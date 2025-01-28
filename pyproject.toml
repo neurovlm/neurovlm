@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "neurovlm"
+version = "0.0.1"
+dependencies = [
+  "numpy",
+  "pandas",
+  "scikit-learn",
+  "torch >= 2.0.0",
+  "sentence-transformers",
+  "nibabel",
+  "nilearn",
+  "tqdm",
+  "matplotlib"
+]
+authors = [
+  { name="Ryan Hammonds", email="ryanphammonds@gmail.com" },
+]
+description = "Neuro vision-language models."
+readme = "README.md"
+requires-python = ">=3.8, <3.13"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
