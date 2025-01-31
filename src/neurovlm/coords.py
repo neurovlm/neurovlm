@@ -7,9 +7,16 @@ import torch
 import nibabel as nib
 from nilearn import image
 
+from .progress import select_tqdm
 from .data import fetch_data
 
-def coords_to_vectors(df_coords: pd.DataFrame, verbose: Optional[bool]=True):
+def coords_to_vectors(
+    df_coords: pd.DataFrame,
+    df_pubs: pd.DataFrame,
+    max_n_coords: Optional[int]=100,
+    fwhm: Optional[float]=9.0,
+    verbose: Optional[bool]=True,
+) -> pd.DataFrame:
     """Convert a dataframe of coordinates to neuro-tensors.
 
     Parameters
@@ -17,8 +24,23 @@ def coords_to_vectors(df_coords: pd.DataFrame, verbose: Optional[bool]=True):
     df_coords : pandas.DataFrame
         Coordinates fetched with pubget, e.g. a df loaded from:
             subset_articlesWithCoords_extractedData/coordinates.csv
+    df_pubs : pandas.DataFrame
+        Metadata per publication.
+    max_n_coords : int, optional, default: 100
+        Drop publications with more than max_n_coords reported.
+    fwhm : float, optional, default: 9.0
+        Size of the Gaussian smoothing kernel.
     verbose : bool, optional, default: True
         Prints progress.
+
+    Returns
+    -------
+    neuro_vectors : 2d float torch.tensor
+        Each row is a publication's neuro tensor, e.g. downsampled
+        MNI, masked, and flattened.
+    df_pubs : pandas.DataFrame
+        Publication info. Each row corresponds the same neuro_vector index,
+        e.g. df_pubs.iloc[i] corresponds to neuro_vectors[i].
     """
     # Load mask
     save_dir = fetch_data()
@@ -34,22 +56,25 @@ def coords_to_vectors(df_coords: pd.DataFrame, verbose: Optional[bool]=True):
         (698.0, 806.0, 684.0)
     ]
 
-    # Compute the neuro vectors
-    neuro_vectors = []
-    selected_pmcids = []
-    pmcids = df_coords['pmcid'].unique()
+    # Merge PMCIDs and PMIDs
+    mask_df = df_coords['pmcid'].isnull()
+    pmcids = df_coords['pmcid'][~mask_df].unique()
+    pmids = df_coords['pmid'][mask_df].unique()
+    ids = [("pmcid", int(i)) for i in pmcids]
+    ids.extend([("pmid", int(i)) for i in pmids])
 
     # Import tqdm
     tqdm = select_tqdm()
-
-    iterable = range(len(pmcids))
+    iterable = ids
     if verbose:
-        iterable =  tqdm(iterable, total=len(pmcids))
+        iterable =  tqdm(iterable, total=len(ids))
 
     # Iterate over dataframe rows
+    neuro_vectors = []
+    row_inds = []
     for i in iterable:
 
-        coords = np.array(df_coords[df_coords['pmcid'] == pmcids[i]][['x', 'y', 'z']])
+        coords = np.array(df_coords[df_coords[i[0]] == i[1]][['x', 'y', 'z']])
 
         # Exclusion criteria
         if len(coords) == 0:
@@ -58,10 +83,10 @@ def coords_to_vectors(df_coords: pd.DataFrame, verbose: Optional[bool]=True):
 
         x, y, z = coords.T
         in_bounds = np.all(x > bounds[0][0]) & np.all(x < bounds[1][0])
-        in_bounds = in_bounds & np.all(y > bounds[0][1]) & np.all(x < bounds[1][1])
+        in_bounds = in_bounds & np.all(y > bounds[0][1]) & np.all(y < bounds[1][1])
         in_bounds = in_bounds & np.all(z > bounds[0][2]) & np.all(z < bounds[1][2])
 
-        if not in_bounds or len(coords) > 100:
+        if not in_bounds or len(coords) > max_n_coords:
             # Drop coords if either:
             #   a) Coordinates lie out-of-bounds in MNI space
             #   b) Study reported over 100 coordinates.
@@ -82,35 +107,20 @@ def coords_to_vectors(df_coords: pd.DataFrame, verbose: Optional[bool]=True):
         peaks_img = image.new_img_like(mask_img, peaks)
 
         # Smooth
-        img = image.smooth_img(peaks_img, fwhm=9.0)
+        img = image.smooth_img(peaks_img, fwhm=fwhm)
 
         # Mask
         neuro_vec = img.get_fdata()[mask]
         if neuro_vec.sum() == 0:
             # Skip papers with out-of-bounds coordinates
-            #   out-of-bounds contracted with neuroquery's masker
             continue
 
         neuro_vectors.append(torch.from_numpy(neuro_vec))
-        selected_pmcids.append(pmcids[i])
+        row_inds.append(int(df_pubs[df_pubs[i[0]] == i[1]].index[0]))
 
-    neuro_vectors = torch.squeeze(torch.stack(neuro_vectors))
+    # Stack vectors
+    neuro_vectors = torch.squeeze(torch.stack(neuro_vectors)).float()
 
-    return neuro_vectors, selected_pmcids
+    df_pubs = df_pubs.iloc[row_inds]
 
-
-def select_tqdm():
-    # Check if running in IPython
-    from IPython import get_ipython
-    ipython = get_ipython()
-
-    if ipython is None:
-        # Not in IPython, assume a regular script
-        from tqdm import tqdm
-    elif "IPKernelApp" in ipython.config:
-        # In Jupyter Notebook or JupyterLab
-        from tqdm.notebook import tqdm
-    else:
-        # In IPython shell
-        from tqdm import tqdm
-    return tqdm
+    return neuro_vectors, df_pubs
