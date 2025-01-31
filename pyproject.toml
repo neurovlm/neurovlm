@@ -14,7 +14,8 @@ dependencies = [
   "nibabel",
   "nilearn",
   "tqdm",
-  "matplotlib"
+  "matplotlib",
+  "pyarrow"
 ]
 authors = [
   { name="Ryan Hammonds", email="ryanphammonds@gmail.com" },
