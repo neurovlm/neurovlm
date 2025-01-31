@@ -1,5 +1,5 @@
 # Pytorch models
-
+from typing import Optional
 import torch
 from torch import nn
 
@@ -13,9 +13,18 @@ class NeuroAutoEncoder(nn.Module):
     decoder : torch.nn.Sequential
         Decoder network.
     """
-    def __init__(self):
+    def __init__(self, seed: Optional[int]=None):
+        """Define network.
 
+        Parameters
+        ----------
+        seed : int, optional, default: None
+            Random seed for weight initialization.
+        """
         super().__init__()
+
+        if seed is not None:
+            torch.manual_seed(seed)
 
         # Layer dimensions
         h0 = 1024
@@ -55,7 +64,7 @@ class NeuroAutoEncoder(nn.Module):
         """
         return self.decoder(self.encoder(X))
 
-class Aligner(nn.Module):
+class TextAligner(nn.Module):
     """Align latent text-tensor to latent neuro-tensor.
 
     Attributes
@@ -63,12 +72,23 @@ class Aligner(nn.Module):
     aligner : torch.nn.Sequential
         Non-linear mapping from 384 to 384.
     """
-    def __init__(self):
+    def __init__(self, latent_dim: Optional[int]=384, seed: Optional[int]=None):
+        """Define network.
+
+        Parameters
+        ----------
+        latent_dim : int, optional, default: 384
+            Input and output size.
+        seed : int, optional, default: None
+            Random seed for weight initialization.
+        """
         super().__init__()
+        if seed is not None:
+            torch.manual_seed(seed)
         self.aligner = nn.Sequential(
-            nn.Linear(384, 384),
+            nn.Linear(latent_dim, latent_dim),
             nn.ReLU(),
-            nn.Linear(384, 384),
+            nn.Linear(latent_dim, latent_dim),
         )
     def forward(self, X: torch.tensor) -> torch.tensor:
         """Forward pass.
