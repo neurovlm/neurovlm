@@ -121,6 +121,6 @@ def coords_to_vectors(
     # Stack vectors
     neuro_vectors = torch.squeeze(torch.stack(neuro_vectors)).float()
 
-    df_pubs = df_pubs.iloc[row_inds]
+    df_pubs = df_pubs.iloc[row_inds].reset_index(drop=True)
 
     return neuro_vectors, df_pubs
