@@ -144,7 +144,7 @@ class Trainer:
             if self.verbose:
                 # Report validation loss
                 with torch.no_grad():
-                    y_pred = self.model(self.y_val)
+                    y_pred = self.model(self.X_val)
                     current_loss = float(self.loss_fn(
                         y_pred, self.y_val
                     ))
