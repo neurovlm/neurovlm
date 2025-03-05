@@ -57,24 +57,20 @@ def coords_to_vectors(
     ]
 
     # Merge PMCIDs and PMIDs
-    mask_df = df_coords['pmcid'].isnull()
-    pmcids = df_coords['pmcid'][~mask_df].unique()
-    pmids = df_coords['pmid'][mask_df].unique()
-    ids = [("pmcid", int(i)) for i in pmcids]
-    ids.extend([("pmid", int(i)) for i in pmids])
+    pmids = df_pubs['pmid']
 
     # Import tqdm
     tqdm = select_tqdm()
-    iterable = ids
+    iterable = pmids
     if verbose:
-        iterable =  tqdm(iterable, total=len(ids))
+        iterable =  tqdm(iterable, total=len(pmids))
 
     # Iterate over dataframe rows
     neuro_vectors = []
     row_inds = []
     for i in iterable:
 
-        coords = np.array(df_coords[df_coords[i[0]] == i[1]][['x', 'y', 'z']])
+        coords = np.array(df_coords[df_coords["pmid"] == i][['x', 'y', 'z']])
 
         # Exclusion criteria
         if len(coords) == 0:
@@ -116,7 +112,7 @@ def coords_to_vectors(
             continue
 
         neuro_vectors.append(torch.from_numpy(neuro_vec))
-        row_inds.append(int(df_pubs[df_pubs[i[0]] == i[1]].index[0]))
+        row_inds.append(int(df_pubs[df_pubs['pmid'] == i].index[0]))
 
     # Stack vectors
     neuro_vectors = torch.squeeze(torch.stack(neuro_vectors)).float()

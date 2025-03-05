@@ -72,7 +72,13 @@ class TextAligner(nn.Module):
     aligner : torch.nn.Sequential
         Non-linear mapping from 384 to 384.
     """
-    def __init__(self, latent_dim: Optional[int]=384, seed: Optional[int]=None):
+    def __init__(
+        self,
+        latent_text_dim: Optional[int]=384,
+        hidden_dim: Optional[int]=384,
+        latent_neuro_dim: Optional[int]=384,
+        seed: Optional[int]=None
+    ):
         """Define network.
 
         Parameters
@@ -86,9 +92,9 @@ class TextAligner(nn.Module):
         if seed is not None:
             torch.manual_seed(seed)
         self.aligner = nn.Sequential(
-            nn.Linear(latent_dim, latent_dim),
+            nn.Linear(latent_text_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(latent_dim, latent_dim),
+            nn.Linear(hidden_dim, latent_neuro_dim),
         )
     def forward(self, X: torch.tensor) -> torch.tensor:
         """Forward pass.
