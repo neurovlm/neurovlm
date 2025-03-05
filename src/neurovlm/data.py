@@ -7,13 +7,19 @@ import requests
 
 URL = "https://github.com/neurovlm/neurovlm_data/raw/refs/heads/main/data"
 
-def fetch_data(url: Optional[str]=URL, overwrite: Optional[bool]=False) -> str:
+def fetch_data(
+    url: Optional[str]=URL,
+    files: Optional[list]=None,
+    overwrite: Optional[bool]=False
+) -> str:
     """Fetch data from a url.
 
     Parameters
     ----------
     url : string, optional, default: URL
         URL to data.
+    files : list, optional, default: None
+        Files to download. None defaults to all files.
     overwrite : bool, optional, default: False
         Overwrite existing files.
 
@@ -22,7 +28,8 @@ def fetch_data(url: Optional[str]=URL, overwrite: Optional[bool]=False) -> str:
     save_dir : string
         Path to saved data.
     """
-    files = ["mask.npz", "publications.parquet", "coordinates.parquet"]
+    if files is None:
+        files = ["mask.npz", "publications.parquet", "coordinates.parquet"]
 
     save_dir = os.path.dirname(os.path.realpath(__file__))
     if "neurovlm_data" not in os.listdir(save_dir):
