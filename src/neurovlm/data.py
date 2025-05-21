@@ -1,8 +1,8 @@
 """Fetch required data."""
 
 import os
+from pathlib import Path
 from typing import Optional
-import os
 import requests
 
 URL = "https://github.com/neurovlm/neurovlm_data/raw/refs/heads/main/data"
@@ -29,15 +29,16 @@ def fetch_data(
         Path to saved data.
     """
     if files is None:
-        files = ["mask.npz", "publications.parquet", "coordinates.parquet"]
+        files = ["mask.npz", "publications.parquet", "coordinates.parquet",
+                 "decoder_half.pt", "aligner_half.pt"]
 
-    save_dir = os.path.dirname(os.path.realpath(__file__))
+    save_dir = Path(os.path.dirname(os.path.realpath(__file__)))
     if "neurovlm_data" not in os.listdir(save_dir):
-        os.mkdir(save_dir + "/neurovlm_data")
+        os.mkdir(save_dir / "neurovlm_data")
     elif not overwrite:
-        return save_dir + "/neurovlm_data"
+        return save_dir / "neurovlm_data"
 
-    save_dir = save_dir + "/neurovlm_data"
+    save_dir = save_dir / "neurovlm_data"
 
     for f in files:
 
@@ -49,9 +50,9 @@ def fetch_data(
 
         if response.status_code == 200:
             # Save file
-            with open(f"{save_dir}/{f}", "wb") as file:
+            with open(save_dir / f, "wb") as file:
                 file.write(response.content)
         else:
             print(f"Error fetching '{f}': {response.status_code}")
 
-    return save_dir
+    return Path(save_dir)
