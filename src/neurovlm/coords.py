@@ -13,7 +13,7 @@ from .data import fetch_data
 def coords_to_vectors(
     df_coords: pd.DataFrame,
     df_pubs: pd.DataFrame,
-    max_n_coords: Optional[int]=100,
+    max_n_coords: Optional[int]=np.inf,
     fwhm: Optional[float]=9.0,
     verbose: Optional[bool]=True,
 ) -> pd.DataFrame:
@@ -51,10 +51,10 @@ def coords_to_vectors(
     mask_img = nib.Nifti1Image(mask.astype(float), affine)
 
     # MNI coordinate bounds
-    bounds = [
-        (-90.0, -126.0, -72.0),
-        (698.0, 806.0, 684.0)
-    ]
+    # bounds = [
+    #     (-90.0, -126.0, -72.0),
+    #     (698.0, 806.0, 684.0)
+    # ]
 
     # Merge PMCIDs and PMIDs
     pmids = df_pubs['pmid']
@@ -73,20 +73,8 @@ def coords_to_vectors(
         coords = np.array(df_coords[df_coords["pmid"] == i][['x', 'y', 'z']])
 
         # Exclusion criteria
-        if len(coords) == 0:
+        if len(coords) == 0 or len(coords) > max_n_coords:
             # Skip papers with no reported coordinates
-            continue
-
-        x, y, z = coords.T
-        in_bounds = np.all(x > bounds[0][0]) & np.all(x < bounds[1][0])
-        in_bounds = in_bounds & np.all(y > bounds[0][1]) & np.all(y < bounds[1][1])
-        in_bounds = in_bounds & np.all(z > bounds[0][2]) & np.all(z < bounds[1][2])
-
-        if not in_bounds or len(coords) > max_n_coords:
-            # Drop coords if either:
-            #   a) Coordinates lie out-of-bounds in MNI space
-            #   b) Study reported over 100 coordinates.
-            #      We want relatively localized results only.
             continue
 
         # Coords to image, adapted from neuroquery
@@ -103,7 +91,10 @@ def coords_to_vectors(
         peaks_img = image.new_img_like(mask_img, peaks)
 
         # Smooth
-        img = image.smooth_img(peaks_img, fwhm=fwhm)
+        if fwhm == 0:
+            img = peaks_img
+        else:
+            img = image.smooth_img(peaks_img, fwhm=fwhm)
 
         # Mask
         neuro_vec = img.get_fdata()[mask]
