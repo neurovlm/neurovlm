@@ -13,13 +13,16 @@ class NeuroAutoEncoder(nn.Module):
     decoder : torch.nn.Sequential
         Decoder network.
     """
-    def __init__(self, seed: Optional[int]=None):
+    def __init__(self, seed: Optional[int]=None, out: Optional[str]="probability"):
         """Define network.
 
         Parameters
         ----------
         seed : int, optional, default: None
             Random seed for weight initialization.
+        out : {"probability", "logits"}, optional, default: "probability"
+            Whether the models returns logits or probabilities. If logits are returned,
+            use BCEWithLogitsLoss. If probabilities are return, use BCELoss.
         """
         super().__init__()
 
@@ -40,14 +43,21 @@ class NeuroAutoEncoder(nn.Module):
             nn.Linear(h1, latent),
         )
 
-        self.decoder = nn.Sequential(
+        decoder_seq = [
             nn.Linear(latent, h1),
             nn.ReLU(),
             nn.Linear(h1, h0),
             nn.ReLU(),
-            nn.Linear(h0, neuro_dim),
-            nn.Sigmoid() # probabilistic output
-        )
+            nn.Linear(h0, neuro_dim)
+        ]
+
+        assert "prob" in out or "logit" in out
+
+        if "prob" in out:
+            decoder_seq.append(nn.Sigmoid())
+        # else returns logits
+
+        self.decoder = nn.Sequential(*decoder_seq)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         """Forward pass.
