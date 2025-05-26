@@ -13,7 +13,15 @@ class NeuroAutoEncoder(nn.Module):
     decoder : torch.nn.Sequential
         Decoder network.
     """
-    def __init__(self, seed: Optional[int]=None, out: Optional[str]="probability"):
+    def __init__(
+            self,
+            seed: Optional[int]=None,
+            out: Optional[str]="probability",
+            dim_neuro: Optional[int]= 28_542,
+            dim_h0: Optional[int]=1024,
+            dim_h1: Optional[int]=512,
+            dim_latent: Optional[int]=384,
+        ):
         """Define network.
 
         Parameters
@@ -29,26 +37,21 @@ class NeuroAutoEncoder(nn.Module):
         if seed is not None:
             torch.manual_seed(seed)
 
-        # Layer dimensions
-        h0 = 1024
-        h1 = 512
-        latent = 384
-        neuro_dim = 28_542
-
         # Networks
         self.encoder = nn.Sequential(
-            nn.Linear(neuro_dim, h0),
+            nn.Linear(dim_neuro, dim_h0),
             nn.ReLU(),
-            nn.Linear(h0, h1),
-            nn.Linear(h1, latent),
+            nn.Linear(dim_h0, dim_h1),
+            nn.ReLU(),
+            nn.Linear(dim_h1, dim_latent),
         )
 
         decoder_seq = [
-            nn.Linear(latent, h1),
+            nn.Linear(dim_latent, dim_h1),
             nn.ReLU(),
-            nn.Linear(h1, h0),
+            nn.Linear(dim_h1, dim_h0),
             nn.ReLU(),
-            nn.Linear(h0, neuro_dim)
+            nn.Linear(dim_h0, dim_neuro),
         ]
 
         assert "prob" in out or "logit" in out
