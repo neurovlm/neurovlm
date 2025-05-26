@@ -17,6 +17,7 @@ class FocalLoss(torch.nn.Module):
 class InfoNCELoss(torch.nn.Module):
     """Compute InfoNCE loss between image and text embeddings."""
     def __init__(self,  temperature=0.07):
+        super().__init__()
         self.temperature = temperature
 
     def forward(self, image, text):
