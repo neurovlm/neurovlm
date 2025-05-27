@@ -2,6 +2,10 @@
 from typing import Optional
 import torch
 from torch import nn
+from adapters import AutoAdapterModel
+from transformers import AutoTokenizer
+from transformers.utils.logging import disable_progress_bar
+disable_progress_bar()
 
 class NeuroAutoEncoder(nn.Module):
     """Autoencoder for neuro-vectors.
@@ -14,14 +18,14 @@ class NeuroAutoEncoder(nn.Module):
         Decoder network.
     """
     def __init__(
-            self,
-            seed: Optional[int]=None,
-            out: Optional[str]="probability",
-            dim_neuro: Optional[int]= 28_542,
-            dim_h0: Optional[int]=1024,
-            dim_h1: Optional[int]=512,
-            dim_latent: Optional[int]=384,
-        ):
+        self,
+        seed: Optional[int]=None,
+        out: Optional[str]="probability",
+        dim_neuro: Optional[int]= 28_542,
+        dim_h0: Optional[int]=1024,
+        dim_h1: Optional[int]=512,
+        dim_latent: Optional[int]=384,
+    ):
         """Define network.
 
         Parameters
@@ -123,3 +127,59 @@ class TextAligner(nn.Module):
             Aligned text-tensor.
         """
         return self.aligner(X)
+
+class Specter:
+    """Wrapper for Specter model."""
+    def __init__(self, model="allenai/specter2_aug2023refresh", adapter="adhoc_query", orthgonalize=True):
+        """Initialize.
+
+        Parameters
+        ----------
+        model : {"allenai/specter2_aug2023refresh", allenai/specter2"}
+            Base model.
+        adapter : {"adhoc_query", "classification", "regression", "proximity"}
+            Adapter to attach to the model, for specific use cases.
+        """
+        tokenizer = AutoTokenizer.from_pretrained(f'{model}_base')
+        self.sep_token = tokenizer.sep_token
+        self.tokenizer = lambda text : tokenizer(
+            text,
+            padding=True,
+            truncation=True,
+            max_length=512,
+            return_tensors="pt",
+            return_token_type_ids=False,
+        )
+
+        self.specter = AutoAdapterModel.from_pretrained(f'{model}_base')
+        self.specter.load_adapter(f"{model}_{adapter}", source="hf", load_as="specter2", set_active=True)
+
+        if orthgonalize:
+            self.ref = self.specter(**self.tokenizer("")).last_hidden_state[:, 0]
+            self.ref= self.ref / self.ref.norm()
+            self.f_transform = self.orthogonalize
+        else:
+            self.f_transform = lambda i : i
+
+    def __call__(self, X):
+        """Pass text through the model.
+
+        Parameters
+        ----------
+        X : list of str
+            Text to encode.
+
+        Returns
+        -------
+        embeddings : torch.tensor
+            Latent text encodings.
+        """
+        text = [i['title'] + self.sep_token + (i.get('abstract') or '') for i in X]
+        tokens  = self.tokenizer(text)
+        embeddings = self.specter(**tokens)
+        embeddings = self.f_transform(embeddings.last_hidden_state[:, 0])
+        return embeddings
+
+    def orthogonalize(self, embedding):
+        proj = (embedding @ self.ref.T) * self.ref
+        return embedding - proj
