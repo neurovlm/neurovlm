@@ -29,8 +29,8 @@ def fetch_data(
         Path to saved data.
     """
     if files is None:
-        files = ["mask.npz", "publications.parquet", "coordinates.parquet",
-                 "decoder_half.pt", "aligner_half.pt"]
+        files = ["mask.npz", "publications.parquet", "coordinates.parquet"]
+        # also accepts: ]..., "decoder_half.pt", "aligner_half.pt"]
 
     save_dir = Path(os.path.dirname(os.path.realpath(__file__)))
     if "neurovlm_data" not in os.listdir(save_dir):
@@ -56,3 +56,10 @@ def fetch_data(
             print(f"Error fetching '{f}': {response.status_code}")
 
     return Path(save_dir)
+
+def get_data_dir():
+    """Return the path to the data directory: ../src/neurovlm_data"""
+    save_dir = Path(os.path.dirname(os.path.realpath(__file__)))
+    if "neurovlm_data" not in os.listdir(save_dir):
+        os.mkdir(save_dir / "neurovlm_data")
+    return save_dir / "neurovlm_data"
