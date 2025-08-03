@@ -21,6 +21,7 @@ class Trainer:
         y_val: Optional[torch.tensor]=None,
         verbose: Optional[bool]=True,
         use_tqdm: Optional[bool]=False,
+        tensorboard_path: Optional[str]=None,
         device: Optional[str]=None
     ):
         """Initialize training parameters.
@@ -48,6 +49,8 @@ class Trainer:
             Prints loss after every epoch. Must pass X_val when True.
         use_tqdm : bool, optional, default: False
             Training progess bar.
+        tensorboard_path : bool, optional, default: False
+            Path to store interactive webpage that displays validation loss over epochs.
         device : {None, "cuda", "mps", "cpu", "auto"}
             Moves model and tensors to requested device.
                 - None: leaves leaves on current device
@@ -83,6 +86,13 @@ class Trainer:
         if self.y_val is None and self.X_val is not None:
             # Assume autoencoder, e.g. target is self
             self.y_val  = self.X_val
+
+        self.tensorboard_path = tensorboard_path
+        if self.tensorboard_path:
+            from torch.utils.tensorboard import SummaryWriter
+            import datetime
+            log_dir = self.tensorboard_path + "/loss_" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            self.writer = SummaryWriter(log_dir)
 
     def fit(
         self,
@@ -141,19 +151,23 @@ class Trainer:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
-            if self.verbose:
+            if self.verbose or self.tensorboard_path is not None:
                 # Report validation loss
                 with torch.no_grad():
                     y_pred = self.model(self.X_val)
-                    current_loss = float(self.loss_fn(
-                        y_pred, self.y_val
-                    ))
-                    print(
-                        f"Epoch: {iepoch}, ",
-                        "val loss: ", f"{init_loss:.5g}", "(initial) ->",
-                        f"{current_loss:.5g}", "(current)",
-                        end="\r"
-                    )
+                    current_loss = self.loss_fn(y_pred, self.y_val)
+
+                    if self.verbose:
+                        print(
+                            f"Epoch: {iepoch}, ",
+                            "val loss: ", f"{init_loss:.5g}", "(initial) ->",
+                            f"{float(current_loss):.5g}", "(current)",
+                            end="\r"
+                        )
+
+                    if self.tensorboard_path is not None:
+                        self.writer.add_scalar("Loss val", current_loss.item(), iepoch)
+
 
     def predict(self, X):
         """Foward pass.

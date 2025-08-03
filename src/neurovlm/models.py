@@ -1,11 +1,17 @@
 # Pytorch models
 from typing import Optional
+import pandas as pd
 import torch
 from torch import nn
+import torch.nn.functional as F
 from adapters import AutoAdapterModel
 from transformers import AutoTokenizer
 from transformers.utils.logging import disable_progress_bar
 disable_progress_bar()
+
+class NormalizeLayer(nn.Module):
+    def forward(self, x):
+        return F.normalize(x, dim=1)
 
 class NeuroAutoEncoder(nn.Module):
     """Autoencoder for neuro-vectors.
@@ -21,10 +27,12 @@ class NeuroAutoEncoder(nn.Module):
         self,
         seed: Optional[int]=None,
         out: Optional[str]="probability",
-        dim_neuro: Optional[int]= 28_542,
+        dim_neuro: Optional[int]=28_542,
         dim_h0: Optional[int]=1024,
         dim_h1: Optional[int]=512,
         dim_latent: Optional[int]=384,
+        activation_fn: Optional[callable]=None,
+        normalize_latent: Optional[bool]=False
     ):
         """Define network.
 
@@ -41,20 +49,26 @@ class NeuroAutoEncoder(nn.Module):
         if seed is not None:
             torch.manual_seed(seed)
 
+        if activation_fn is None:
+            activation_fn = nn.ReLU()
+
         # Networks
         self.encoder = nn.Sequential(
             nn.Linear(dim_neuro, dim_h0),
-            nn.ReLU(),
+            activation_fn,
             nn.Linear(dim_h0, dim_h1),
-            nn.ReLU(),
+            activation_fn,
             nn.Linear(dim_h1, dim_latent),
         )
 
+        if normalize_latent:
+            self.encoder.append(NormalizeLayer())
+
         decoder_seq = [
             nn.Linear(dim_latent, dim_h1),
-            nn.ReLU(),
+            activation_fn,
             nn.Linear(dim_h1, dim_h0),
-            nn.ReLU(),
+            activation_fn,
             nn.Linear(dim_h0, dim_neuro),
         ]
 
@@ -91,8 +105,8 @@ class TextAligner(nn.Module):
     """
     def __init__(
         self,
-        latent_text_dim: Optional[int]=384,
-        hidden_dim: Optional[int]=384,
+        latent_text_dim: Optional[int]=768,
+        hidden_dim: Optional[int]=512,
         latent_neuro_dim: Optional[int]=384,
         seed: Optional[int]=None
     ):
@@ -108,11 +122,13 @@ class TextAligner(nn.Module):
         super().__init__()
         if seed is not None:
             torch.manual_seed(seed)
+
         self.aligner = nn.Sequential(
             nn.Linear(latent_text_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, latent_neuro_dim),
         )
+
     def forward(self, X: torch.tensor) -> torch.tensor:
         """Forward pass.
 
@@ -174,7 +190,11 @@ class Specter:
         embeddings : torch.tensor
             Latent text encodings.
         """
-        text = [i['title'] + self.sep_token + (i.get('abstract') or '') for i in X]
+        if isinstance(X, (pd.DataFrame, dict)):
+            text = [i['title'] + self.sep_token + (i.get('abstract') or '') for i in X]
+        else:
+            text = X
+
         tokens  = self.tokenizer(text)
         embeddings = self.specter(**tokens)
         embeddings = self.f_transform(embeddings.last_hidden_state[:, 0])
