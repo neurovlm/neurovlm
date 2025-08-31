@@ -8,11 +8,15 @@ version = "0.0.1"
 dependencies = [
   "numpy",
   "pandas",
+  "torch",
   "scikit-learn",
-  "torch >= 2.0.0",
+  "torch",
   "sentence-transformers",
+  "adapters",
+  "peft",
   "nibabel",
   "nilearn",
+  "nimare",
   "tqdm",
   "matplotlib",
   "pyarrow"
