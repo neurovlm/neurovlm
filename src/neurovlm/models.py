@@ -5,7 +5,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from adapters import AutoAdapterModel
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModel
 from transformers.utils.logging import disable_progress_bar
 disable_progress_bar()
 
@@ -167,8 +167,21 @@ class Specter:
             return_token_type_ids=False,
         )
 
-        self.specter = AutoAdapterModel.from_pretrained(f'{model}_base')
-        self.specter.load_adapter(f"{model}_{adapter}", source="hf", load_as="specter2", set_active=True)
+        #self.specter = AutoAdapterModel.from_pretrained(f'{model}_base')
+        #self.specter.load_adapter(f"{model}_{adapter}", source="hf", load_as="specter2", set_active=True)
+
+        if adapter is None:
+            # no adapter
+            self.specter = AutoModel.from_pretrained(f'{model}_base')
+        elif "/" in adapter:
+            # custom adapters, e.g. neurospecter trained by Jerjes
+            self.specter = AutoModel.from_pretrained(f'{model}_base')
+            self.specter.load_adapter(adapter)
+        else:
+            # specter2 supported adapters: proximity, adhoc_query, regression, classification
+            self.specter = AutoAdapterModel.from_pretrained(f'{model}_base')
+            self.specter.load_adapter(f"{model}_{adapter}", source="hf", load_as="specter2", set_active=True)
+
 
         if orthgonalize:
             self.ref = self.specter(**self.tokenizer("")).last_hidden_state[:, 0]
