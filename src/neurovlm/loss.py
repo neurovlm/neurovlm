@@ -2,6 +2,9 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+import numpy as np
+from skimage.metrics import structural_similarity as ssim
+from sklearn.metrics import mean_squared_error, f1_score
 
 class FocalLoss(nn.Module):
     def __init__(self, alpha=1, gamma=2):
@@ -60,3 +63,89 @@ class TruncatedLoss(nn.Module):
             return loss_per_sample[easy_mask].mean()
         else:
             return loss_per_sample.mean()
+
+def compute_metrics(original, reconstructed, thresholds=(0.001, 0.01, 0.1)):
+    """Compute MSE, SSIM, and Dice between original and reconstructed brain maps."""
+
+    if hasattr(original, "detach"):  # torch tensor
+        original = original.detach().cpu().numpy()
+        reconstructed = reconstructed.detach().cpu().numpy()
+
+    N = original.shape[0]
+    mse_scores_t = np.zeros(len(thresholds))
+    ssim_scores_t = np.zeros(len(thresholds))
+    dice_score_t = np.zeros(len(thresholds))
+
+    for it, t in enumerate(thresholds):
+        # Threshold
+        orig_bin = (original > t).astype(np.uint8)
+        recon_bin = (reconstructed > t).astype(np.uint8)
+
+        # MSE
+        mse_per_sample = ((orig_bin - recon_bin) ** 2).mean(axis=1)
+        mse_scores_t[it] = mse_per_sample.mean()
+
+        # SSIM
+        ssim_scores = np.empty(N)
+        for i in range(N):
+            if orig_bin[i].max() == orig_bin[i].min() and recon_bin[i].max() == recon_bin[i].min():
+                ssim_scores[i] = 1.0
+            else:
+                ssim_scores[i] = ssim(orig_bin[i], recon_bin[i], data_range=1)
+        ssim_scores_t[it] = ssim_scores.mean()
+
+        # Dice
+        intersection = np.logical_and(orig_bin, recon_bin).sum(axis=1)
+        denom = orig_bin.sum(axis=1) + recon_bin.sum(axis=1)
+        dice_per_sample = np.ones(N, dtype=float)  # default 1.0 when denom == 0
+        np.divide(
+            2.0 * intersection, denom,
+            out=dice_per_sample, where=(denom > 0)
+        )
+        dice_score_t[it] = dice_per_sample.mean()
+
+    return mse_scores_t, ssim_scores_t, dice_score_t
+
+
+
+def recall_n(y_pred, y_truth, n_first=10, thresh=0.95, reduce_mean=False):
+    assert (y_pred.ndim in (1, 2)) and (
+        y_truth.ndim in (1, 2)
+    ), "arrays should be of dimension 1 or 2"
+    assert y_pred.shape == y_truth.shape, "both arrays should have the same shape"
+
+    if y_pred.ndim == 1:
+        # recall@n for a single sample
+        targets = np.where(y_truth >= thresh)[0]
+        pred_n_first = np.argsort(y_pred)[::-1][:n_first]
+
+        if len(targets) > 0:
+            ratio_in_n = len(np.intersect1d(targets, pred_n_first)) / len(targets)
+        else:
+            ratio_in_n = np.nan
+
+        return ratio_in_n
+    else:
+        # recall@n for a dataset (mean of recall@n for all samples)
+        result = np.zeros(len(y_pred))
+        for i, (sample_y_pred, sample_y_truth) in enumerate(zip(y_pred, y_truth)):
+            result[i] = recall_n(sample_y_pred, sample_y_truth, n_first, thresh)
+        if reduce_mean:
+            return np.nanmean(result)
+
+        return result
+
+def mix_match(similarity):
+    accuracies = []
+    for row_index in range(len(similarity)):
+        current_row_accumulator = 0
+        for col_index in range(len(similarity[row_index])):
+            if col_index == row_index:
+                continue
+            else:
+                if similarity[row_index][row_index] > similarity[row_index][col_index]:
+                    current_row_accumulator += 1
+
+        accuracies.append(current_row_accumulator / (len(similarity[row_index])-1))
+
+    return np.mean(accuracies)
