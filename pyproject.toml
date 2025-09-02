@@ -10,6 +10,7 @@ dependencies = [
   "pandas",
   "torch",
   "scikit-learn",
+  "scikit-image",
   "torch",
   "sentence-transformers",
   "adapters",

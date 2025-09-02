@@ -1,9 +1,11 @@
 """Training loop."""
 
 import warnings
+from copy import deepcopy
 from typing import Callable, Optional
 import torch
 from torch import nn
+import numpy as np
 from .progress import select_tqdm
 
 
@@ -20,6 +22,7 @@ class Trainer:
         X_val: Optional[torch.tensor]=None,
         y_val: Optional[torch.tensor]=None,
         verbose: Optional[bool]=True,
+        interval: Optional[int]=None,
         use_tqdm: Optional[bool]=False,
         tensorboard_path: Optional[str]=None,
         device: Optional[str]=None
@@ -46,7 +49,10 @@ class Trainer:
         y_val : 2d torch.tensor, optional, default: None
             Validation target data.
         verbose : bool, optional, default: True
-            Prints loss after every epoch. Must pass X_val when True.
+            Prints val loss after every epoch if True. Must pass X_val.
+            Int
+        interval : optional, default: None
+            How often to traci val loss, in epochs.
         use_tqdm : bool, optional, default: False
             Training progess bar.
         tensorboard_path : bool, optional, default: False
@@ -65,9 +71,12 @@ class Trainer:
         self.n_epochs = n_epochs
         self.optimizer = optimizer(self.model.parameters(), self.lr)
         self.verbose = verbose
+        self.interval = 1 if self.verbose and interval is None else interval
         self.iter_wrapper = select_tqdm() if use_tqdm else None
         self.X_val = X_val
         self.y_val = y_val
+
+
         if self.verbose and self.X_val is None:
             warnings.warn("No validation set to report on. Setting verbose to False.")
             self.verbose = False
@@ -125,12 +134,16 @@ class Trainer:
                 init_loss = float(self.loss_fn(
                     y_pred, self.y_val
                 ))
+                print(f"Epoch: -1, val loss: {float(init_loss):.5g}")
 
         # Train text aligner
         if self.iter_wrapper is not None:
             iterable = self.iter_wrapper(range(self.n_epochs), total=self.n_epochs)
         else:
             iterable = range(self.n_epochs)
+
+        self._best_model = None
+        best_loss = np.inf
 
         for iepoch in iterable:
             # Randomly shuffle data
@@ -151,23 +164,23 @@ class Trainer:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
-            if self.verbose or self.tensorboard_path is not None:
+            if (self.interval is not None and iepoch % self.interval == 0) or self.tensorboard_path is not None:
+
                 # Report validation loss
                 with torch.no_grad():
+
                     y_pred = self.model(self.X_val)
                     current_loss = self.loss_fn(y_pred, self.y_val)
 
                     if self.verbose:
-                        print(
-                            f"Epoch: {iepoch}, ",
-                            "val loss: ", f"{init_loss:.5g}", "(initial) ->",
-                            f"{float(current_loss):.5g}", "(current)",
-                            end="\r"
-                        )
+                        print(f"Epoch: {iepoch}, val loss: {float(current_loss):.5g}")
+
+                    if current_loss < best_loss:
+                        best_loss = float(current_loss)
+                        self._best_model = deepcopy(self.model)
 
                     if self.tensorboard_path is not None:
                         self.writer.add_scalar("Loss val", current_loss.item(), iepoch)
-
 
     def predict(self, X):
         """Foward pass.
@@ -188,6 +201,10 @@ class Trainer:
             Where to save model to, including model name.
         """
         torch.save(self.model, path)
+
+    def restore_best(self):
+        """Restore the best model, basd on best validation loss."""
+        self.model = self._best_model
 
 
 def which_device() -> str:
