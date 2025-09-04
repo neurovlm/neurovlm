@@ -167,9 +167,6 @@ class Specter:
             return_token_type_ids=False,
         )
 
-        #self.specter = AutoAdapterModel.from_pretrained(f'{model}_base')
-        #self.specter.load_adapter(f"{model}_{adapter}", source="hf", load_as="specter2", set_active=True)
-
         if adapter is None:
             # no adapter
             self.specter = AutoModel.from_pretrained(f'{model}_base')
@@ -179,9 +176,13 @@ class Specter:
             self.specter.load_adapter(adapter)
         else:
             # specter2 supported adapters: proximity, adhoc_query, regression, classification
-            self.specter = AutoAdapterModel.from_pretrained(f'{model}_base')
-            self.specter.load_adapter(f"{model}_{adapter}", source="hf", load_as="specter2", set_active=True)
+            if adapter == "proximity":
+                adapter = model # defaults to proximity
+            else:
+                adapter = f"{model}_{adapter}"
 
+            self.specter = AutoAdapterModel.from_pretrained(f'{model}_base')
+            self.specter.load_adapter(adapter, source="hf", load_as="specter2", set_active=True)
 
         if orthgonalize:
             self.ref = self.specter(**self.tokenizer("")).last_hidden_state[:, 0]
