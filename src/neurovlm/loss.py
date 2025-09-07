@@ -64,48 +64,42 @@ class TruncatedLoss(nn.Module):
         else:
             return loss_per_sample.mean()
 
-def compute_metrics(original, reconstructed, thresholds=(0.001, 0.01, 0.1)):
+def compute_metrics(original, reconstructed, thresholds=(0.001, 0.01, 0.1), percentile=False):
     """Compute MSE, SSIM, and Dice between original and reconstructed brain maps."""
 
     if hasattr(original, "detach"):  # torch tensor
         original = original.detach().cpu().numpy()
         reconstructed = reconstructed.detach().cpu().numpy()
 
-    N = original.shape[0]
     mse_scores_t = np.zeros(len(thresholds))
     ssim_scores_t = np.zeros(len(thresholds))
     dice_score_t = np.zeros(len(thresholds))
 
     for it, t in enumerate(thresholds):
+
         # Threshold
-        orig_bin = (original > t).astype(np.uint8)
-        recon_bin = (reconstructed > t).astype(np.uint8)
+        if percentile:
+            t_recon = np.percentile(reconstructed, t)
+            t_orig = np.percentile(original, t)
+
+        orig_bin = (original > t_orig).astype(np.uint8)
+        recon_bin = (reconstructed > t_recon).astype(np.uint8)
 
         # MSE
-        mse_per_sample = ((orig_bin - recon_bin) ** 2).mean(axis=1)
-        mse_scores_t[it] = mse_per_sample.mean()
+        mse_scores_t[it] = ((orig_bin - recon_bin) ** 2).mean()
 
         # SSIM
-        ssim_scores = np.empty(N)
-        for i in range(N):
-            if orig_bin[i].max() == orig_bin[i].min() and recon_bin[i].max() == recon_bin[i].min():
-                ssim_scores[i] = 1.0
-            else:
-                ssim_scores[i] = ssim(orig_bin[i], recon_bin[i], data_range=1)
-        ssim_scores_t[it] = ssim_scores.mean()
+        ssim_scores_t[it] = ssim(orig_bin, recon_bin, data_range=1)
 
-        # Dice
-        intersection = np.logical_and(orig_bin, recon_bin).sum(axis=1)
-        denom = orig_bin.sum(axis=1) + recon_bin.sum(axis=1)
-        dice_per_sample = np.ones(N, dtype=float)  # default 1.0 when denom == 0
-        np.divide(
-            2.0 * intersection, denom,
-            out=dice_per_sample, where=(denom > 0)
-        )
-        dice_score_t[it] = dice_per_sample.mean()
+        # Dice for 1D arrays
+        intersection = np.logical_and(orig_bin, recon_bin).sum()
+        denom = orig_bin.sum() + recon_bin.sum()
+        dice = 1.0  # default if denom == 0
+        if denom > 0:
+            dice = 2.0 * intersection / denom
+        dice_score_t[it] = dice
 
     return mse_scores_t, ssim_scores_t, dice_score_t
-
 
 
 def recall_n(y_pred, y_truth, n_first=10, thresh=0.95, reduce_mean=False):
