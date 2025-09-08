@@ -171,7 +171,7 @@ class Specter:
             # no adapter
             self.specter = AutoModel.from_pretrained(f'{model}_base')
         elif "/" in adapter:
-            # custom adapters, e.g. neurospecter trained by Jerjes
+            # custom adapters, e.g. neurospecter trained by anon
             self.specter = AutoModel.from_pretrained(f'{model}_base')
             self.specter.load_adapter(adapter)
         else:
