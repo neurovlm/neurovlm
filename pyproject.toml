@@ -23,7 +23,7 @@ dependencies = [
   "pyarrow"
 ]
 authors = [
-  { name="Ryan Hammonds", email="ryanphammonds@gmail.com" },
+  { name="anon", email="anon@gmail.com" },
 ]
 description = "Neuro vision-language models."
 readme = "README.md"
