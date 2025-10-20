@@ -133,8 +133,8 @@ def transform_nifti_to_2d(nifti_img: nib.Nifti1Image, mask_img_path: Path | str 
 
 
 
-def run_brain_to_text_pipeline(query_vector: torch.Tensor):
-    output = summarize_papers(query_vector,top_k=10)
+def run_brain2text(query_vector: torch.Tensor):
+    output = summarize_papers(query_vector, top_k=10)
     return output
 
 
