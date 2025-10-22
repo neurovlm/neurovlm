@@ -210,8 +210,9 @@ class Specter:
             text = X
 
         tokens  = self.tokenizer(text)
-        embeddings = self.specter(**tokens)
-        embeddings = self.f_transform(embeddings.last_hidden_state[:, 0])
+        embeddings = self.specter(**tokens).last_hidden_state[:, 0]
+        # embeddings = embeddings / embeddings.norm()
+        embeddings = self.f_transform(embeddings)
         return embeddings
 
     def orthogonalize(self, embedding):

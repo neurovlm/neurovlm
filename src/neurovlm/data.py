@@ -63,3 +63,5 @@ def get_data_dir():
     if "neurovlm_data" not in os.listdir(save_dir):
         os.mkdir(save_dir / "neurovlm_data")
     return save_dir / "neurovlm_data"
+
+data_dir = get_data_dir()
