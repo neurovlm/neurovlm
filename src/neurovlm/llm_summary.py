@@ -83,7 +83,7 @@ def _load_autoencoder() -> torch.nn.Module:
 
 def search_papers(query: str | torch.Tensor, top_k: int = 5) -> Tuple[str, List[str]]:
     """Return a context block of top papers and their titles.
-
+    query : str | torch.Tensor. str for natural language query, tensor for already encodedbrain-derived vector.
     Accepts either a natural language query or a brain-derived vector.
     """
     df = _load_dataframe()
@@ -98,12 +98,7 @@ def search_papers(query: str | torch.Tensor, top_k: int = 5) -> Tuple[str, List[
         # Cosine similarity and ranking
         cos_sim = latent_text @ encoded_text_norm  # [num_papers]
     else:
-        # Encode brain vector to latent space and normalize
-        encoder = _load_autoencoder()
-        brain_vec = query.to("cpu").unsqueeze(0)
-        with torch.no_grad():
-            latent = encoder.encoder(brain_vec).squeeze(0)
-        encoded_text_norm = latent / latent.norm()
+        encoded_text_norm = query / query.norm()
         cos_sim = latent_text @ encoded_text_norm  # [num_papers]
 
     inds = torch.argsort(cos_sim, descending=True)
