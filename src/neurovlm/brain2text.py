@@ -134,6 +134,9 @@ def transform_nifti_to_2d(nifti_img: nib.Nifti1Image, mask_img_path: Path | str 
 
 
 def run_brain2text(query_vector: torch.Tensor):
+    """
+    query_vector: torch.Tensor
+        An already encoded brain-derived vector."""
     output = summarize_papers(query_vector, top_k=10)
     return output
 
