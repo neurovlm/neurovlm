@@ -46,6 +46,18 @@ def _load_specter() -> Specter:
     """Construct and cache a Specter encoder."""
     return Specter()
 
+def _load_neurowiki() -> pd.DataFrame:
+    """Load the Neurowiki DataFrame.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns including at least `title` and `summary`.
+    """
+    data_dir = get_data_dir()
+    neurowiki_path = data_dir / "neurowiki.parquet"
+    return pd.read_parquet(neurowiki_path, engine="fastparquet")
+
 
 @lru_cache(maxsize=1)
 def _load_latent_text() -> torch.Tensor:
