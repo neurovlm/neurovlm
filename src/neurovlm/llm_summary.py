@@ -17,6 +17,7 @@ from typing import List, Tuple
 
 import ollama
 import pandas as pd
+import numpy as np
 import torch
 
 from neurovlm.data import get_data_dir
@@ -39,15 +40,10 @@ def _load_dataframe() -> pd.DataFrame:
     except Exception as e:  # pragma: no cover - depends on local engines
         print(f"pyarrow failed: {e}, trying fastparquet...")
         return pd.read_parquet(parquet_path, engine="fastparquet")
-
-
+    
 @lru_cache(maxsize=1)
-def _load_specter() -> Specter:
-    """Construct and cache a Specter encoder."""
-    return Specter()
-
-def _load_neurowiki() -> pd.DataFrame:
-    """Load the Neurowiki DataFrame.
+def _load_neuro_wiki() -> pd.DataFrame:
+    """Load the Neurowiki DataFrame with a robust parquet engine fallback.
 
     Returns
     -------
@@ -55,57 +51,135 @@ def _load_neurowiki() -> pd.DataFrame:
         DataFrame with columns including at least `title` and `summary`.
     """
     data_dir = get_data_dir()
-    neurowiki_path = data_dir / "neurowiki.parquet"
-    return pd.read_parquet(neurowiki_path, engine="fastparquet")
+    parquet_path = data_dir / "neurowiki_with_ids.parquet"
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as e:  # pragma: no cover - depends on local engines
+        print(f"pyarrow failed: {e}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
 
 
 @lru_cache(maxsize=1)
-def _load_latent_text() -> torch.Tensor:
-    """Load and return unit-normalized latent text embeddings.
+def _load_specter() -> Specter:
+    """Construct and cache a Specter encoder."""
+    return Specter()
 
-    Returns
-    -------
-    torch.Tensor
-        Tensor of shape [num_papers, dim] with unit-norm rows.
-    """
+
+@lru_cache(maxsize=1)
+def _load_latent_text() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load unit-normalized latent embeddings and their PubMed IDs."""
     data_dir = get_data_dir()
-    latent = torch.load(data_dir / "latent_text.pt", weights_only=True).to("cpu")
-    # Unit-normalize rows for cosine similarity via dot product
-    return latent / latent.norm(dim=1, keepdim=True)
+    latent_payload = torch.load(
+        data_dir / "latent_text_aligned.pt",
+        weights_only=False,
+    )
+
+    latent = latent_payload["latent"]
+    if getattr(latent, "is_sparse", False):
+        latent = latent.to_dense()
+    latent = latent.to(dtype=torch.float32, device="cpu")
+
+    latent_norm = latent.norm(dim=1, keepdim=True).clamp_min(1e-12)
+    latent_unit = latent / latent_norm
+
+    latent_pmid = np.asarray(latent_payload["pmid"])
+    return latent_unit, latent_pmid
+
+def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load unit-normalized latent embeddings and their IDs."""
+    data_dir = get_data_dir()
+    latent_payload = torch.load(
+        data_dir / "latent_specter_wiki_aligned.pt",
+        weights_only=False,
+    )
+
+    latent = latent_payload["latent"]
+    if getattr(latent, "is_sparse", False):
+        latent = latent.to_dense()
+    latent = latent.to(dtype=torch.float32, device="cpu")
+
+    latent_norm = latent.norm(dim=1, keepdim=True).clamp_min(1e-12)
+    latent_unit = latent / latent_norm
+
+    latent_id = np.asarray(latent_payload["id"])
+    return latent_unit, latent_id
 
 @lru_cache(maxsize=1)
 def _load_autoencoder() -> torch.nn.Module:
     """Load and return the text encoder model."""
     data_dir = get_data_dir()
-    encoder = torch.load(data_dir / "autoencoder.pt", weights_only=True).to("cpu")
+    encoder = torch.load(data_dir / "autoencoder_sparse.pt", weights_only=False).to("cpu")
     return encoder
 
+def _proj_head() -> torch.nn.Module:
+    """Load and return the text projection head."""
+    data_dir = get_data_dir()
+    proj_head = torch.load(data_dir / "proj_head_mse_sparse_adhoc.pt", weights_only=False).to("cpu")
+    return proj_head
 
-def search_papers(query: str | torch.Tensor, top_k: int = 5) -> Tuple[str, List[str]]:
+def search_papers(
+    query: str | torch.Tensor,
+    top_k: int = 5,
+    show_titles: bool = False,
+) -> Tuple[str, List[str]]:
     """Return a context block of top papers and their titles.
-    query : str | torch.Tensor. str for natural language query, tensor for already encodedbrain-derived vector.
-    Accepts either a natural language query or a brain-derived vector.
+
+    Parameters
+    ----------
+    query : str | torch.Tensor
+        Natural language query or pre-computed brain embedding.
+    top_k : int, optional
+        Number of publications to retrieve.
+    show_titles : bool, optional
+        When True, print the ranked titles to stdout.
+
+    Returns
+    -------
+    tuple[str, list[str]]
+        The formatted context block and the ordered list of titles.
     """
     df = _load_dataframe()
-    latent_text = _load_latent_text()  # [num_papers, dim]
+    latent_text, latent_pmids = _load_latent_text()
+    proj_head = _proj_head()
 
     if isinstance(query, str):
         specter = _load_specter()
         # Encode and normalize query
         encoded_text = specter(query)[0].detach().to("cpu")
         encoded_text_norm = encoded_text / encoded_text.norm()
+        proj_text = proj_head(encoded_text_norm.unsqueeze(0)).squeeze(0)
+        proj_text = proj_text / proj_text.norm()
 
         # Cosine similarity and ranking
-        cos_sim = latent_text @ encoded_text_norm  # [num_papers]
+        cos_sim = latent_text @ proj_text  
     else:
-        encoded_text_norm = query / query.norm()
-        cos_sim = latent_text @ encoded_text_norm  # [num_papers]
+        # Assume query is already a brain-derived embedding
+        encoded_norm = query / query.norm()
+        cos_sim = latent_text @ encoded_norm  
 
     inds = torch.argsort(cos_sim, descending=True)
     inds_top = inds[:top_k].tolist()
 
-    # Aggregate publications to pass to LLM
-    rows = df.iloc[inds_top]
+    pmids_top = [latent_pmids[i] for i in inds_top]
+
+    rows: pd.DataFrame
+    if "pmid" in df.columns:
+        pmid_lookup = df.drop_duplicates("pmid").set_index("pmid", drop=False)
+        selected_rows = []
+        for pmid in pmids_top:
+            try:
+                row = pmid_lookup.loc[pmid]
+                if isinstance(row, pd.DataFrame):
+                    row = row.iloc[0]
+                selected_rows.append(row)
+            except KeyError:
+                continue
+        if selected_rows:
+            rows = pd.DataFrame(selected_rows)
+        else:
+            rows = df.iloc[inds_top]
+    else:
+        rows = df.iloc[inds_top]
     pieces = []
     for idx, (_, row) in enumerate(rows.iterrows(), start=1):
         title = (
@@ -123,7 +197,89 @@ def search_papers(query: str | torch.Tensor, top_k: int = 5) -> Tuple[str, List[
     else:
         titles = ["Untitled"] * len(rows)
 
+    if show_titles:
+        print("Top matches:")
+        for idx, title in enumerate(titles, start=1):
+            print(f"{idx}. {title}")
+
     return papers_context, titles
+
+
+def search_wiki(
+    query: str | torch.Tensor,
+    top_k: int = 2,
+    show_titles: bool = False,
+) -> Tuple[str, List[str]]:
+    """Return a context block of top NeuroWiki entries and their titles.
+
+    Parameters
+    ----------
+    query : str | torch.Tensor
+        Natural language query or pre-computed brain embedding.
+    top_k : int, optional
+        Number of entries to retrieve.
+    show_titles : bool, optional
+        When True, print the ranked titles to stdout.
+
+    Returns
+    -------
+    tuple[str, list[str]]
+        The formatted context block and the ordered list of titles.
+    """
+    df = _load_neuro_wiki()
+    latent_wiki, latent_ids = _load_latent_wiki()
+    proj_head = _proj_head()
+
+    if isinstance(query, str):
+        specter = _load_specter()
+        encoded_text = specter(query)[0].detach().to("cpu")
+        encoded_text_norm = encoded_text / encoded_text.norm()
+        proj_text = proj_head(encoded_text_norm.unsqueeze(0)).squeeze(0)
+        proj_text = proj_text / proj_text.norm()
+        cos_sim = latent_wiki @ proj_text
+    else:
+        encoded_norm = query / query.norm()
+        cos_sim = latent_wiki @ encoded_norm
+
+    inds = torch.argsort(cos_sim, descending=True)
+    inds_top = inds[:top_k].tolist()
+    ids_top = [latent_ids[i] for i in inds_top]
+
+    missing_columns = [col for col in ("id", "title", "summary") if col not in df.columns]
+    if missing_columns:
+        raise ValueError(
+            f"NeuroWiki DataFrame is missing required columns: {', '.join(missing_columns)}"
+        )
+
+    id_lookup = df.drop_duplicates("id").set_index("id", drop=False)
+    selected_rows = []
+    for entry_id in ids_top:
+        try:
+            row = id_lookup.loc[entry_id]
+            if isinstance(row, pd.DataFrame):
+                row = row.iloc[0]
+            selected_rows.append(row)
+        except KeyError:
+            continue
+    rows = pd.DataFrame(selected_rows) if selected_rows else df.iloc[inds_top]
+
+    pieces = []
+    titles: List[str] = []
+    for idx, (_, row) in enumerate(rows.iterrows(), start=1):
+        title = str(row["title"]) if pd.notna(row["title"]) else "Untitled"
+        titles.append(title)
+        summary = str(row["summary"]) if pd.notna(row["summary"]) else ""
+        summary = re.sub(r"\s+", " ", summary).strip()
+        pieces.append(f"[{idx}] {title}\n{summary}\n")
+
+    wiki_context = "\n".join(pieces)
+
+    if show_titles:
+        print("Top matches:")
+        for idx, title in enumerate(titles, start=1):
+            print(f"{idx}. {title}")
+
+    return wiki_context, titles
 
 
 def system_prompt(for_brain_input: bool = False) -> str:
@@ -134,7 +290,7 @@ def system_prompt(for_brain_input: bool = False) -> str:
     if for_brain_input:
         return """
         You are a helpful neuroscience research assistant.
-        You will receive a set of publications associated with an input brain representation rather than a textual query. Your task is to summarize key findings and insights from these publications, focusing on what they reveal about the brain.
+        You will receive a set of publications associated with an input brain representation and a set of neuroscience concepts with its meaning. Your task is to summarize key findings and insights from these publications, focusing on what they reveal about the brain and if the neuroscience concept relates to the paper talk about it.
 
         Your response must:
         - Start with a brief overview (2-4 sentences) summarizing the main themes or takeaways across the publications.
@@ -147,7 +303,7 @@ def system_prompt(for_brain_input: bool = False) -> str:
 
     return """
     You are a helpful neuroscience research assistant.
-    You will receive a set of publications and a user query. Your task is to summarize key findings and insights from these publications, focusing on how they relate to the query.
+    You will receive a set of publications, set of neuroscience concepts with its meaning and a user query. Your task is to summarize key findings and insights from these publications, focusing on how they relate to the query, use the neuroscience concepts as added context and information.
 
     Your response must:
     - Start with a brief overview (2-4 sentences) summarizing the main themes or takeaways across the publications.
@@ -159,16 +315,26 @@ def system_prompt(for_brain_input: bool = False) -> str:
     """
 
 
-def build_user_prompt(query: str | torch.Tensor, papers_context: str) -> str:
-    """Compose the user-facing prompt given a query and context block."""
+def build_user_prompt(
+    query: str | torch.Tensor,
+    papers_context: str,
+    wiki_context: str | None = None,
+) -> str:
+    """Compose the user-facing prompt given a query, publications, and NeuroWiki context."""
     if isinstance(query, str):
-        return (
+        prompt = (
             f"Here are publications related to the query \"{query}\":\n{papers_context}\n"
         )
-    return f"Here are the publications related to the input brain:\n{papers_context}\n"
+    else:
+        prompt = f"Here are the publications related to the input brain:\n{papers_context}\n"
+
+    if wiki_context:
+        prompt += f"\nHere are neuroscience concepts from the NeuroWiki:\n{wiki_context}\n"
+
+    return prompt
 
 
-def summarize_papers(
+def generate_response(
     query: str | torch.Tensor,
     top_k: int = 5,
     model: str = "qwen2.5:3b-instruct",
@@ -194,6 +360,13 @@ def summarize_papers(
         The LLM-generated summary text.
     """
     papers_context, titles = search_papers(query, top_k=top_k)
+    wiki_context = ""
+    wiki_titles: List[str] = []
+    try:
+        wiki_context, wiki_titles = search_wiki(query, top_k=top_k)
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        if verbose:
+            print(f"Warning: failed to retrieve NeuroWiki concepts ({exc})")
 
     # Decide prompt flavor early so it is always defined
     for_brain_input = not isinstance(query, str)
@@ -207,12 +380,19 @@ def summarize_papers(
         print(header)
         for i, title in enumerate(titles, start=1):
             print(f"[{i}] {title}")
+        if wiki_titles:
+            print("Top NeuroWiki concepts:")
+            for i, title in enumerate(wiki_titles, start=1):
+                print(f"[{i}] {title}")
         print("LLM writing summary...")
 
     response = ollama.chat(
         messages=[
             {"role": "system", "content": system_prompt(for_brain_input=for_brain_input)},
-            {"role": "user", "content": build_user_prompt(query, papers_context)},
+            {
+                "role": "user",
+                "content": build_user_prompt(query, papers_context, wiki_context or None),
+            },
         ],
         model=model,
     )
@@ -225,64 +405,3 @@ def summarize_papers(
         print(output_text)
     return output_text
 
-
-def _main() -> None:
-    """Simple CLI for text or brain-vector queries.
-
-    Examples
-    --------
-    Text query:
-        python -m neurovlm.llm_summary "neural correlates of working memory" --top-k 5
-
-    Brain vector from a .pt file containing a 1D tensor:
-        python -m neurovlm.llm_summary --brain-vector path/to/vector.pt --top-k 10
-    """
-    parser = argparse.ArgumentParser(description="Search and summarize publications with a local LLM")
-    grp = parser.add_mutually_exclusive_group(required=True)
-    grp.add_argument("query", nargs="?", help="Natural language query to search")
-    grp.add_argument("--brain-vector", dest="brain_vector", help="Path to a .pt file with a 1D torch tensor")
-    parser.add_argument("--top-k", type=int, default=5, help="Number of publications to include in context")
-    parser.add_argument(
-        "--model",
-        default="qwen2.5:3b-instruct",
-        help="Ollama model name (e.g., qwen2.5:3b-instruct, llama3.2:3b)",
-    )
-    parser.add_argument("--quiet", action="store_true", help="Suppress progress printing")
-
-    args = parser.parse_args()
-
-    if args.query is not None:
-        query: str | torch.Tensor = args.query
-    else:
-        vec = torch.load(args.brain_vector, map_location="cpu")
-        if isinstance(vec, dict) and "tensor" in vec:
-            vec = vec["tensor"]
-        if vec.dim() == 2 and vec.size(0) == 1:
-            vec = vec.squeeze(0)
-        if vec.dim() != 1:
-            raise ValueError("Brain vector must be a 1D tensor or [1, D] tensor")
-        query = vec
-
-    try:
-        summarize_papers(query, top_k=args.top_k, model=args.model, verbose=not args.quiet)
-    except Exception as e:
-        print(f"Error: {e}")
-        print("Ensure Ollama is running and the model is pulled: `ollama run qwen2.5:3b-instruct`.")
-
-
-if __name__ == "__main__":
-    _main()
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Summarize publications for a query using a local LLM.")
-    parser.add_argument("query", type=str, help="Question or topic to search and summarize")
-    parser.add_argument("--top-k", type=int, default=5, help="Number of publications to include")
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="qwen2.5:3b-instruct",
-        help="Ollama model to use (e.g., qwen2.5:3b-instruct, llama3.2:3b)",
-    )
-    args = parser.parse_args()
-
-    summarize_papers(args.query, top_k=args.top_k, model=args.model, verbose=True)
