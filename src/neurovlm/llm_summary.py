@@ -75,15 +75,9 @@ def _load_latent_text() -> Tuple[torch.Tensor, np.ndarray]:
     )
 
     latent = latent_payload["latent"]
-    if getattr(latent, "is_sparse", False):
-        latent = latent.to_dense()
-    latent = latent.to(dtype=torch.float32, device="cpu")
-
-    latent_norm = latent.norm(dim=1, keepdim=True).clamp_min(1e-12)
-    latent_unit = latent / latent_norm
 
     latent_pmid = np.asarray(latent_payload["pmid"])
-    return latent_unit, latent_pmid
+    return latent, latent_pmid
 
 def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
     """Load unit-normalized latent embeddings and their IDs."""
@@ -94,15 +88,9 @@ def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
     )
 
     latent = latent_payload["latent"]
-    if getattr(latent, "is_sparse", False):
-        latent = latent.to_dense()
-    latent = latent.to(dtype=torch.float32, device="cpu")
-
-    latent_norm = latent.norm(dim=1, keepdim=True).clamp_min(1e-12)
-    latent_unit = latent / latent_norm
 
     latent_id = np.asarray(latent_payload["id"])
-    return latent_unit, latent_id
+    return latent, latent_id
 
 @lru_cache(maxsize=1)
 def _load_autoencoder() -> torch.nn.Module:
@@ -159,7 +147,7 @@ def search_papers(
         # Encode and normalize query
         encoded_query = specter(query)[0].detach().to("cpu")
         encoded_query_norm = encoded_query / encoded_query.norm()
-        proj_query = proj_head(encoded_query_norm.unsqueeze(0)).squeeze(0)
+        proj_query = proj_head(encoded_query_norm)
         proj_query = proj_query / proj_query.norm()
 
         # should i project latent text aligned too?
@@ -172,7 +160,7 @@ def search_papers(
         proj_head_text = _proj_head_text_infonce()
 
         encoded_norm = query / query.norm()
-        img_embed = proj_head_img(encoded_norm.unsqueeze(0)).squeeze(0)
+        img_embed = proj_head_img(encoded_norm)
         img_embed = img_embed / img_embed.norm()
 
         # text_embed = proj_head_text(latent_text.unsqueeze(0)).squeeze(0)
