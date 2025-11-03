@@ -89,7 +89,7 @@ def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
     """Load unit-normalized latent embeddings and their IDs."""
     data_dir = get_data_dir()
     latent_payload = torch.load(
-        data_dir / "latent_specter_wiki_aligned.pt",
+        data_dir / "latent_specter_wiki.pt",
         weights_only=False,
     )
 
@@ -111,10 +111,22 @@ def _load_autoencoder() -> torch.nn.Module:
     encoder = torch.load(data_dir / "autoencoder_sparse.pt", weights_only=False).to("cpu")
     return encoder
 
-def _proj_head() -> torch.nn.Module:
+def _proj_head_image_infonce() -> torch.nn.Module:
+    """Load and return the text projection head."""
+    data_dir = get_data_dir()
+    proj_head = torch.load(data_dir / "proj_head_image_infonce.pt", weights_only=False).to("cpu")
+    return proj_head
+
+def _proj_head_mse_adhoc() -> torch.nn.Module:
     """Load and return the text projection head."""
     data_dir = get_data_dir()
     proj_head = torch.load(data_dir / "proj_head_mse_sparse_adhoc.pt", weights_only=False).to("cpu")
+    return proj_head
+
+def _proj_head_text_infonce() -> torch.nn.Module:
+    """Load and return the text projection head."""
+    data_dir = get_data_dir()
+    proj_head = torch.load(data_dir / "proj_head_text_infonce.pt", weights_only=False).to("cpu")
     return proj_head
 
 def search_papers(
@@ -140,22 +152,35 @@ def search_papers(
     """
     df = _load_dataframe()
     latent_text, latent_pmids = _load_latent_text()
-    proj_head = _proj_head()
 
     if isinstance(query, str):
         specter = _load_specter()
+        proj_head = _proj_head_mse_adhoc()
         # Encode and normalize query
-        encoded_text = specter(query)[0].detach().to("cpu")
-        encoded_text_norm = encoded_text / encoded_text.norm()
-        proj_text = proj_head(encoded_text_norm.unsqueeze(0)).squeeze(0)
-        proj_text = proj_text / proj_text.norm()
+        encoded_query = specter(query)[0].detach().to("cpu")
+        encoded_query_norm = encoded_query / encoded_query.norm()
+        proj_query = proj_head(encoded_query_norm.unsqueeze(0)).squeeze(0)
+        proj_query = proj_query / proj_query.norm()
+
+        # should i project latent text aligned too?
 
         # Cosine similarity and ranking
-        cos_sim = latent_text @ proj_text  
+        cos_sim = latent_text @ proj_query
     else:
         # Assume query is already a brain-derived embedding
+        proj_head_img = _proj_head_image_infonce()
+        proj_head_text = _proj_head_text_infonce()
+
         encoded_norm = query / query.norm()
-        cos_sim = latent_text @ encoded_norm  
+        img_embed = proj_head_img(encoded_norm.unsqueeze(0)).squeeze(0)
+        img_embed = img_embed / img_embed.norm()
+
+        # text_embed = proj_head_text(latent_text.unsqueeze(0)).squeeze(0)
+        # text_embed = text_embed / text_embed.norm()
+
+        # print(f"text_embed shape: {text_embed.shape}, img_embed shape: {img_embed.shape}")
+        cos_sim = latent_text @ img_embed
+        
 
     inds = torch.argsort(cos_sim, descending=True)
     inds_top = inds[:top_k].tolist()
@@ -228,18 +253,31 @@ def search_wiki(
     """
     df = _load_neuro_wiki()
     latent_wiki, latent_ids = _load_latent_wiki()
-    proj_head = _proj_head()
 
     if isinstance(query, str):
         specter = _load_specter()
-        encoded_text = specter(query)[0].detach().to("cpu")
-        encoded_text_norm = encoded_text / encoded_text.norm()
-        proj_text = proj_head(encoded_text_norm.unsqueeze(0)).squeeze(0)
-        proj_text = proj_text / proj_text.norm()
-        cos_sim = latent_wiki @ proj_text
+        proj_head = _proj_head_mse_adhoc()
+
+        encoded_query = specter(query)[0].detach().to("cpu")
+        encoded_query_norm = encoded_query / encoded_query.norm()
+        proj_query = proj_head(encoded_query_norm)
+        proj_query = proj_query / proj_query.norm()
+
+        proj_wiki = proj_head(latent_wiki)
+        proj_wiki = proj_wiki / proj_wiki.norm()
+
+        cos_sim = proj_wiki @ proj_query
     else:
+        proj_head_img = _proj_head_image_infonce()
+        proj_head_text = _proj_head_text_infonce()
+
         encoded_norm = query / query.norm()
-        cos_sim = latent_wiki @ encoded_norm
+        img_embed = proj_head_img(encoded_norm)
+        img_embed = img_embed / img_embed.norm()
+        
+        wiki_embed = proj_head_text(latent_wiki)
+        wiki_embed = wiki_embed / wiki_embed.norm()
+        cos_sim = wiki_embed @ img_embed
 
     inds = torch.argsort(cos_sim, descending=True)
     inds_top = inds[:top_k].tolist()
