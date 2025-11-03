@@ -16,9 +16,10 @@ pieces fit together.
 
 from __future__ import annotations
 
+import re
 import warnings
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, List, Mapping, Tuple
 
 import nibabel as nib
 import numpy as np
@@ -27,14 +28,145 @@ import torch
 from nilearn.image import resample_img
 from nilearn.maskers import NiftiMasker
 
-from neurovlm.data import get_data_dir
-from neurovlm.data import fetch_data
-from neurovlm.models import NeuroAutoEncoder
+from neurovlm.data import fetch_data, get_data_dir
 from neurovlm.train import which_device
-from neurovlm.llm_summary import search_papers, generate_response
+from neurovlm.retrieval_resources import (
+    _load_dataframe,
+    _load_latent_text,
+    _load_latent_wiki,
+    _load_neuro_wiki,
+    _proj_head_image_infonce,
+    _proj_head_text_infonce,
+)
 data_dir = get_data_dir()
 
 warnings.filterwarnings("ignore")
+
+
+def search_papers_from_brain(
+    query: torch.Tensor,
+    top_k: int = 5,
+    show_titles: bool = False,
+) -> Tuple[str, List[str]]:
+    """Return context for the most similar papers to a brain-derived embedding."""
+    if not isinstance(query, torch.Tensor):
+        raise TypeError("query must be a torch.Tensor for brain-based retrieval")
+
+    df = _load_dataframe()
+    latent_text, latent_pmids = _load_latent_text()
+    proj_head_img = _proj_head_image_infonce()
+
+    encoded_norm = query / query.norm()
+    img_embed = proj_head_img(encoded_norm)
+    img_embed = img_embed / img_embed.norm()
+    cos_sim = latent_text @ img_embed
+
+    inds = torch.argsort(cos_sim, descending=True)
+    inds_top = inds[:top_k].tolist()
+    pmids_top = [latent_pmids[i] for i in inds_top]
+
+    if "pmid" in df.columns:
+        pmid_lookup = df.drop_duplicates("pmid").set_index("pmid", drop=False)
+        selected_rows = []
+        for pmid in pmids_top:
+            try:
+                row = pmid_lookup.loc[pmid]
+                if isinstance(row, pd.DataFrame):
+                    row = row.iloc[0]
+                selected_rows.append(row)
+            except KeyError:
+                continue
+        rows = pd.DataFrame(selected_rows) if selected_rows else df.iloc[inds_top]
+    else:
+        rows = df.iloc[inds_top]
+
+    pieces = []
+    title_col = "name" if "name" in rows.columns else ("title" if "title" in rows.columns else None)
+    titles: List[str]
+    if title_col is not None:
+        titles = rows[title_col].astype(str).tolist()
+    else:
+        titles = ["Untitled"] * len(rows)
+
+    for idx, (_, row) in enumerate(rows.iterrows(), start=1):
+        title = (
+            str(row["name"]) if "name" in rows.columns else str(row.get("title", "Untitled"))
+        )
+        desc = str(row.get("description", "")).replace("\n", " ")
+        desc = re.sub(r"\s+", " ", desc).strip()
+        pieces.append(f"[{idx}] {title}\n{desc}\n")
+
+    if show_titles:
+        print("Top matches:")
+        for idx, title in enumerate(titles, start=1):
+            print(f"{idx}. {title}")
+
+    papers_context = "\n".join(pieces)
+    return papers_context, titles
+
+
+def search_wiki_from_brain(
+    query: torch.Tensor,
+    top_k: int = 2,
+    show_titles: bool = False,
+) -> Tuple[str, List[str]]:
+    """Return context for the most similar NeuroWiki entries to a brain-derived embedding."""
+    if not isinstance(query, torch.Tensor):
+        raise TypeError("query must be a torch.Tensor for brain-based retrieval")
+
+    df = _load_neuro_wiki()
+    latent_wiki, latent_ids = _load_latent_wiki()
+
+    proj_head_img = _proj_head_image_infonce()
+    proj_head_text = _proj_head_text_infonce()
+
+    encoded_norm = query / query.norm()
+    img_embed = proj_head_img(encoded_norm)
+    img_embed = img_embed / img_embed.norm()
+
+    wiki_embed = proj_head_text(latent_wiki)
+    wiki_embed = wiki_embed / wiki_embed.norm()
+    cos_sim = wiki_embed @ img_embed
+
+    inds = torch.argsort(cos_sim, descending=True)
+    inds_top = inds[:top_k].tolist()
+    ids_top = [latent_ids[i] for i in inds_top]
+
+    missing_columns = [col for col in ("id", "title", "summary") if col not in df.columns]
+    if missing_columns:
+        raise ValueError(
+            f"NeuroWiki DataFrame is missing required columns: {', '.join(missing_columns)}"
+        )
+
+    id_lookup = df.drop_duplicates("id").set_index("id", drop=False)
+    selected_rows = []
+    for entry_id in ids_top:
+        try:
+            row = id_lookup.loc[entry_id]
+            if isinstance(row, pd.DataFrame):
+                row = row.iloc[0]
+            selected_rows.append(row)
+        except KeyError:
+            continue
+
+    rows = pd.DataFrame(selected_rows) if selected_rows else df.iloc[inds_top]
+
+    pieces = []
+    titles: List[str] = []
+    for idx, (_, row) in enumerate(rows.iterrows(), start=1):
+        title = str(row["title"]) if pd.notna(row["title"]) else "Untitled"
+        titles.append(title)
+        summary = str(row["summary"]) if pd.notna(row["summary"]) else ""
+        summary = re.sub(r"\s+", " ", summary).strip()
+        pieces.append(f"[{idx}] {title}\n{summary}\n")
+
+    if show_titles:
+        print("Top matches:")
+        for idx, title in enumerate(titles, start=1):
+            print(f"{idx}. {title}")
+
+    wiki_context = "\n".join(pieces)
+    return wiki_context, titles
 
 
 def load_metadata(data_dir: Path | str | None = data_dir) -> dict[str, pd.DataFrame]:
@@ -191,12 +323,13 @@ def resmaple_array_nifti(
 
 
 
-def run_brain2text(query_vector: torch.Tensor):
+def generate_llm_response_from_brain(query_vector: torch.Tensor):
     """
     query_vector: torch.Tensor
         An already encoded brain-derived vector."""
-    output = generate_response(query_vector, top_k=5)
-    return output
+    from neurovlm.llm_summary import generate_response
+
+    return generate_response(query_vector, top_k_similar_papers=5)
 
 
 __all__ = [
@@ -205,4 +338,6 @@ __all__ = [
     "resmaple_nifti",
     "resmaple_array_nifti",
     "run_brain2text",
+    "search_papers_from_brain",
+    "search_wiki_from_brain",
 ]
