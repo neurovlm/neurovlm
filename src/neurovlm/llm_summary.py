@@ -13,8 +13,8 @@ from typing import List
 import ollama
 import torch
 
-from neurovlm.brain2text import search_papers_from_brain, search_wiki_from_brain
-from neurovlm.text_to_brain import search_papers_from_text, search_wiki_from_text
+from neurovlm.brain_input import search_papers_from_brain, search_wiki_from_brain
+from neurovlm.text_input import search_papers_from_text, search_wiki_from_text
 
 
 def system_prompt(for_brain_input: bool = False) -> str:
