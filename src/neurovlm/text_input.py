@@ -19,7 +19,7 @@ from neurovlm.retrieval_resources import (
     _load_latent_wiki,
     _load_neuro_wiki,
     _load_specter,
-    _proj_head_mse_adhoc,
+    _proj_head_text_infonce
 )
 
 __all__ = ["search_papers_from_text", "search_wiki_from_text", "generate_llm_response_from_text"]
@@ -38,7 +38,7 @@ def search_papers_from_text(
     latent_text, latent_pmids = _load_latent_text()
 
     specter = _load_specter()
-    proj_head = _proj_head_mse_adhoc()
+    proj_head = _proj_head_text_infonce()
 
     encoded_query = specter(query)[0].detach().to("cpu")
     proj_query = proj_head(encoded_query)
@@ -106,7 +106,7 @@ def search_wiki_from_text(
     if not (df['id'] == latent_ids).all():
         raise ValueError("Mismatch between DataFrame 'id' column and latent_ids: ensure they are aligned.")
     specter = _load_specter()
-    proj_head = _proj_head_mse_adhoc()
+    proj_head = _proj_head_text_infonce()
 
     encoded_query = specter(query)[0].detach().to("cpu")
     encoded_query = encoded_query / encoded_query.norm()
@@ -117,7 +117,6 @@ def search_wiki_from_text(
     proj_wiki = proj_head(wiki_embed)
     proj_wiki = proj_wiki / proj_wiki.norm(dim=1)[:, None]
     cos_sim = proj_wiki @ proj_query
-
 
     inds = torch.argsort(cos_sim, descending=True)
     inds_top = inds[:top_k].tolist()
