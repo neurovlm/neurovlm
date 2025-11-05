@@ -55,11 +55,16 @@ def search_papers_from_brain(
     df = _load_dataframe()
     latent_text, latent_pmids = _load_latent_text()
     proj_head_img = _proj_head_image_infonce()
+    proj_head_text = _proj_head_text_infonce()
 
-    encoded_norm = query / query.norm()
-    img_embed = proj_head_img(encoded_norm)
-    img_embed = img_embed / img_embed.norm()
-    cos_sim = latent_text @ img_embed
+    proj_img = proj_head_img(query).squeeze(0)
+    proj_img = proj_img / proj_img.norm()
+
+    text_embeddings = latent_text / latent_text.norm(dim=1)[:, None]
+    proj_text = proj_head_text(text_embeddings)
+    proj_text = proj_text / proj_text.norm(dim=1)[:, None]
+
+    cos_sim = proj_text @ proj_img
 
     inds = torch.argsort(cos_sim, descending=True)
     inds_top = inds[:top_k].tolist()
@@ -75,6 +80,7 @@ def search_papers_from_brain(
                     row = row.iloc[0]
                 selected_rows.append(row)
             except KeyError:
+                print(f"PMID {pmid} not found in DataFrame.")
                 continue
         rows = pd.DataFrame(selected_rows) if selected_rows else df.iloc[inds_top]
     else:
@@ -120,13 +126,14 @@ def search_wiki_from_brain(
     proj_head_img = _proj_head_image_infonce()
     proj_head_text = _proj_head_text_infonce()
 
-    encoded_norm = query / query.norm()
-    img_embed = proj_head_img(encoded_norm)
-    img_embed = img_embed / img_embed.norm()
+    proj_img = proj_head_img(query).squeeze(0)
+    proj_img = proj_img / proj_img.norm()
 
-    wiki_embed = proj_head_text(latent_wiki)
-    wiki_embed = wiki_embed / wiki_embed.norm()
-    cos_sim = wiki_embed @ img_embed
+    wiki_embed = latent_wiki / latent_wiki.norm(dim=1)[:, None]
+    proj_wiki = proj_head_text(wiki_embed)
+    proj_wiki = proj_wiki / proj_wiki.norm(dim=1)[:, None]
+
+    cos_sim = proj_wiki @ proj_img
 
     inds = torch.argsort(cos_sim, descending=True)
     inds_top = inds[:top_k].tolist()
@@ -180,16 +187,18 @@ def load_metadata(data_dir: Path | str | None = data_dir) -> dict[str, pd.DataFr
         directory is fetched (or validated) automatically.
     """
     root = Path(fetch_data() if data_dir is None else data_dir)
-    df_pubs = pd.read_parquet(root / "publications.parquet")
+    df_pubs = pd.read_parquet(root / "publications_more.parquet")
     df_coords = pd.read_parquet(root / "coordinates.parquet")
     return {"publications": df_pubs, "coordinates": df_coords}
 
 
 def load_models(
     autoencoder_path: Path | str = f"{data_dir} / autoencoder_sparse.pt",
-    latent_paper_path: Path | str = f"{data_dir} / latent_text_aligned.pt",
-    latent_wiki_path: Path | str = f"{data_dir} / latent_specter_wiki_aligned.pt",
-    proj_head_path: Path | str = f"{data_dir} / proj_head_mse_sparse_adhoc.pt",
+    latent_paper_path: Path | str = f"{data_dir} / latent_specter2_adhoc.pt",
+    latent_wiki_path: Path | str = f"{data_dir} / latent_specter_wiki.pt",
+    proj_head_mse_adhoc_path: Path | str = f"{data_dir} / proj_head_mse_sparse_adhoc.pt",
+    proj_head_img_infonce_path: Path | str = f"{data_dir} / proj_head_image_infonce.pt",
+    proj_head_text_infonce_path: Path | str = f"{data_dir} / proj_head_text_infonce.pt",
     device: torch.device | None = None,
 ) -> dict[str, torch.nn.Module | torch.Tensor]:
     """
@@ -204,8 +213,14 @@ def load_models(
         autoencoder_path, weights_only=False
     ).to(target_device)
    
-    proj_head = torch.load(
-        proj_head_path, weights_only=False
+    proj_head_mse_adhoc = torch.load(
+        proj_head_mse_adhoc_path, weights_only=False
+    ).to(target_device)
+    proj_head_img_infonce = torch.load(
+        proj_head_img_infonce_path, weights_only=False
+    ).to(target_device)
+    proj_head_text_infonce = torch.load(
+        proj_head_text_infonce_path, weights_only=False
     ).to(target_device)
 
     latent_paper = torch.load(
@@ -222,7 +237,9 @@ def load_models(
 
     return {
         "autoencoder": autoencoder,
-        "proj_head": proj_head,
+        "proj_head": {"mse_adhoc": proj_head_mse_adhoc,
+                      "img_infonce": proj_head_img_infonce,
+                      "text_infonce": proj_head_text_infonce},
         "latent_paper": latent_paper,
         "latent_paper_ids": latent_pmid,
         "latent_wiki": latent_wiki,

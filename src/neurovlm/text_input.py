@@ -41,11 +41,12 @@ def search_papers_from_text(
     proj_head = _proj_head_mse_adhoc()
 
     encoded_query = specter(query)[0].detach().to("cpu")
-    encoded_query_norm = encoded_query / encoded_query.norm()
-    proj_query = proj_head(encoded_query_norm)
+    proj_query = proj_head(encoded_query)
     proj_query = proj_query / proj_query.norm()
 
-    cos_sim = latent_text @ proj_query
+    proj_text = proj_head(latent_text)
+    proj_text = proj_text / proj_text.norm(dim=1)[:, None]
+    cos_sim = proj_text @ proj_query
 
     inds = torch.argsort(cos_sim, descending=True)
     inds_top = inds[:top_k].tolist()
@@ -102,23 +103,24 @@ def search_wiki_from_text(
 
     df = _load_neuro_wiki()
     latent_wiki, latent_ids = _load_latent_wiki()
-
+    assert (df['id'] == latent_ids).all()
     specter = _load_specter()
     proj_head = _proj_head_mse_adhoc()
 
     encoded_query = specter(query)[0].detach().to("cpu")
-    encoded_query_norm = encoded_query / encoded_query.norm()
-    proj_query = proj_head(encoded_query_norm)
+    encoded_query = encoded_query / encoded_query.norm()
+    proj_query = proj_head(encoded_query)
     proj_query = proj_query / proj_query.norm()
 
-    proj_wiki = proj_head(latent_wiki)
-    proj_wiki = proj_wiki / proj_wiki.norm()
+    wiki_embed = latent_wiki / latent_wiki.norm(dim=1)[:, None]
+    proj_wiki = proj_head(wiki_embed)
+    proj_wiki = proj_wiki / proj_wiki.norm(dim=1)[:, None]
     cos_sim = proj_wiki @ proj_query
+
 
     inds = torch.argsort(cos_sim, descending=True)
     inds_top = inds[:top_k].tolist()
     ids_top = [latent_ids[i] for i in inds_top]
-
     missing_columns = [col for col in ("id", "title", "summary") if col not in df.columns]
     if missing_columns:
         raise ValueError(
