@@ -22,7 +22,7 @@ from neurovlm.retrieval_resources import (
     _proj_head_mse_adhoc,
 )
 
-__all__ = ["search_papers_from_text", "search_wiki_from_text"]
+__all__ = ["search_papers_from_text", "search_wiki_from_text", "generate_llm_response_from_text"]
 
 
 def search_papers_from_text(
@@ -103,7 +103,8 @@ def search_wiki_from_text(
 
     df = _load_neuro_wiki()
     latent_wiki, latent_ids = _load_latent_wiki()
-    assert (df['id'] == latent_ids).all()
+    if not (df['id'] == latent_ids).all():
+        raise ValueError("Mismatch between DataFrame 'id' column and latent_ids: ensure they are aligned.")
     specter = _load_specter()
     proj_head = _proj_head_mse_adhoc()
 
@@ -161,8 +162,18 @@ def search_wiki_from_text(
 
 def generate_llm_response_from_text(query: str):
     """
-    query: str
-        A natural language query to be encoded."""
+    Generate an LLM response for a given natural language query.
+
+    Parameters
+    ----------
+    query : str
+        A natural language query to be encoded.
+
+    Returns
+    -------
+    str
+        The generated LLM response.
+    """
     from neurovlm.llm_summary import generate_response
 
     return generate_response(query, top_k_similar_papers=5)

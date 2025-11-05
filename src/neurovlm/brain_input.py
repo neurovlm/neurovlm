@@ -193,12 +193,12 @@ def load_metadata(data_dir: Path | str | None = data_dir) -> dict[str, pd.DataFr
 
 
 def load_models(
-    autoencoder_path: Path | str = f"{data_dir} / autoencoder_sparse.pt",
-    latent_paper_path: Path | str = f"{data_dir} / latent_specter2_adhoc.pt",
-    latent_wiki_path: Path | str = f"{data_dir} / latent_specter_wiki.pt",
-    proj_head_mse_adhoc_path: Path | str = f"{data_dir} / proj_head_mse_sparse_adhoc.pt",
-    proj_head_img_infonce_path: Path | str = f"{data_dir} / proj_head_image_infonce.pt",
-    proj_head_text_infonce_path: Path | str = f"{data_dir} / proj_head_text_infonce.pt",
+    autoencoder_path: Path | str = Path(data_dir) / "autoencoder_sparse.pt",
+    latent_paper_path: Path | str = Path(data_dir) / "latent_specter2_adhoc.pt",
+    latent_wiki_path: Path | str = Path(data_dir) / "latent_specter_wiki.pt",
+    proj_head_mse_adhoc_path: Path | str = Path(data_dir) / "proj_head_mse_sparse_adhoc.pt",
+    proj_head_img_infonce_path: Path | str = Path(data_dir) / "proj_head_image_infonce.pt",
+    proj_head_text_infonce_path: Path | str = Path(data_dir) / "proj_head_text_infonce.pt",
     device: torch.device | None = None,
 ) -> dict[str, torch.nn.Module | torch.Tensor]:
     """
@@ -223,17 +223,17 @@ def load_models(
         proj_head_text_infonce_path, weights_only=False
     ).to(target_device)
 
-    latent_paper = torch.load(
+    latent_paper_dict = torch.load(
         latent_paper_path, weights_only=False
     ).to(target_device)
-    latent_paper = latent_paper['latent']
-    latent_pmid = latent_paper['pmid']
+    latent_paper = latent_paper_dict['latent']
+    latent_pmid = latent_paper_dict['pmid']
 
-    latent_wiki = torch.load(
+    latent_wiki_dict = torch.load(
         latent_wiki_path, weights_only=False
     ).to(target_device)
-    latent_wiki = latent_wiki['latent']
-    latent_wikiid = latent_wiki['id']
+    latent_wiki = latent_wiki_dict['latent']
+    latent_wikiid = latent_wiki_dict['id']
 
     return {
         "autoencoder": autoencoder,
@@ -342,8 +342,18 @@ def resmaple_array_nifti(
 
 def generate_llm_response_from_brain(query_vector: torch.Tensor):
     """
-    query_vector: torch.Tensor
-        An already encoded brain-derived vector."""
+    Generate an LLM response based on a brain-derived vector.
+
+    Parameters
+    ----------
+    query_vector : torch.Tensor
+        An already encoded brain-derived vector.
+
+    Returns
+    -------
+    str
+        The generated response from the LLM.
+    """
     from neurovlm.llm_summary import generate_response
 
     return generate_response(query_vector, top_k_similar_papers=5)
@@ -354,7 +364,7 @@ __all__ = [
     "load_models",
     "resmaple_nifti",
     "resmaple_array_nifti",
-    "run_brain2text",
     "search_papers_from_brain",
     "search_wiki_from_brain",
+    "generate_llm_response_from_brain",
 ]
