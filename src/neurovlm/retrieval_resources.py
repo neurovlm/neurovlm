@@ -34,7 +34,7 @@ __all__ = [
 def _load_dataframe() -> pd.DataFrame:
     """Load the publications DataFrame with a parquet engine fallback."""
     data_dir = get_data_dir()
-    parquet_path = data_dir / "publications.parquet"
+    parquet_path = data_dir / "publications_more.parquet"
     try:
         return pd.read_parquet(parquet_path, engine="pyarrow")
     except Exception as exc:  # pragma: no cover - depends on local engines
@@ -65,7 +65,7 @@ def _load_latent_text() -> Tuple[torch.Tensor, np.ndarray]:
     """Load unit-normalized latent text embeddings and associated PubMed IDs."""
     data_dir = get_data_dir()
     latent_payload = torch.load(
-        data_dir / "latent_text_aligned.pt",
+        data_dir / "latent_specter2_adhoc.pt",
         weights_only=False,
     )
 
