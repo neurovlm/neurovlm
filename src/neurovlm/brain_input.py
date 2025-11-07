@@ -292,7 +292,7 @@ def _resample_to_mask(
     )
 
 
-def resmaple_nifti(
+def resample_nifti(
     nifti_img: nib.Nifti1Image,
     data_dir: Path | str | None = None,
 ) -> torch.Tensor:
@@ -308,7 +308,7 @@ def resmaple_nifti(
     return out_tensor
 
 
-def resmaple_array_nifti(
+def resample_array_nifti(
     networks: Mapping[str, Mapping[str, Any]],
     data_dir: Path | str | None = None,
 ) -> dict[str, nib.Nifti1Image]:
