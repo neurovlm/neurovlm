@@ -1,0 +1,370 @@
+"""
+Utilities for mapping brain activation maps to relevant literature.
+
+This module consolidates the logic experimented with in the
+``brain_to_text`` notebook into reusable functions. The workflow:
+
+1. Load NeuroVLM models and metadata tables.
+2. Optionally deduplicate latent text batches saved on disk.
+3. Flatten neuroimaging volumes into masked vectors.
+4. Encode a query map, search for the closest text embeddings, and
+   summarise the corresponding publications.
+
+The top-level :func:`run_brain_to_text_pipeline` function shows how the
+pieces fit together.
+"""
+
+from __future__ import annotations
+
+import re
+import warnings
+from pathlib import Path
+from typing import Any, List, Mapping, Tuple
+
+import nibabel as nib
+import numpy as np
+import pandas as pd
+import torch
+from nilearn.image import resample_img
+from nilearn.maskers import NiftiMasker
+
+from neurovlm.data import fetch_data, get_data_dir
+from neurovlm.train import which_device
+from neurovlm.retrieval_resources import (
+    _load_dataframe,
+    _load_latent_text,
+    _load_latent_wiki,
+    _load_neuro_wiki,
+    _proj_head_image_infonce,
+    _proj_head_text_infonce,
+)
+data_dir = get_data_dir()
+
+warnings.filterwarnings("ignore")
+
+
+def search_papers_from_brain(
+    query: torch.Tensor,
+    top_k: int = 5,
+    show_titles: bool = False,
+) -> Tuple[str, List[str]]:
+    """Return context for the most similar papers to a brain-derived embedding."""
+    if not isinstance(query, torch.Tensor):
+        raise TypeError("query must be a torch.Tensor for brain-based retrieval")
+
+    df = _load_dataframe()
+    latent_text, latent_pmids = _load_latent_text()
+    proj_head_img = _proj_head_image_infonce()
+    proj_head_text = _proj_head_text_infonce()
+
+    proj_img = proj_head_img(query).squeeze(0)
+    proj_img = proj_img / proj_img.norm()
+
+    text_embeddings = latent_text / latent_text.norm(dim=1)[:, None]
+    proj_text = proj_head_text(text_embeddings)
+    proj_text = proj_text / proj_text.norm(dim=1)[:, None]
+
+    cos_sim = proj_text @ proj_img
+
+    inds = torch.argsort(cos_sim, descending=True)
+    inds_top = inds[:top_k].tolist()
+    pmids_top = [latent_pmids[i] for i in inds_top]
+
+    if "pmid" in df.columns:
+        pmid_lookup = df.drop_duplicates("pmid").set_index("pmid", drop=False)
+        selected_rows = []
+        for pmid in pmids_top:
+            try:
+                row = pmid_lookup.loc[pmid]
+                if isinstance(row, pd.DataFrame):
+                    row = row.iloc[0]
+                selected_rows.append(row)
+            except KeyError:
+                print(f"PMID {pmid} not found in DataFrame.")
+                continue
+        rows = pd.DataFrame(selected_rows) if selected_rows else df.iloc[inds_top]
+    else:
+        rows = df.iloc[inds_top]
+
+    pieces = []
+    title_col = "name" if "name" in rows.columns else ("title" if "title" in rows.columns else None)
+    titles: List[str]
+    if title_col is not None:
+        titles = rows[title_col].astype(str).tolist()
+    else:
+        titles = ["Untitled"] * len(rows)
+
+    for idx, (_, row) in enumerate(rows.iterrows(), start=1):
+        title = (
+            str(row["name"]) if "name" in rows.columns else str(row.get("title", "Untitled"))
+        )
+        desc = str(row.get("description", "")).replace("\n", " ")
+        desc = re.sub(r"\s+", " ", desc).strip()
+        pieces.append(f"[{idx}] {title}\n{desc}\n")
+
+    if show_titles:
+        print("Top matches:")
+        for idx, title in enumerate(titles, start=1):
+            print(f"{idx}. {title}")
+
+    papers_context = "\n".join(pieces)
+    return papers_context, titles
+
+
+def search_wiki_from_brain(
+    query: torch.Tensor,
+    top_k: int = 2,
+    show_titles: bool = False,
+) -> Tuple[str, List[str]]:
+    """Return context for the most similar NeuroWiki entries to a brain-derived embedding."""
+    if not isinstance(query, torch.Tensor):
+        raise TypeError("query must be a torch.Tensor for brain-based retrieval")
+
+    df = _load_neuro_wiki()
+    latent_wiki, latent_ids = _load_latent_wiki()
+
+    proj_head_img = _proj_head_image_infonce()
+    proj_head_text = _proj_head_text_infonce()
+
+    proj_img = proj_head_img(query).squeeze(0)
+    proj_img = proj_img / proj_img.norm()
+
+    wiki_embed = latent_wiki / latent_wiki.norm(dim=1)[:, None]
+    proj_wiki = proj_head_text(wiki_embed)
+    proj_wiki = proj_wiki / proj_wiki.norm(dim=1)[:, None]
+
+    cos_sim = proj_wiki @ proj_img
+
+    inds = torch.argsort(cos_sim, descending=True)
+    inds_top = inds[:top_k].tolist()
+    ids_top = [latent_ids[i] for i in inds_top]
+
+    missing_columns = [col for col in ("id", "title", "summary") if col not in df.columns]
+    if missing_columns:
+        raise ValueError(
+            f"NeuroWiki DataFrame is missing required columns: {', '.join(missing_columns)}"
+        )
+
+    id_lookup = df.drop_duplicates("id").set_index("id", drop=False)
+    selected_rows = []
+    for entry_id in ids_top:
+        try:
+            row = id_lookup.loc[entry_id]
+            if isinstance(row, pd.DataFrame):
+                row = row.iloc[0]
+            selected_rows.append(row)
+        except KeyError:
+            continue
+
+    rows = pd.DataFrame(selected_rows) if selected_rows else df.iloc[inds_top]
+
+    pieces = []
+    titles: List[str] = []
+    for idx, (_, row) in enumerate(rows.iterrows(), start=1):
+        title = str(row["title"]) if pd.notna(row["title"]) else "Untitled"
+        titles.append(title)
+        summary = str(row["summary"]) if pd.notna(row["summary"]) else ""
+        summary = re.sub(r"\s+", " ", summary).strip()
+        pieces.append(f"[{idx}] {title}\n{summary}\n")
+
+    if show_titles:
+        print("Top matches:")
+        for idx, title in enumerate(titles, start=1):
+            print(f"{idx}. {title}")
+
+    wiki_context = "\n".join(pieces)
+    return wiki_context, titles
+
+
+def load_metadata(data_dir: Path | str | None = data_dir) -> dict[str, pd.DataFrame]:
+    """
+    Load publication metadata used to map latent vectors to textual data.
+
+    Parameters
+    ----------
+    data_dir:
+        Optional path returned by :func:`fetch_data`. When omitted the data
+        directory is fetched (or validated) automatically.
+    """
+    root = Path(fetch_data() if data_dir is None else data_dir)
+    df_pubs = pd.read_parquet(root / "publications_more.parquet")
+    df_coords = pd.read_parquet(root / "coordinates.parquet")
+    return {"publications": df_pubs, "coordinates": df_coords}
+
+
+def load_models(
+    autoencoder_path: Path | str = Path(data_dir) / "autoencoder_sparse.pt",
+    latent_paper_path: Path | str = Path(data_dir) / "latent_specter2_adhoc.pt",
+    latent_wiki_path: Path | str = Path(data_dir) / "latent_specter_wiki.pt",
+    proj_head_mse_adhoc_path: Path | str = Path(data_dir) / "proj_head_mse_sparse_adhoc.pt",
+    proj_head_img_infonce_path: Path | str = Path(data_dir) / "proj_head_image_infonce.pt",
+    proj_head_text_infonce_path: Path | str = Path(data_dir) / "proj_head_text_infonce.pt",
+    device: torch.device | None = None,
+) -> dict[str, torch.nn.Module | torch.Tensor]:
+    """
+    Load the trained NeuroVLM components required for the brain-to-text task.
+
+    Returns a dictionary containing encoder/decoder models and cached latent
+    representations. All models are moved to the requested ``device``.
+    """
+    target_device = device if device is not None else which_device()
+
+    autoencoder = torch.load(
+        autoencoder_path, weights_only=False
+    ).to(target_device)
+   
+    proj_head_mse_adhoc = torch.load(
+        proj_head_mse_adhoc_path, weights_only=False
+    ).to(target_device)
+    proj_head_img_infonce = torch.load(
+        proj_head_img_infonce_path, weights_only=False
+    ).to(target_device)
+    proj_head_text_infonce = torch.load(
+        proj_head_text_infonce_path, weights_only=False
+    ).to(target_device)
+
+    latent_paper_dict = torch.load(
+        latent_paper_path, weights_only=False
+    ).to(target_device)
+    latent_paper = latent_paper_dict['latent']
+    latent_pmid = latent_paper_dict['pmid']
+
+    latent_wiki_dict = torch.load(
+        latent_wiki_path, weights_only=False
+    ).to(target_device)
+    latent_wiki = latent_wiki_dict['latent']
+    latent_wikiid = latent_wiki_dict['id']
+
+    return {
+        "autoencoder": autoencoder,
+        "proj_head": {"mse_adhoc": proj_head_mse_adhoc,
+                      "img_infonce": proj_head_img_infonce,
+                      "text_infonce": proj_head_text_infonce},
+        "latent_paper": latent_paper,
+        "latent_paper_ids": latent_pmid,
+        "latent_wiki": latent_wiki,
+        "latent_wiki_ids": latent_wikiid,
+    }
+
+
+def _load_mask_bundle(
+    data_dir: Path | str | None = None,
+) -> tuple[dict[str, Any], nib.Nifti1Image, NiftiMasker]:
+    """Return mask arrays, image, and fitted masker."""
+    root = Path(fetch_data() if data_dir is None else data_dir)
+    mask_arrays = np.load(root / "mask.npz", allow_pickle=True)
+    mask_img = nib.Nifti1Image(
+        mask_arrays["mask"].astype(float),
+        mask_arrays["affine"],
+    )
+    masker = NiftiMasker(mask_img=mask_img, dtype=np.float32).fit()
+    return mask_arrays, mask_img, masker
+
+
+def _resample_to_mask(
+    img: nib.Nifti1Image,
+    mask_arrays: Mapping[str, Any],
+) -> nib.Nifti1Image:
+    """Resample an image to match the project mask affine."""
+    img_arr = img.get_fdata()
+    unique_values = np.unique(img_arr)
+    is_binary = len(unique_values) == 2 and set(np.round(unique_values).tolist()) <= {0, 1}
+
+    if is_binary:
+        return resample_img(
+            img,
+            target_affine=mask_arrays["affine"],
+            interpolation="nearest",
+        )
+
+    img_resampled = resample_img(
+        img,
+        target_affine=mask_arrays["affine"],
+    )
+    img_resampled_arr = img_resampled.get_fdata()
+    img_resampled_arr[img_resampled_arr < 0] = 0.0
+    thresh = np.percentile(img_resampled_arr.flatten(), 95)
+    img_resampled_arr[img_resampled_arr < thresh] = 0.0
+    img_resampled_arr[img_resampled_arr >= thresh] = 1.0
+    return nib.Nifti1Image(
+        img_resampled_arr,
+        affine=mask_arrays["affine"],
+    )
+
+
+def resample_nifti(
+    nifti_img: nib.Nifti1Image,
+    data_dir: Path | str | None = None,
+) -> torch.Tensor:
+    """
+    Resample and flatten a NIfTI image using the project mask definition.
+    """
+    mask_arrays, _, masker = _load_mask_bundle(data_dir=data_dir)
+    img_resampled = _resample_to_mask(nifti_img, mask_arrays)
+
+    flattened = masker.transform(img_resampled)
+    flattened[flattened > 0] = 1
+    out_tensor = torch.tensor(flattened).squeeze(0)
+    return out_tensor
+
+
+def resample_array_nifti(
+    networks: Mapping[str, Mapping[str, Any]],
+    data_dir: Path | str | None = None,
+) -> dict[str, nib.Nifti1Image]:
+    """
+    Resample stored network arrays into NIfTI images aligned with the project mask.
+
+    Parameters
+    ----------
+    networks:
+        Mapping of network identifiers to dictionaries containing ``array`` and ``affine``.
+    data_dir:
+        Optional directory pointing to the cached NeuroVLM data (defaults to :func:`fetch_data`).
+
+    Returns
+    -------
+    dict[str, nib.Nifti1Image]
+        Resampled NIfTI images keyed by the original network identifier.
+    """
+    mask_arrays, _, _ = _load_mask_bundle(data_dir=data_dir)
+    networks_resampled: dict[str, nib.Nifti1Image] = {}
+
+    for key, payload in networks.items():
+        array = np.asarray(payload["array"])
+        affine = np.asarray(payload["affine"])
+        img = nib.Nifti1Image(array, affine=affine)
+        networks_resampled[key] = _resample_to_mask(img, mask_arrays)
+
+    return networks_resampled
+
+
+
+def generate_llm_response_from_brain(query_vector: torch.Tensor):
+    """
+    Generate an LLM response based on a brain-derived vector.
+
+    Parameters
+    ----------
+    query_vector : torch.Tensor
+        An already encoded brain-derived vector.
+
+    Returns
+    -------
+    str
+        The generated response from the LLM.
+    """
+    from neurovlm.llm_summary import generate_response
+
+    return generate_response(query_vector, top_k_similar_papers=5)
+
+
+__all__ = [
+    "load_metadata",
+    "load_models",
+    "resmaple_nifti",
+    "resmaple_array_nifti",
+    "search_papers_from_brain",
+    "search_wiki_from_brain",
+    "generate_llm_response_from_brain",
+]

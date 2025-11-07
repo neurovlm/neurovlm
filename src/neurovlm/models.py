@@ -176,13 +176,15 @@ class Specter:
             self.specter.load_adapter(adapter)
         else:
             # specter2 supported adapters: proximity, adhoc_query, regression, classification
+            # Map the proximity adapter explicitly to the HF id "allenai/specter2".
+            # Other adapters follow the naming pattern "{model}_{adapter}".
             if adapter == "proximity":
-                adapter = model # defaults to proximity
+                adapter_id = "allenai/specter2"
             else:
-                adapter = f"{model}_{adapter}"
+                adapter_id = f"{model}_{adapter}"
 
             self.specter = AutoAdapterModel.from_pretrained(f'{model}_base')
-            self.specter.load_adapter(adapter, source="hf", load_as="specter2", set_active=True)
+            self.specter.load_adapter(adapter_id, source="hf", load_as="specter2", set_active=True)
 
         if orthgonalize:
             self.ref = self.specter(**self.tokenizer("")).last_hidden_state[:, 0]
@@ -196,18 +198,42 @@ class Specter:
 
         Parameters
         ----------
-        X : list of str
-            Text to encode.
+        X : DataFrame | dict | list[str] | list[dict] | str
+            Text to encode. Accepts:
+            - pandas DataFrame with columns 'title' and 'abstract' (or 'summary').
+            - dict with keys 'title' and optional 'abstract'/'summary'.
+            - list of strings or list of dicts as above.
+            - a single string.
 
         Returns
         -------
         embeddings : torch.tensor
             Latent text encodings.
         """
-        if isinstance(X, (pd.DataFrame, dict)):
-            text = [i['title'] + self.sep_token + (i.get('abstract') or '') for i in X]
+        if isinstance(X, pd.DataFrame):
+            abs_col = (
+                'abstract' if 'abstract' in X.columns
+                else ('summary' if 'summary' in X.columns else None)
+            )
+            titles = X['title'].fillna('').astype(str).tolist() if 'title' in X.columns else [''] * len(X)
+            abstracts = (
+                X[abs_col].fillna('').astype(str).tolist() if abs_col is not None else [''] * len(X)
+            )
+            text = [t + self.sep_token + a for t, a in zip(titles, abstracts)]
+        elif isinstance(X, dict):
+            title = X.get('title') or ''
+            abstract = X.get('abstract') or X.get('summary') or ''
+            text = [f"{title}{self.sep_token}{abstract}"]
+        elif isinstance(X, (list, tuple)):
+            if len(X) > 0 and isinstance(X[0], dict):
+                text = [
+                    (d.get('title') or '') + self.sep_token + (d.get('abstract') or d.get('summary') or '')
+                    for d in X
+                ]
+            else:
+                text = list(X)
         else:
-            text = X
+            text = [str(X)]
 
         tokens  = self.tokenizer(text)
         embeddings = self.specter(**tokens).last_hidden_state[:, 0]
