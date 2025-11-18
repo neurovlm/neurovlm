@@ -200,7 +200,7 @@ def load_models(
     proj_head_img_infonce_path: Path | str = Path(data_dir) / "proj_head_image_infonce.pt",
     proj_head_text_infonce_path: Path | str = Path(data_dir) / "proj_head_text_infonce.pt",
     device: torch.device | None = None,
-) -> dict[str, torch.nn.Module | torch.Tensor]:
+) -> dict[str, dict[str, Any] | Any]:
     """
     Load the trained NeuroVLM components required for the brain-to-text task.
 
