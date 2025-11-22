@@ -146,7 +146,8 @@ class TextAligner(nn.Module):
 
 class Specter:
     """Wrapper for Specter model."""
-    def __init__(self, model="allenai/specter2_aug2023refresh", adapter="adhoc_query", orthgonalize=True):
+    def __init__(self, model="allenai/specter2_aug2023refresh", adapter="adhoc_query",
+                 orthgonalize=True, pooling=None):
         """Initialize.
 
         Parameters
@@ -166,6 +167,7 @@ class Specter:
             return_tensors="pt",
             return_token_type_ids=False,
         )
+        self.pooling = pooling
 
         if adapter is None:
             # no adapter
@@ -187,7 +189,8 @@ class Specter:
             self.specter.load_adapter(adapter_id, source="hf", load_as="specter2", set_active=True)
 
         if orthgonalize:
-            self.ref = self.specter(**self.tokenizer("")).last_hidden_state[:, 0]
+            tokens = self.tokenizer("")
+            self.ref = self.pool(self.specter(**tokens).last_hidden_state, tokens["attention_mask"], method=self.pooling)
             self.ref= self.ref / self.ref.norm()
             self.f_transform = self.orthogonalize
         else:
@@ -235,12 +238,37 @@ class Specter:
         else:
             text = [str(X)]
 
-        tokens  = self.tokenizer(text)
-        embeddings = self.specter(**tokens).last_hidden_state[:, 0]
-        # embeddings = embeddings / embeddings.norm()
+        tokens = self.tokenizer(text)
+        embeddings = self.pool(self.specter(**tokens).last_hidden_state, tokens["attention_mask"], method=self.pooling)
         embeddings = self.f_transform(embeddings)
         return embeddings
 
     def orthogonalize(self, embedding):
         proj = (embedding @ self.ref.T) * self.ref
         return embedding - proj
+
+    def pool(self, hidden, attention_mask, method=None):
+        """Pool embedding matrix."""
+
+        mask = attention_mask.unsqueeze(-1)
+
+        if method == "mean": # mean pooling
+            emb = (hidden * mask).sum(dim=1) / mask.sum(dim=1)
+        elif method == "max": # max pooling
+            hidden_masked = hidden.masked_fill(mask == 0, -1e9)
+            emb = hidden_masked.max(dim=1).values
+        elif method == "mean_max": # mean + max
+            mean_emb = (hidden * mask).sum(dim=1) / mask.sum(dim=1)
+            hidden_masked = hidden.masked_fill(mask == 0, -1e9)
+            max_emb = hidden_masked.max(dim=1).values
+            emb = torch.cat([mean_emb, max_emb], dim=-1)
+        elif method == "attention": # attention pooling (self-weighted)
+            query = (hidden * mask).sum(dim=1, keepdim=True) / mask.sum(dim=1, keepdim=True)
+            scores = torch.matmul(hidden, query.transpose(1, 2)).squeeze(-1)
+            scores = scores.masked_fill(attention_mask == 0, -1e9)
+            weights = F.softmax(scores, dim=-1).unsqueeze(-1)
+            emb = (hidden * weights).sum(dim=1)
+        else:
+            emb = hidden[:, 0]
+
+        return emb
