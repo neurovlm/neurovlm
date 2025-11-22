@@ -14,6 +14,9 @@ import numpy as np
 import pandas as pd
 import torch
 
+import nibabel as nib
+from nilearn import maskers
+
 from neurovlm.data import get_data_dir
 from neurovlm.models import Specter
 
@@ -24,6 +27,7 @@ __all__ = [
     "_load_latent_text",
     "_load_latent_wiki",
     "_load_autoencoder",
+    "_load_masker",
     "_proj_head_image_infonce",
     "_proj_head_mse_adhoc",
     "_proj_head_text_infonce",
@@ -97,6 +101,16 @@ def _load_autoencoder() -> torch.nn.Module:
 
 
 @lru_cache(maxsize=1)
+def _load_masker() -> nib.Nifti1Image:
+    """Load mask."""
+    data_dir = get_data_dir()
+    mask_arrays = np.load(data_dir / "mask.npz", allow_pickle=True)
+    mask_img = nib.Nifti1Image(mask_arrays["mask"].astype(float),  mask_arrays["affine"])
+    masker = maskers.NiftiMasker(mask_img=mask_img, dtype=np.float32).fit()
+    return masker
+
+
+@lru_cache(maxsize=1)
 def _proj_head_image_infonce() -> torch.nn.Module:
     """Load and return the image projection head."""
     data_dir = get_data_dir()
@@ -118,4 +132,3 @@ def _proj_head_text_infonce() -> torch.nn.Module:
     data_dir = get_data_dir()
     proj_head = torch.load(data_dir / "proj_head_text_infonce.pt", weights_only=False).to("cpu")
     return proj_head
-
