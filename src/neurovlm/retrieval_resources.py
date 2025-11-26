@@ -24,9 +24,11 @@ from neurovlm.models import Specter
 __all__ = [
     "_load_dataframe",
     "_load_neuro_wiki",
+    "_load_cogatlas_dataset",
     "_load_specter",
     "_load_latent_text",
     "_load_latent_wiki",
+    "_load_latent_cogatlas",
     "_load_autoencoder",
     "_load_masker",
     "_load_networks",
@@ -53,6 +55,17 @@ def _load_neuro_wiki() -> pd.DataFrame:
     """Load the NeuroWiki DataFrame with a parquet engine fallback."""
     data_dir = get_data_dir()
     parquet_path = data_dir / "neurowiki_with_ids.parquet"
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover - depends on local engines
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
+@lru_cache(maxsize=1)
+def _load_cogatlas_dataset() -> pd.DataFrame:
+    """Load the CogAtlas DataFrame with a parquet engine fallback."""
+    data_dir = get_data_dir()
+    parquet_path = data_dir / "cogatlas.parquet"
     try:
         return pd.read_parquet(parquet_path, engine="pyarrow")
     except Exception as exc:  # pragma: no cover - depends on local engines
@@ -92,6 +105,20 @@ def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
     latent = latent_payload["latent"]
     latent_id = np.asarray(latent_payload["id"])
     return latent, latent_id
+
+
+@lru_cache(maxsize=1)
+def _load_latent_cogatlas() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load unit-normalized latent cognitive atlas embeddings and their term IDs."""
+    data_dir = get_data_dir()
+    latent_payload = torch.load(
+        data_dir / "latent_cogatlas.pt",
+        weights_only=False,
+    )
+
+    latent = latent_payload["latent"]
+    latent_terms = np.asarray(latent_payload["term"])
+    return latent, latent_terms
 
 
 @lru_cache(maxsize=1)
