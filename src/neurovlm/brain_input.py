@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 import warnings
 from pathlib import Path
-from typing import Any, List, Mapping, Tuple
+from typing import Any, List, Mapping, Tuple, LiteralString
 
 import nibabel as nib
 import numpy as np
@@ -34,7 +34,9 @@ from neurovlm.retrieval_resources import (
     _load_dataframe,
     _load_latent_text,
     _load_latent_wiki,
+    _load_latent_cogatlas,
     _load_neuro_wiki,
+    _load_cogatlas_dataset,
     _proj_head_image_infonce,
     _proj_head_text_infonce,
 )
@@ -47,7 +49,7 @@ def search_papers_from_brain(
     query: torch.Tensor,
     top_k: int = 5,
     show_titles: bool = False,
-) -> Tuple[str, List[str]]:
+) -> tuple[LiteralString, list[str], list]:
     """Return context for the most similar papers to a brain-derived embedding."""
     if not isinstance(query, torch.Tensor):
         raise TypeError("query must be a torch.Tensor for brain-based retrieval")
@@ -68,6 +70,7 @@ def search_papers_from_brain(
 
     inds = torch.argsort(cos_sim, descending=True)
     inds_top = inds[:top_k].tolist()
+    cos_sim_top = cos_sim[inds_top].detach().cpu().numpy()
     pmids_top = [latent_pmids[i] for i in inds_top]
 
     if "pmid" in df.columns:
@@ -108,14 +111,14 @@ def search_papers_from_brain(
             print(f"{idx}. {title}")
 
     papers_context = "\n".join(pieces)
-    return papers_context, titles
+    return papers_context, titles, cos_sim_top
 
 
 def search_wiki_from_brain(
     query: torch.Tensor,
     top_k: int = 2,
     show_titles: bool = False,
-) -> Tuple[str, List[str]]:
+) -> Tuple[str, List[str], np.ndarray]:
     """Return context for the most similar NeuroWiki entries to a brain-derived embedding."""
     if not isinstance(query, torch.Tensor):
         raise TypeError("query must be a torch.Tensor for brain-based retrieval")
@@ -137,6 +140,7 @@ def search_wiki_from_brain(
 
     inds = torch.argsort(cos_sim, descending=True)
     inds_top = inds[:top_k].tolist()
+    cos_sim_top = cos_sim[inds_top].detach().cpu().numpy()
     ids_top = [latent_ids[i] for i in inds_top]
 
     missing_columns = [col for col in ("id", "title", "summary") if col not in df.columns]
@@ -173,7 +177,76 @@ def search_wiki_from_brain(
             print(f"{idx}. {title}")
 
     wiki_context = "\n".join(pieces)
-    return wiki_context, titles
+    return wiki_context, titles, cos_sim_top
+
+
+def search_cogatlas_from_brain(
+    query: torch.Tensor,
+    top_k: int = 5,
+    show_titles: bool = False,
+) -> Tuple[str, List[str], np.ndarray]:
+    """Return context for the most similar Cognitive Atlas terms to a brain-derived embedding."""
+    if not isinstance(query, torch.Tensor):
+        raise TypeError("query must be a torch.Tensor for brain-based retrieval")
+
+    df = _load_cogatlas_dataset()
+    latent_cogatlas, latent_terms = _load_latent_cogatlas()
+
+    proj_head_img = _proj_head_image_infonce()
+    proj_head_text = _proj_head_text_infonce()
+
+    proj_img = proj_head_img(query).squeeze(0)
+    proj_img = proj_img / proj_img.norm()
+
+    cogatlas_embed = latent_cogatlas / latent_cogatlas.norm(dim=1)[:, None]
+    proj_cogatlas = proj_head_text(cogatlas_embed)
+    proj_cogatlas = proj_cogatlas / proj_cogatlas.norm(dim=1)[:, None]
+
+    cos_sim = proj_cogatlas @ proj_img
+
+    inds = torch.argsort(cos_sim, descending=True)
+    inds_top = inds[:top_k].tolist()
+    cos_sim_top = cos_sim[inds_top].detach().cpu().numpy()
+    terms_top = [latent_terms[i] for i in inds_top]
+
+    missing_columns = [col for col in ("term", "definition") if col not in df.columns]
+    if missing_columns:
+        raise ValueError(
+            f"CogAtlas DataFrame is missing required columns: {', '.join(missing_columns)}"
+        )
+
+    # Ensure term column is lowercase for matching
+    df["term"] = df["term"].str.lower()
+    term_lookup = df.drop_duplicates("term").set_index("term", drop=False)
+    selected_rows = []
+    for term in terms_top:
+        try:
+            row = term_lookup.loc[term]
+            if isinstance(row, pd.DataFrame):
+                row = row.iloc[0]
+            selected_rows.append(row)
+        except KeyError:
+            print(f"Term '{term}' not found in CogAtlas DataFrame.")
+            continue
+
+    rows = pd.DataFrame(selected_rows) if selected_rows else df.iloc[inds_top]
+
+    pieces = []
+    terms: List[str] = []
+    for idx, (_, row) in enumerate(rows.iterrows(), start=1):
+        term = str(row["term"]) if pd.notna(row["term"]) else "Untitled"
+        terms.append(term)
+        definition = str(row["definition"]) if pd.notna(row["definition"]) else ""
+        definition = re.sub(r"\s+", " ", definition).strip()
+        pieces.append(f"[{idx}] {term}\n{definition}\n")
+
+    if show_titles:
+        print("Top matches:")
+        for idx, term in enumerate(terms, start=1):
+            print(f"{idx}. {term}")
+
+    cogatlas_context = "\n".join(pieces)
+    return cogatlas_context, terms, cos_sim_top
 
 
 def load_metadata(data_dir: Path | str | None = data_dir) -> dict[str, pd.DataFrame]:
@@ -366,5 +439,6 @@ __all__ = [
     "resmaple_array_nifti",
     "search_papers_from_brain",
     "search_wiki_from_brain",
+    "search_cogatlas_from_brain",
     "generate_llm_response_from_brain",
 ]
