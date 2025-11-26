@@ -17,12 +17,14 @@ from neurovlm.retrieval_resources import (
     _load_dataframe,
     _load_latent_text,
     _load_latent_wiki,
+    _load_latent_cogatlas,
     _load_neuro_wiki,
+    _load_cogatlas_dataset,
     _load_specter,
     _proj_head_text_infonce
 )
 
-__all__ = ["search_papers_from_text", "search_wiki_from_text", "generate_llm_response_from_text"]
+__all__ = ["search_papers_from_text", "search_wiki_from_text", "search_cogatlas_from_text", "generate_llm_response_from_text"]
 
 
 def search_papers_from_text(
@@ -157,6 +159,73 @@ def search_wiki_from_text(
     wiki_context = "\n".join(pieces)
     return wiki_context, titles
 
+
+def search_cogatlas_from_text(
+    query: str,
+    top_k: int = 5,
+    show_titles: bool = False,
+) -> Tuple[str, List[str]]:
+    """Return a context block of top Cognitive Atlas terms for a text query."""
+    if not isinstance(query, str):
+        raise TypeError("query must be a string for text-based retrieval")
+
+    df = _load_cogatlas_dataset()
+    latent_cogatlas, latent_terms = _load_latent_cogatlas()
+
+    specter = _load_specter()
+    proj_head = _proj_head_text_infonce()
+
+    encoded_query = specter(query)[0].detach().to("cpu")
+    encoded_query = encoded_query / encoded_query.norm()
+    proj_query = proj_head(encoded_query)
+    proj_query = proj_query / proj_query.norm()
+
+    cogatlas_embed = latent_cogatlas / latent_cogatlas.norm(dim=1)[:, None]
+    proj_cogatlas = proj_head(cogatlas_embed)
+    proj_cogatlas = proj_cogatlas / proj_cogatlas.norm(dim=1)[:, None]
+    cos_sim = proj_cogatlas @ proj_query
+
+    inds = torch.argsort(cos_sim, descending=True)
+    inds_top = inds[:top_k].tolist()
+    terms_top = [latent_terms[i] for i in inds_top]
+
+    missing_columns = [col for col in ("term", "definition") if col not in df.columns]
+    if missing_columns:
+        raise ValueError(
+            f"CogAtlas DataFrame is missing required columns: {', '.join(missing_columns)}"
+        )
+
+    # Ensure term column is lowercase for matching
+    df["term"] = df["term"].str.lower()
+    term_lookup = df.drop_duplicates("term").set_index("term", drop=False)
+    selected_rows = []
+    for term in terms_top:
+        try:
+            row = term_lookup.loc[term]
+            if isinstance(row, pd.DataFrame):
+                row = row.iloc[0]
+            selected_rows.append(row)
+        except KeyError:
+            continue
+
+    rows = pd.DataFrame(selected_rows) if selected_rows else df.iloc[inds_top]
+
+    pieces = []
+    terms: List[str] = []
+    for idx, (_, row) in enumerate(rows.iterrows(), start=1):
+        term = str(row["term"]) if pd.notna(row["term"]) else "Untitled"
+        terms.append(term)
+        definition = str(row["definition"]) if pd.notna(row["definition"]) else ""
+        definition = re.sub(r"\s+", " ", definition).strip()
+        pieces.append(f"[{idx}] {term}\n{definition}\n")
+
+    if show_titles:
+        print("Top matches:")
+        for idx, term in enumerate(terms, start=1):
+            print(f"{idx}. {term}")
+
+    cogatlas_context = "\n".join(pieces)
+    return cogatlas_context, terms
 
 
 def generate_llm_response_from_text(query: str):
