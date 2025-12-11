@@ -20,7 +20,8 @@ dependencies = [
   "nimare",
   "tqdm",
   "matplotlib",
-  "pyarrow"
+  "pyarrow",
+  "tqdm"
 ]
 authors = [
   { name="Ryan Hammonds", email="ryanphammonds@gmail.com" },
