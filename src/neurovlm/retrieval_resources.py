@@ -96,7 +96,7 @@ def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
 def _load_autoencoder() -> torch.nn.Module:
     """Load and return the text encoder model."""
     data_dir = get_data_dir()
-    encoder = torch.load(data_dir / "autoencoder_sparse.pt", weights_only=False).to("cpu")
+    encoder = torch.load(data_dir / "autoencoder_sparse.pt", weights_only=False, map_location="cpu")
     return encoder
 
 
@@ -114,7 +114,7 @@ def _load_masker() -> nib.Nifti1Image:
 def _proj_head_image_infonce() -> torch.nn.Module:
     """Load and return the image projection head."""
     data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_image_infonce.pt", weights_only=False).to("cpu")
+    proj_head = torch.load(data_dir / "proj_head_image_infonce.pt", weights_only=False, map_location="cpu")
     return proj_head
 
 
@@ -122,7 +122,7 @@ def _proj_head_image_infonce() -> torch.nn.Module:
 def _proj_head_mse_adhoc() -> torch.nn.Module:
     """Load and return the MSE projection head."""
     data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_mse_sparse_adhoc.pt", weights_only=False).to("cpu")
+    proj_head = torch.load(data_dir / "proj_head_mse_sparse_adhoc.pt", weights_only=False, map_location="cpu")
     return proj_head
 
 
@@ -130,5 +130,5 @@ def _proj_head_mse_adhoc() -> torch.nn.Module:
 def _proj_head_text_infonce() -> torch.nn.Module:
     """Load and return the text projection head."""
     data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_text_infonce.pt", weights_only=False).to("cpu")
+    proj_head = torch.load(data_dir / "proj_head_text_infonce.pt", weights_only=False, map_location="cpu")
     return proj_head
