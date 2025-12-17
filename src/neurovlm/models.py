@@ -147,7 +147,7 @@ class TextAligner(nn.Module):
 class Specter:
     """Wrapper for Specter model."""
     def __init__(self, model="allenai/specter2_aug2023refresh", adapter="adhoc_query",
-                 orthgonalize=True, pooling=None):
+                 orthgonalize=True, pooling=None, device="cpu"):
         """Initialize.
 
         Parameters
@@ -157,6 +157,7 @@ class Specter:
         adapter : {"adhoc_query", "classification", "regression", "proximity"}
             Adapter to attach to the model, for specific use cases.
         """
+        self.device = torch.device(device)
         tokenizer = AutoTokenizer.from_pretrained(f'{model}_base')
         self.sep_token = tokenizer.sep_token
         self.tokenizer = lambda text : tokenizer(
@@ -188,15 +189,22 @@ class Specter:
             self.specter = AutoAdapterModel.from_pretrained(f'{model}_base')
             self.specter.load_adapter(adapter_id, source="hf", load_as="specter2", set_active=True)
 
+        self.specter = self.specter.to(self.device).eval()
+
         if orthgonalize:
-            tokens = self.tokenizer("")
-            self.ref = self.pool(self.specter(**tokens).last_hidden_state, tokens["attention_mask"], method=self.pooling)
-            self.ref= self.ref / self.ref.norm()
+            with torch.inference_mode():
+                tokens = {k: v.to(self.device) for k, v in self.tokenizer("").items()}
+                self.ref = self.pool(
+                    self.specter(**tokens).last_hidden_state,
+                    tokens["attention_mask"],
+                    method=self.pooling
+                )
+                self.ref= self.ref / self.ref.norm()
             self.f_transform = self.orthogonalize
         else:
             self.f_transform = lambda i : i
 
-    def __call__(self, X):
+    def __call__(self, X: pd.DataFrame | dict | list | str) -> torch.Tensor:
         """Pass text through the model.
 
         Parameters
@@ -238,16 +246,21 @@ class Specter:
         else:
             text = [str(X)]
 
-        tokens = self.tokenizer(text)
-        embeddings = self.pool(self.specter(**tokens).last_hidden_state, tokens["attention_mask"], method=self.pooling)
-        embeddings = self.f_transform(embeddings)
+        tokens ={k: v.to(self.device) for k, v in self.tokenizer(text).items()}
+        with torch.inference_mode():
+            embeddings = self.pool(
+                self.specter(**tokens).last_hidden_state,
+                tokens["attention_mask"],
+                method=self.pooling
+            )
+            embeddings = self.f_transform(embeddings)
         return embeddings
 
-    def orthogonalize(self, embedding):
+    def orthogonalize(self, embedding: torch.Tensor) -> torch.Tensor:
         proj = (embedding @ self.ref.T) * self.ref
         return embedding - proj
 
-    def pool(self, hidden, attention_mask, method=None):
+    def pool(self, hidden: torch.Tensor, attention_mask: torch.Tensor, method: Optional[str]=None) -> torch.Tensor:
         """Pool embedding matrix."""
 
         mask = attention_mask.unsqueeze(-1)
@@ -272,3 +285,19 @@ class Specter:
             emb = hidden[:, 0]
 
         return emb
+
+
+class ConceptClf(nn.Module):
+    """Predict concepts from latent neuro embeddings."""
+    def __init__(self, d_out):
+        super().__init__()
+        self.seq = nn.Sequential(
+            nn.Linear(384, 768),
+            nn.ReLU(),
+            nn.Linear(768, 1526),
+            nn.ReLU(),
+            nn.Linear(1526, d_out)
+        )
+    def forward(self, X: torch.tensor):
+        return self.seq(X)
+        
