@@ -2,6 +2,7 @@
 from typing import Optional
 import numpy as np
 import torch
+from torch.nn import functional as F
 from skimage.metrics import structural_similarity as ssim
 from sklearn.metrics import mean_squared_error, f1_score
 
@@ -139,24 +140,24 @@ def recall_curve(latent_text: torch.Tensor, latent_image: torch.Tensor) -> tuple
     """
     # Unit vectors
     if not (latent_text.norm(dim=1) == 1).all():
-        latent_text_norm = latent_text / latent_text.norm(dim=1)[:, None]
+        latent_text_norm = F.normalize(latent_text, dim=1, eps=1e-8)
     else:
         latent_text_norm = latent_text
 
     if not (latent_image.norm(dim=1) == 1).all():
-        latent_image_norm = latent_image / latent_image.norm(dim=1)[:, None]
+        latent_image_norm = F.normalize(latent_image, dim=1, eps=1e-8)
     else:
         latent_image_norm = latent_image
-
+        
     # Text-to-image
     cos_t_to_i = latent_text_norm @ latent_image_norm.T
-    t_to_i = np.zeros(len(latent_text_norm))
+    t_to_i = np.zeros(latent_text_norm.shape[0])
     for k in range(len(latent_text_norm)):
         t_to_i[k] = recall_at_k(cos_t_to_i, k + 1)
 
     # Image-to-text
     cos_i_to_t = latent_image_norm @ latent_text_norm.T
-    i_to_t = np.zeros(len(latent_text_norm))
+    i_to_t = np.zeros(latent_image_norm.shape[0])
     for k in range(len(latent_text_norm)):
         i_to_t[k] = recall_at_k(cos_i_to_t, k + 1)
 
