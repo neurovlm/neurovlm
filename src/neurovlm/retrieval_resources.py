@@ -135,10 +135,10 @@ def _proj_head_image_infonce() -> torch.nn.Module:
 
 
 @lru_cache(maxsize=1)
-def _proj_head_mse() -> torch.nn.Module:
+def _proj_head_text_mse() -> torch.nn.Module:
     """Load and return the MSE projection head."""
     data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_mse.pt", weights_only=False, map_location="cpu")
+    proj_head = torch.load(data_dir / "proj_head_text_mse.pt", weights_only=False, map_location="cpu")
     return proj_head
 
 
