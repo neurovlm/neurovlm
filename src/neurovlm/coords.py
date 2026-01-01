@@ -49,5 +49,6 @@ def coords_to_vectors(df_coords: pd.DataFrame, fwhm: int) -> pd.DataFrame:
         kernel.transform(df, masker=masker, return_type="array")
     ).float() / kmax
     neuro_vectors = torch.clamp_max(neuro_vectors, 1) # clamp to (0, 1)
-
+    # neuro_vectors = neuro_vectors / neuro_vectors.max(dim=1, keepdim=True).values 
+    
     return neuro_vectors

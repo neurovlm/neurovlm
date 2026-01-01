@@ -9,10 +9,14 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Tuple
+import gzip, pickle
 
 import numpy as np
 import pandas as pd
 import torch
+
+import nibabel as nib
+from nilearn import maskers
 
 from neurovlm.data import get_data_dir
 from neurovlm.models import Specter
@@ -26,6 +30,8 @@ __all__ = [
     "_load_latent_wiki",
     "_load_latent_cogatlas",
     "_load_autoencoder",
+    "_load_masker",
+    "_load_networks",
     "_proj_head_image_infonce",
     "_proj_head_mse_adhoc",
     "_proj_head_text_infonce",
@@ -36,7 +42,7 @@ __all__ = [
 def _load_dataframe() -> pd.DataFrame:
     """Load the publications DataFrame with a parquet engine fallback."""
     data_dir = get_data_dir()
-    parquet_path = data_dir / "publications_more.parquet"
+    parquet_path = data_dir / "publications.parquet"
     try:
         return pd.read_parquet(parquet_path, engine="pyarrow")
     except Exception as exc:  # pragma: no cover - depends on local engines
@@ -119,23 +125,47 @@ def _load_latent_cogatlas() -> Tuple[torch.Tensor, np.ndarray]:
 def _load_autoencoder() -> torch.nn.Module:
     """Load and return the text encoder model."""
     data_dir = get_data_dir()
-    encoder = torch.load(data_dir / "autoencoder_sparse.pt", weights_only=False).to("cpu")
+    encoder = torch.load(data_dir / "autoencoder.pt", weights_only=False, map_location="cpu")
     return encoder
+
+
+@lru_cache(maxsize=1)
+def _load_masker() -> nib.Nifti1Image:
+    """Load mask."""
+    data_dir = get_data_dir()
+    mask_arrays = np.load(data_dir / "mask.npz", allow_pickle=True)
+    mask_img = nib.Nifti1Image(mask_arrays["mask"].astype(float),  mask_arrays["affine"])
+    masker = maskers.NiftiMasker(mask_img=mask_img, dtype=np.float32).fit()
+    return masker
+
+
+@lru_cache(maxsize=1)
+def _load_networks() -> torch.nn.Module:
+    """Load network atlases."""
+    with gzip.open(get_data_dir() / "networks_arrays.pkl.gz", "rb") as f:
+        networks = pickle.load(f)
+
+    network_imgs = []
+    for k in networks.keys():
+        for a in networks[k].keys():
+            network_imgs.append((k, a, nib.Nifti1Image(networks[k][a]["array"], affine=networks[k][a]["affine"])))
+
+    return networks
 
 
 @lru_cache(maxsize=1)
 def _proj_head_image_infonce() -> torch.nn.Module:
     """Load and return the image projection head."""
     data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_image_infonce.pt", weights_only=False).to("cpu")
+    proj_head = torch.load(data_dir / "proj_head_image_infonce.pt", weights_only=False, map_location="cpu")
     return proj_head
 
 
 @lru_cache(maxsize=1)
-def _proj_head_mse_adhoc() -> torch.nn.Module:
+def _proj_head_text_mse() -> torch.nn.Module:
     """Load and return the MSE projection head."""
     data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_mse_sparse_adhoc.pt", weights_only=False).to("cpu")
+    proj_head = torch.load(data_dir / "proj_head_text_mse.pt", weights_only=False, map_location="cpu")
     return proj_head
 
 
@@ -143,6 +173,5 @@ def _proj_head_mse_adhoc() -> torch.nn.Module:
 def _proj_head_text_infonce() -> torch.nn.Module:
     """Load and return the text projection head."""
     data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_text_infonce.pt", weights_only=False).to("cpu")
+    proj_head = torch.load(data_dir / "proj_head_text_infonce.pt", weights_only=False, map_location="cpu")
     return proj_head
-
