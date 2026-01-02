@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 import warnings
 from pathlib import Path
-from typing import Any, List, Mapping, Tuple, LiteralString
+from typing import Any, List, Mapping, Tuple, LiteralString, Literal
 
 import nibabel as nib
 import numpy as np
@@ -39,6 +39,10 @@ from neurovlm.retrieval_resources import (
     _load_cogatlas_dataset,
     _proj_head_image_infonce,
     _proj_head_text_infonce,
+    _load_latent_cogatlas_disorder,
+    _load_latent_cogatlas_task,
+    _load_cogatlas_disorder_dataset,
+    _load_cogatlas_task_dataset
 )
 data_dir = get_data_dir()
 
@@ -184,13 +188,23 @@ def search_cogatlas_from_brain(
     query: torch.Tensor,
     top_k: int = 5,
     show_titles: bool = False,
+    category: Literal["cogatlas", "cogatlas_task", "cogatlas_disorder"] = "cogatlas",
 ) -> Tuple[str, List[str], np.ndarray]:
     """Return context for the most similar Cognitive Atlas terms to a brain-derived embedding."""
     if not isinstance(query, torch.Tensor):
         raise TypeError("query must be a torch.Tensor for brain-based retrieval")
 
-    df = _load_cogatlas_dataset()
-    latent_cogatlas, latent_terms = _load_latent_cogatlas()
+    if category == "cogatlas":
+        df = _load_cogatlas_dataset()
+        latent_cogatlas, latent_terms = _load_latent_cogatlas()
+    elif category == "cogatlas_task":
+        df = _load_cogatlas_task_dataset(filtered=True)
+        latent_cogatlas, latent_terms = _load_latent_cogatlas_task()
+    elif category == "cogatlas_disorder":
+        df = _load_cogatlas_disorder_dataset()
+        latent_cogatlas, latent_terms = _load_latent_cogatlas_disorder()
+    else:
+        raise ValueError()
 
     proj_head_img = _proj_head_image_infonce()
     proj_head_text = _proj_head_text_infonce()
@@ -263,61 +277,6 @@ def load_metadata(data_dir: Path | str | None = data_dir) -> dict[str, pd.DataFr
     df_pubs = pd.read_parquet(root / "publications_more.parquet")
     df_coords = pd.read_parquet(root / "coordinates.parquet")
     return {"publications": df_pubs, "coordinates": df_coords}
-
-
-def load_models(
-    autoencoder_path: Path | str = Path(data_dir) / "autoencoder_sparse.pt",
-    latent_paper_path: Path | str = Path(data_dir) / "latent_specter2_adhoc.pt",
-    latent_wiki_path: Path | str = Path(data_dir) / "latent_specter_wiki.pt",
-    proj_head_mse_adhoc_path: Path | str = Path(data_dir) / "proj_head_mse_sparse_adhoc.pt",
-    proj_head_img_infonce_path: Path | str = Path(data_dir) / "proj_head_image_infonce.pt",
-    proj_head_text_infonce_path: Path | str = Path(data_dir) / "proj_head_text_infonce.pt",
-    device: torch.device | None = None,
-) -> dict[str, dict[str, Any] | Any]:
-    """
-    Load the trained NeuroVLM components required for the brain-to-text task.
-
-    Returns a dictionary containing encoder/decoder models and cached latent
-    representations. All models are moved to the requested ``device``.
-    """
-    target_device = device if device is not None else which_device()
-
-    autoencoder = torch.load(
-        autoencoder_path, weights_only=False
-    ).to(target_device)
-   
-    proj_head_mse_adhoc = torch.load(
-        proj_head_mse_adhoc_path, weights_only=False
-    ).to(target_device)
-    proj_head_img_infonce = torch.load(
-        proj_head_img_infonce_path, weights_only=False
-    ).to(target_device)
-    proj_head_text_infonce = torch.load(
-        proj_head_text_infonce_path, weights_only=False
-    ).to(target_device)
-
-    latent_paper_dict = torch.load(
-        latent_paper_path, weights_only=False
-    ).to(target_device)
-    latent_paper = latent_paper_dict['latent']
-    latent_pmid = latent_paper_dict['pmid']
-
-    latent_wiki_dict = torch.load(
-        latent_wiki_path, weights_only=False
-    ).to(target_device)
-    latent_wiki = latent_wiki_dict['latent']
-    latent_wikiid = latent_wiki_dict['id']
-
-    return {
-        "autoencoder": autoencoder,
-        "proj_head": {"mse_adhoc": proj_head_mse_adhoc,
-                      "img_infonce": proj_head_img_infonce,
-                      "text_infonce": proj_head_text_infonce},
-        "latent_paper": latent_paper,
-        "latent_paper_ids": latent_pmid,
-        "latent_wiki": latent_wiki,
-        "latent_wiki_ids": latent_wikiid,
-    }
 
 
 def _load_mask_bundle(
@@ -434,9 +393,8 @@ def generate_llm_response_from_brain(query_vector: torch.Tensor):
 
 __all__ = [
     "load_metadata",
-    "load_models",
-    "resmaple_nifti",
-    "resmaple_array_nifti",
+    "resample_nifti",
+    "resample_array_nifti",
     "search_papers_from_brain",
     "search_wiki_from_brain",
     "search_cogatlas_from_brain",

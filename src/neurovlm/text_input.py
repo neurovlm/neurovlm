@@ -8,8 +8,9 @@ blocks suitable for prompting an LLM.
 from __future__ import annotations
 
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Literal, Union
 
+import numpy as np
 import pandas as pd
 import torch
 
@@ -18,8 +19,12 @@ from neurovlm.retrieval_resources import (
     _load_latent_text,
     _load_latent_wiki,
     _load_latent_cogatlas,
+    _load_latent_cogatlas_disorder,
+    _load_latent_cogatlas_task,
     _load_neuro_wiki,
     _load_cogatlas_dataset,
+    _load_cogatlas_disorder_dataset,
+    _load_cogatlas_task_dataset,
     _load_specter,
     _proj_head_text_infonce
 )
@@ -161,24 +166,59 @@ def search_wiki_from_text(
 
 
 def search_cogatlas_from_text(
-    query: str,
+    query: Union[str, torch.Tensor],
     top_k: int = 5,
     show_titles: bool = False,
-) -> Tuple[str, List[str]]:
-    """Return a context block of top Cognitive Atlas terms for a text query."""
-    if not isinstance(query, str):
-        raise TypeError("query must be a string for text-based retrieval")
+    category: Literal["cogatlas", "cogatlas_task", "cogatlas_disorder"] = "cogatlas",
+) -> Tuple[str, List[str], np.ndarray]:
+    """Return a context block of top Cognitive Atlas terms for a text query or embedding.
 
-    df = _load_cogatlas_dataset()
-    latent_cogatlas, latent_terms = _load_latent_cogatlas()
+    Parameters
+    ----------
+    query : str or torch.Tensor
+        Either a text string or a pre-computed tensor embedding (768-dim from SPECTER).
+    top_k : int
+        Number of top results to return.
+    show_titles : bool
+        Whether to print the top matches.
+    category : str
+        Which category to search: "cogatlas" (concepts), "cogatlas_task", or "cogatlas_disorder".
 
-    specter = _load_specter()
+    Returns
+    -------
+    Tuple[str, List[str], np.ndarray]
+        Context string, list of terms, and cosine similarity scores.
+    """
+    if not isinstance(query, (str, torch.Tensor)):
+        raise TypeError("query must be a string or torch.Tensor for text-based retrieval")
+
+    # Load appropriate dataset and embeddings based on category
+    if category == "cogatlas":
+        df = _load_cogatlas_dataset()
+        latent_cogatlas, latent_terms = _load_latent_cogatlas()
+    elif category == "cogatlas_task":
+        df = _load_cogatlas_task_dataset(filtered=True)
+        latent_cogatlas, latent_terms = _load_latent_cogatlas_task()
+    elif category == "cogatlas_disorder":
+        df = _load_cogatlas_disorder_dataset()
+        latent_cogatlas, latent_terms = _load_latent_cogatlas_disorder()
+    else:
+        raise ValueError(f"Unknown category: {category}")
+
     proj_head = _proj_head_text_infonce()
 
-    encoded_query = specter(query)[0].detach().to("cpu")
-    encoded_query = encoded_query / encoded_query.norm()
-    proj_query = proj_head(encoded_query)
-    proj_query = proj_query / proj_query.norm()
+    # Handle string vs tensor query
+    if isinstance(query, str):
+        specter = _load_specter()
+        encoded_query = specter(query)[0].detach().to("cpu")
+        encoded_query = encoded_query / encoded_query.norm()
+        proj_query = proj_head(encoded_query)
+        proj_query = proj_query / proj_query.norm()
+    else:
+        # Query is already a tensor embedding
+        encoded_query = query / query.norm()
+        proj_query = proj_head(encoded_query)
+        proj_query = proj_query / proj_query.norm()
 
     cogatlas_embed = latent_cogatlas / latent_cogatlas.norm(dim=1)[:, None]
     proj_cogatlas = proj_head(cogatlas_embed)
@@ -187,6 +227,7 @@ def search_cogatlas_from_text(
 
     inds = torch.argsort(cos_sim, descending=True)
     inds_top = inds[:top_k].tolist()
+    cos_sim_top = cos_sim[inds_top].detach().cpu().numpy()
     terms_top = [latent_terms[i] for i in inds_top]
 
     missing_columns = [col for col in ("term", "definition") if col not in df.columns]
@@ -206,6 +247,7 @@ def search_cogatlas_from_text(
                 row = row.iloc[0]
             selected_rows.append(row)
         except KeyError:
+            print(f"Term '{term}' not found in CogAtlas DataFrame.")
             continue
 
     rows = pd.DataFrame(selected_rows) if selected_rows else df.iloc[inds_top]
@@ -225,7 +267,7 @@ def search_cogatlas_from_text(
             print(f"{idx}. {term}")
 
     cogatlas_context = "\n".join(pieces)
-    return cogatlas_context, terms
+    return cogatlas_context, terms, cos_sim_top
 
 
 def generate_llm_response_from_text(query: str):

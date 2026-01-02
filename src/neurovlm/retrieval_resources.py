@@ -25,15 +25,19 @@ __all__ = [
     "_load_dataframe",
     "_load_neuro_wiki",
     "_load_cogatlas_dataset",
+    "_load_cogatlas_task_dataset",
+    "_load_cogatlas_disorder_dataset",
     "_load_specter",
     "_load_latent_text",
     "_load_latent_wiki",
     "_load_latent_cogatlas",
+    "_load_latent_cogatlas_disorder",
+    "_load_latent_cogatlas_task",
     "_load_autoencoder",
     "_load_masker",
     "_load_networks",
     "_proj_head_image_infonce",
-    "_proj_head_mse_adhoc",
+    "_proj_head_mse_sparse_adhoc",
     "_proj_head_text_infonce",
 ]
 
@@ -42,7 +46,7 @@ __all__ = [
 def _load_dataframe() -> pd.DataFrame:
     """Load the publications DataFrame with a parquet engine fallback."""
     data_dir = get_data_dir()
-    parquet_path = data_dir / "publications.parquet"
+    parquet_path = data_dir / "publications_more.parquet"
     try:
         return pd.read_parquet(parquet_path, engine="pyarrow")
     except Exception as exc:  # pragma: no cover - depends on local engines
@@ -71,6 +75,42 @@ def _load_cogatlas_dataset() -> pd.DataFrame:
     except Exception as exc:  # pragma: no cover - depends on local engines
         print(f"pyarrow failed: {exc}, trying fastparquet...")
         return pd.read_parquet(parquet_path, engine="fastparquet")
+
+def _load_cogatlas_task_dataset(filtered = False) -> pd.DataFrame:
+    """Load the CogAtlas DataFrame with a parquet engine fallback."""
+    data_dir = get_data_dir()
+    if filtered:
+        parquet_path = data_dir / "cogatlas_task_filtered.parquet"
+        try:
+            return pd.read_parquet(parquet_path, engine="pyarrow")
+        except Exception as exc:  # pragma: no cover - depends on local engines
+            print(f"pyarrow failed: {exc}, trying fastparquet...")
+            return pd.read_parquet(parquet_path, engine="fastparquet")
+    else:
+        parquet_path = data_dir / "cogatlas_task.parquet"
+        try:
+            return pd.read_parquet(parquet_path, engine="pyarrow")
+        except Exception as exc:  # pragma: no cover - depends on local engines
+            print(f"pyarrow failed: {exc}, trying fastparquet...")
+            return pd.read_parquet(parquet_path, engine="fastparquet")
+
+def _load_cogatlas_disorder_dataset(filtered = False) -> pd.DataFrame:
+    """Load the CogAtlas DataFrame with a parquet engine fallback."""
+    data_dir = get_data_dir()
+    if filtered:
+        parquet_path = data_dir / "cogatlas_disorder_filtered.parquet"
+        try:
+            return pd.read_parquet(parquet_path, engine="pyarrow")
+        except Exception as exc:  # pragma: no cover - depends on local engines
+            print(f"pyarrow failed: {exc}, trying fastparquet...")
+            return pd.read_parquet(parquet_path, engine="fastparquet")
+    else:
+        parquet_path = data_dir / "cogatlas_disorder.parquet"
+        try:
+            return pd.read_parquet(parquet_path, engine="pyarrow")
+        except Exception as exc:  # pragma: no cover - depends on local engines
+            print(f"pyarrow failed: {exc}, trying fastparquet...")
+            return pd.read_parquet(parquet_path, engine="fastparquet")
 
 
 @lru_cache(maxsize=1)
@@ -120,6 +160,32 @@ def _load_latent_cogatlas() -> Tuple[torch.Tensor, np.ndarray]:
     latent_terms = np.asarray(latent_payload["term"])
     return latent, latent_terms
 
+@lru_cache(maxsize=1)
+def _load_latent_cogatlas_disorder() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load unit-normalized latent cognitive atlas embeddings and their term IDs."""
+    data_dir = get_data_dir()
+    latent_payload = torch.load(
+        data_dir / "latent_cogatlas_disorder.pt",
+        weights_only=False,
+    )
+
+    latent = latent_payload["latent"]
+    latent_terms = np.asarray(latent_payload["term"])
+    return latent, latent_terms
+
+@lru_cache(maxsize=1)
+def _load_latent_cogatlas_task() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load unit-normalized latent cognitive atlas embeddings and their term IDs."""
+    data_dir = get_data_dir()
+    latent_payload = torch.load(
+        data_dir / "latent_cogatlas_task.pt",
+        weights_only=False,
+    )
+
+    latent = latent_payload["latent"]
+    latent_terms = np.asarray(latent_payload["term"])
+    return latent, latent_terms
+
 
 @lru_cache(maxsize=1)
 def _load_autoencoder() -> torch.nn.Module:
@@ -162,10 +228,10 @@ def _proj_head_image_infonce() -> torch.nn.Module:
 
 
 @lru_cache(maxsize=1)
-def _proj_head_text_mse() -> torch.nn.Module:
+def _proj_head_mse_sparse_adhoc() -> torch.nn.Module:
     """Load and return the MSE projection head."""
     data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_text_mse.pt", weights_only=False, map_location="cpu")
+    proj_head = torch.load(data_dir / "proj_head_mse_sparse_adhoc", weights_only=False, map_location="cpu")
     return proj_head
 
 
