@@ -13,8 +13,8 @@ from typing import List
 import ollama
 import torch
 
-from neurovlm.brain_input import search_papers_from_brain, search_wiki_from_brain
-from neurovlm.text_input import search_papers_from_text, search_wiki_from_text
+from neurovlm.brain_input import search_papers_from_brain, search_wiki_from_brain, search_cogatlas_from_brain
+from neurovlm.text_input import search_papers_from_text, search_wiki_from_text, search_cogatlas_from_text
 
 
 def system_prompt(for_brain_input: bool = False) -> str:
@@ -25,12 +25,13 @@ def system_prompt(for_brain_input: bool = False) -> str:
     if for_brain_input:
         return """
         You are a helpful neuroscience research assistant.
-        You will receive a set of publications associated with an input brain representation and a set of neuroscience concepts with its meaning. Your task is to summarize key findings and insights from these publications, focusing on what they reveal about the brain and if the neuroscience concept relates to the paper talk about it.
+        You will receive a set of publications associated with an input brain representation, neuroscience concepts from NeuroWiki, and cognitive terms from the Cognitive Atlas. Your task is to summarize key findings and insights from these publications, focusing on what they reveal about the brain and how the neuroscience concepts and cognitive terms relate to the papers.
 
         Your response must:
         - Start with a brief overview (2-4 sentences) summarizing the main themes or takeaways across the publications.
         - Ground every statement in the provided publications and explain how the evidence informs interpretation of the brain input. Do not add outside knowledge or speculation.
         - Identify how each publication contributes to understanding the brain-derived signal. If evidence is indirect, clarify the most relevant methods, populations, or findings that help characterize the input.
+        - Use the Cognitive Atlas terms to help interpret the cognitive functions or processes implicated by the brain activation patterns.
         - Synthesize across studies, noting key areas of agreement or convergence, and conflicting or divergent findings with balanced context (e.g., methods, populations, analyses).
         - Use paragraphs or bullet points depending on the structure that best communicates the interpretation.
         - Maintain an objective, precise, scholarly tone suitable for neuroscience research contexts.
@@ -38,7 +39,7 @@ def system_prompt(for_brain_input: bool = False) -> str:
 
     return """
     You are a helpful neuroscience research assistant.
-    You will receive a set of publications, set of neuroscience concepts with its meaning and a user query. Your task is to summarize key findings and insights from these publications, focusing on how they relate to the query, use the neuroscience concepts as added context and information.
+    You will receive a set of publications, neuroscience concepts from NeuroWiki, cognitive terms from the Cognitive Atlas, and a user query. Your task is to summarize key findings and insights from these publications, focusing on how they relate to the query. Use the neuroscience concepts and cognitive terms as added context and information.
 
     Your response must:
     - Start with a brief overview (2-4 sentences) summarizing the main themes or takeaways across the publications.
@@ -54,8 +55,9 @@ def build_user_prompt(
     query: str | torch.Tensor,
     papers_context: str,
     wiki_context: str | None = None,
+    cogatlas_context: str | None = None,
 ) -> str:
-    """Compose the user-facing prompt given a query, publications, and NeuroWiki context."""
+    """Compose the user-facing prompt given a query, publications, NeuroWiki, and Cognitive Atlas context."""
     if isinstance(query, str):
         prompt = (
             f"Here are publications related to the query \"{query}\":\n{papers_context}\n"
@@ -66,6 +68,9 @@ def build_user_prompt(
     if wiki_context:
         prompt += f"\nHere are neuroscience concepts from the NeuroWiki:\n{wiki_context}\n"
 
+    if cogatlas_context:
+        prompt += f"\nHere are cognitive terms from the Cognitive Atlas:\n{cogatlas_context}\n"
+
     return prompt
 
 
@@ -73,6 +78,7 @@ def generate_response(
     query: str | torch.Tensor,
     top_k_similar_papers: int = 5,
     top_n_wiki_articles: int = 2,
+    top_n_cogatlas_terms: int = 5,
     model: str = "qwen2.5:3b-instruct",
     verbose: bool = True,
 ) -> str:
@@ -86,6 +92,8 @@ def generate_response(
         Number of publications (titles + summaries) to include in the context.
     top_n_wiki_articles : int, optional
         Number of NeuroWiki articles to include alongside the publications.
+    top_n_cogatlas_terms : int, optional
+        Number of Cognitive Atlas terms to include alongside the publications.
     model : str, optional
         Ollama model name, e.g., 'qwen2.5:3b-instruct' or 'llama3.2:3b'.
     verbose : bool, optional
@@ -99,18 +107,28 @@ def generate_response(
     for_brain_input = not isinstance(query, str)
 
     if for_brain_input:
-        papers_context, titles = search_papers_from_brain(
+        papers_context, titles, _ = search_papers_from_brain(
             query, top_k=top_k_similar_papers, show_titles=False
         )
         wiki_context = ""
         wiki_titles: List[str] = []
         try:
-            wiki_context, wiki_titles = search_wiki_from_brain(
+            wiki_context, wiki_titles, _ = search_wiki_from_brain(
                 query, top_k=top_n_wiki_articles, show_titles=False
             )
         except Exception as exc:  # pragma: no cover - defensive fallback
             if verbose:
                 print(f"Warning: failed to retrieve NeuroWiki concepts ({exc})")
+
+        cogatlas_context = ""
+        cogatlas_terms: List[str] = []
+        try:
+            cogatlas_context, cogatlas_terms, _ = search_cogatlas_from_brain(
+                query, top_k=top_n_cogatlas_terms, show_titles=False
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            if verbose:
+                print(f"Warning: failed to retrieve Cognitive Atlas terms ({exc})")
     else:
         papers_context, titles = search_papers_from_text(
             query, top_k=top_k_similar_papers, show_titles=False
@@ -125,6 +143,16 @@ def generate_response(
             if verbose:
                 print(f"Warning: failed to retrieve NeuroWiki concepts ({exc})")
 
+        cogatlas_context = ""
+        cogatlas_terms = []
+        try:
+            cogatlas_context, cogatlas_terms = search_cogatlas_from_text(
+                query, top_k=top_n_cogatlas_terms, show_titles=False
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            if verbose:
+                print(f"Warning: failed to retrieve Cognitive Atlas terms ({exc})")
+
     if verbose:
         header = (
             f"Top {top_k_similar_papers} publications for query: '{query}'"
@@ -138,6 +166,10 @@ def generate_response(
             print("Top NeuroWiki concepts:")
             for i, title in enumerate(wiki_titles, start=1):
                 print(f"[{i}] {title}")
+        if cogatlas_terms:
+            print("Top Cognitive Atlas terms:")
+            for i, term in enumerate(cogatlas_terms, start=1):
+                print(f"[{i}] {term}")
         print("LLM writing summary...")
 
     response = ollama.chat(
@@ -145,7 +177,7 @@ def generate_response(
             {"role": "system", "content": system_prompt(for_brain_input=for_brain_input)},
             {
                 "role": "user",
-                "content": build_user_prompt(query, papers_context, wiki_context or None),
+                "content": build_user_prompt(query, papers_context, wiki_context or None, cogatlas_context or None),
             },
         ],
         model=model,

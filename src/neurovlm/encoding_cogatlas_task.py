@@ -1,0 +1,56 @@
+import pandas as pd
+import torch
+import networkx as nx
+from neurovlm.data import data_dir
+from neurovlm.retrieval_resources import _load_specter
+
+# Load
+df = pd.read_parquet(data_dir / "cogatlas_task.parquet")
+df_graph = pd.read_parquet(data_dir / "cogatlas_task_graph.parquet")
+
+# Replace special characters
+df["definition"] = df["definition"].str.replace("\n", "").replace("\r", "")
+
+# Manual filter if needed
+drop = []
+
+df['term'] = df['term'].str.lower()
+
+df = df[~df['term'].isin(drop)]
+
+df_graph = df_graph[~df_graph["task"].isin(drop)]
+
+# Build graph (tasks connected to their conditions and concepts)
+G = nx.DiGraph()
+for _, row in df_graph.iterrows():
+    task = str(row["task"]).strip()
+    related_item = str(row["related_item"]).strip()
+    rel = str(row["relationship"]).strip().upper()
+    # Add edge from task to related item
+    G.add_edge(task, related_item, relationship=rel)
+
+# Node centrality
+centrality = nx.degree_centrality(G)
+
+# Top-k most central nodes (filter to only include tasks, not conditions/concepts)
+k = 300
+task_nodes = set(df["term"].tolist())
+top_nodes = [node for node in sorted(centrality, key=centrality.get, reverse=True) if node in task_nodes][:k]
+
+# Encode top-k titles + descriptions
+specter = _load_specter()
+df_filtered = df[df["term"].isin(top_nodes)].reset_index(drop=True)
+text = (df_filtered["term"] + "[SEP]" + df_filtered["definition"]).tolist()
+terms = df_filtered["term"].tolist()
+
+latent_text = torch.zeros((len(text), 768))
+batch_size = 16
+for i in range(0, len(text), batch_size):
+    with torch.no_grad():
+        latent_text[i:i+batch_size] = specter(text[i:i+batch_size])
+
+# Save embeddings with term IDs (similar to latent_specter_wiki and latent_specter2_adhoc)
+torch.save({"latent": latent_text, "term": terms}, data_dir / "latent_cogatlas_task.pt")
+
+# Also save the filtered dataframe with the same terms for easy lookup
+df_filtered.to_parquet(data_dir / "cogatlas_task_filtered.parquet")
