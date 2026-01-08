@@ -1,1 +1,4 @@
 .env
+*.pt
+*.parquet
+*.pkl.gz
