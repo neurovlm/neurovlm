@@ -19,7 +19,8 @@ import nibabel as nib
 from nilearn import maskers
 
 from neurovlm.data import get_data_dir
-from neurovlm.models import Specter
+from neurovlm.models import Specter, ProjHead, NeuroAutoEncoder
+from neurovl.io import load_model
 
 __all__ = [
     "_load_dataframe",
@@ -98,8 +99,8 @@ def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
 def _load_autoencoder() -> torch.nn.Module:
     """Load and return the text encoder model."""
     data_dir = get_data_dir()
-    encoder = torch.load(data_dir / "autoencoder.pt", weights_only=False, map_location="cpu")
-    return encoder
+    autoencoder = load_model(NeuroAutoEncoder(seed=0, out="logit"), data_dir / "autoencoder.safetensors")
+    return autoencoder
 
 
 @lru_cache(maxsize=1)
@@ -125,12 +126,11 @@ def _load_networks() -> torch.nn.Module:
 
     return networks
 
-
 @lru_cache(maxsize=1)
 def _proj_head_image_infonce() -> torch.nn.Module:
     """Load and return the image projection head."""
     data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_image_infonce.pt", weights_only=False, map_location="cpu")
+    proj_head = load_model(ProjHead(), data_dir / "proj_head_text_infonce.safetensors")
     return proj_head
 
 
@@ -138,7 +138,7 @@ def _proj_head_image_infonce() -> torch.nn.Module:
 def _proj_head_text_mse() -> torch.nn.Module:
     """Load and return the MSE projection head."""
     data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_text_mse.pt", weights_only=False, map_location="cpu")
+    proj_head = load_model(ProjHead(), data_dir / "proj_head_text_mse.safetensors")
     return proj_head
 
 
@@ -146,5 +146,5 @@ def _proj_head_text_mse() -> torch.nn.Module:
 def _proj_head_text_infonce() -> torch.nn.Module:
     """Load and return the text projection head."""
     data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_text_infonce.pt", weights_only=False, map_location="cpu")
+    proj_head = load_model(ProjHead(384, 384, 384), data_dir / "proj_head_image_infonce.safetensors")
     return proj_head

@@ -95,27 +95,32 @@ class NeuroAutoEncoder(nn.Module):
         """
         return self.decoder(self.encoder(X))
 
-class TextAligner(nn.Module):
-    """Align latent text-tensor to latent neuro-tensor.
+class ProjHead(nn.Module):
+    """Align latent tensors.
 
     Attributes
     ----------
     aligner : torch.nn.Sequential
         Non-linear mapping from 384 to 384.
     """
+
     def __init__(
         self,
-        latent_text_dim: Optional[int]=768,
+        latent_in_dim: Optional[int]=768,
         hidden_dim: Optional[int]=512,
-        latent_neuro_dim: Optional[int]=384,
+        latent_out_dim: Optional[int]=384,
         seed: Optional[int]=None
     ):
         """Define network.
 
         Parameters
         ----------
-        latent_dim : int, optional, default: 384
-            Input and output size.
+        latent_in_dim : int, optional, default: 384
+            Input size.
+        hidden_dim : int, optional, default: 512
+            Hidden layer size.
+        latent_out_dim : int, optional, default: 384
+            Output size.
         seed : int, optional, default: None
             Random seed for weight initialization.
         """
@@ -124,9 +129,9 @@ class TextAligner(nn.Module):
             torch.manual_seed(seed)
 
         self.aligner = nn.Sequential(
-            nn.Linear(latent_text_dim, hidden_dim),
+            nn.Linear(latent_in_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, latent_neuro_dim),
+            nn.Linear(hidden_dim, latent_out_dim),
         )
 
     def forward(self, X: torch.tensor) -> torch.tensor:
@@ -285,7 +290,6 @@ class Specter:
             emb = hidden[:, 0]
 
         return emb
-
 
 class ConceptClf(nn.Module):
     """Predict concepts from latent neuro embeddings."""
