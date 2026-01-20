@@ -151,13 +151,13 @@ def recall_curve(latent_text: torch.Tensor, latent_image: torch.Tensor) -> tuple
         
     # Text-to-image
     cos_t_to_i = latent_text_norm @ latent_image_norm.T
-    t_to_i = np.zeros(latent_text_norm.shape[0])
+    t_to_i = torch.zeros(latent_text_norm.shape[0])
     for k in range(len(latent_text_norm)):
         t_to_i[k] = recall_at_k(cos_t_to_i, k + 1)
 
     # Image-to-text
     cos_i_to_t = latent_image_norm @ latent_text_norm.T
-    i_to_t = np.zeros(latent_image_norm.shape[0])
+    i_to_t = torch.zeros(latent_image_norm.shape[0])
     for k in range(len(latent_text_norm)):
         i_to_t[k] = recall_at_k(cos_i_to_t, k + 1)
 

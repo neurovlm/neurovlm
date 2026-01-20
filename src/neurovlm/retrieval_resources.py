@@ -22,7 +22,9 @@ import nibabel as nib
 from nilearn import maskers
 from huggingface_hub import hf_hub_download
 
-from neurovlm.models import Specter, TextAligner, NeuroAutoEncoder
+from neurovlm.data import get_data_dir
+from neurovlm.models import Specter, ProjHead, NeuroAutoEncoder
+from neurovlm.io import load_model
 
 __all__ = [
     "_load_dataframe",
@@ -241,24 +243,10 @@ def _load_latent_cogatlas_task() -> Tuple[torch.Tensor, np.ndarray]:
 
 @lru_cache(maxsize=1)
 def _load_autoencoder() -> torch.nn.Module:
-    """Load the autoencoder model from HuggingFace."""
-    model_path = _download_from_hf(
-        "neurovlm/encoder_and_proj_head",
-        "autoencoder.safetensors",
-        repo_type="model"
-    )
-    state_dict = load_safetensors(model_path)
-
-    # Reconstruct the autoencoder model from state dict
-    encoder = NeuroAutoEncoder(
-        out="logits",
-        dim_neuro=28_542,
-        dim_h0=1024,
-        dim_h1=512,
-        dim_latent=384
-    )
-    encoder.load_state_dict(state_dict)
-    return encoder
+    """Load and return the text encoder model."""
+    data_dir = get_data_dir()
+    autoencoder = load_model(NeuroAutoEncoder(seed=0, out="logit"), data_dir / "autoencoder.safetensors")
+    return autoencoder
 
 
 @lru_cache(maxsize=1)
@@ -287,64 +275,24 @@ def _load_networks() -> dict:
 
     return networks
 
-
 @lru_cache(maxsize=1)
 def _proj_head_image_infonce() -> torch.nn.Module:
-    """Load the image projection head from HuggingFace."""
-    proj_path = _download_from_hf(
-        "neurovlm/encoder_and_proj_head",
-        "proj_head_image_infonce.safetensors",
-        repo_type="model"
-    )
-    state_dict = load_safetensors(proj_path)
-
-    # Create TextAligner with the correct architecture for image projection
-    proj_head = TextAligner(
-        latent_text_dim=384,
-        hidden_dim=384,
-        latent_neuro_dim=384
-    )
-    proj_head.load_state_dict(state_dict)
-    proj_head.eval()
+    """Load and return the image projection head."""
+    data_dir = get_data_dir()
+    proj_head = load_model(ProjHead(), data_dir / "proj_head_text_infonce.safetensors")
     return proj_head
 
 @lru_cache(maxsize=1)
 def _proj_head_mse_sparse_adhoc() -> torch.nn.Module:
-    """Load the MSE projection head from HuggingFace."""
-    proj_path = _download_from_hf(
-        "neurovlm/encoder_and_proj_head",
-        "proj_head_text_mse.safetensors",
-        repo_type="model"
-    )
-    state_dict = load_safetensors(proj_path)
-
-    # Create TextAligner with the correct architecture for text MSE projection
-    proj_head = TextAligner(
-        latent_text_dim=768,
-        hidden_dim=512,
-        latent_neuro_dim=384
-    )
-    proj_head.load_state_dict(state_dict)
-    proj_head.eval()
+    """Load and return the MSE projection head."""
+    data_dir = get_data_dir()
+    proj_head = load_model(ProjHead(), data_dir / "proj_head_text_mse.safetensors")
     return proj_head
 
 
 @lru_cache(maxsize=1)
 def _proj_head_text_infonce() -> torch.nn.Module:
-    """Load the text projection head from HuggingFace."""
-    proj_path = _download_from_hf(
-        "neurovlm/encoder_and_proj_head",
-        "proj_head_text_infonce.safetensors",
-        repo_type="model"
-    )
-    state_dict = load_safetensors(proj_path)
-
-    # Create TextAligner with the correct architecture for text InfoNCE projection
-    proj_head = TextAligner(
-        latent_text_dim=768,
-        hidden_dim=512,
-        latent_neuro_dim=384
-    )
-    proj_head.load_state_dict(state_dict)
-    proj_head.eval()
+    """Load and return the text projection head."""
+    data_dir = get_data_dir()
+    proj_head = load_model(ProjHead(384, 384, 384), data_dir / "proj_head_image_infonce.safetensors")
     return proj_head
