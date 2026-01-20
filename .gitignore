@@ -2,3 +2,6 @@
 *.pt
 *.parquet
 *.pkl.gz
+*.pt
+*.parquet
+*.pkl.gz
