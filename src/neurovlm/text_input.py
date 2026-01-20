@@ -32,6 +32,7 @@ from neurovlm.retrieval_resources import (
 __all__ = ["search_papers_from_text", "search_wiki_from_text", "search_cogatlas_from_text", "generate_llm_response_from_text"]
 
 
+@torch.no_grad()
 def search_papers_from_text(
     query: str,
     top_k: int = 5,
@@ -99,6 +100,7 @@ def search_papers_from_text(
     return papers_context, titles
 
 
+@torch.no_grad()
 def search_wiki_from_text(
     query: str,
     top_k: int = 2,
@@ -165,6 +167,7 @@ def search_wiki_from_text(
     return wiki_context, titles
 
 
+@torch.no_grad()
 def search_cogatlas_from_text(
     query: Union[str, torch.Tensor],
     top_k: int = 5,
@@ -270,21 +273,89 @@ def search_cogatlas_from_text(
     return cogatlas_context, terms, cos_sim_top
 
 
-def generate_llm_response_from_text(query: str):
+@torch.no_grad()
+def generate_llm_response_from_text(
+    query: str,
+    top_k_papers: int = 5,
+    top_k_cogatlas_concepts: int = 5,
+    top_k_cogatlas_disorders: int = 5,
+    top_k_cogatlas_tasks: int = 5,
+    backend: Literal["ollama", "huggingface"] = "ollama",
+    model_name: str | None = None,
+):
     """
     Generate an LLM response for a given natural language query.
+
+    For text input, focuses on papers and CogAtlas terms (concepts, disorders, tasks).
+    NeuroWiki entries are NOT included for text-based queries.
 
     Parameters
     ----------
     query : str
         A natural language query to be encoded.
+    top_k_papers : int
+        Number of top papers to retrieve.
+    top_k_cogatlas_concepts : int
+        Number of top CogAtlas concept terms to retrieve.
+    top_k_cogatlas_disorders : int
+        Number of top CogAtlas disorder terms to retrieve.
+    top_k_cogatlas_tasks : int
+        Number of top CogAtlas task terms to retrieve.
+    backend : {"ollama", "huggingface"}, optional
+        Which LLM backend to use. Default: "ollama" (faster, requires Ollama installed).
+    model_name : str, optional
+        Model name. If None, uses backend defaults.
 
     Returns
     -------
     str
         The generated LLM response.
+
+    Examples
+    --------
+    >>> # Use Ollama (default, fast)
+    >>> output = generate_llm_response_from_text("default mode network")
+
+    >>> # Use HuggingFace with small model
+    >>> output = generate_llm_response_from_text(
+    ...     "default mode network",
+    ...     backend="huggingface",
+    ...     model_name="Qwen/Qwen2.5-0.5B-Instruct"
+    ... )
     """
     from neurovlm.llm_summary import generate_response
 
-    return generate_response(query, top_k_similar_papers=5)
+    # Retrieve top k papers
+    papers_context, paper_titles = search_papers_from_text(
+        query, top_k=top_k_papers, show_titles=False
+    )
 
+    # Retrieve top k for each CogAtlas category
+    cogatlas_concepts_context, cogatlas_concepts_terms, _ = search_cogatlas_from_text(
+        query, top_k=top_k_cogatlas_concepts, show_titles=False, category="cogatlas"
+    )
+
+    cogatlas_disorders_context, cogatlas_disorders_terms, _ = search_cogatlas_from_text(
+        query, top_k=top_k_cogatlas_disorders, show_titles=False, category="cogatlas_disorder"
+    )
+
+    cogatlas_tasks_context, cogatlas_tasks_terms, _ = search_cogatlas_from_text(
+        query, top_k=top_k_cogatlas_tasks, show_titles=False, category="cogatlas_task"
+    )
+
+    # Combine all cogatlas contexts
+    cogatlas_combined_context = "\n".join([
+        "Concepts:\n" + cogatlas_concepts_context,
+        "Disorders:\n" + cogatlas_disorders_context,
+        "Tasks:\n" + cogatlas_tasks_context,
+    ])
+
+    return generate_response(
+        query=query,
+        papers_context=papers_context,
+        wiki_context=None,  # No wiki for text input
+        cogatlas_context=cogatlas_combined_context,
+        user_prompt=query,
+        backend=backend,
+        model_name=model_name,
+    )

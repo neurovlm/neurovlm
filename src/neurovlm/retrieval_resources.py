@@ -3,6 +3,8 @@
 These helpers centralize cached access to publication metadata,
 latent embeddings, and projection heads so they can be shared across
 brain- and text-driven retrieval workflows.
+
+Files are now loaded from HuggingFace repositories under the neurovlm organization.
 """
 
 from __future__ import annotations
@@ -14,16 +16,18 @@ import gzip, pickle
 import numpy as np
 import pandas as pd
 import torch
+from safetensors.torch import load_file as load_safetensors
 
 import nibabel as nib
 from nilearn import maskers
+from huggingface_hub import hf_hub_download
 
-from neurovlm.data import get_data_dir
-from neurovlm.models import Specter
+from neurovlm.models import Specter, TextAligner, NeuroAutoEncoder
 
 __all__ = [
     "_load_dataframe",
     "_load_neuro_wiki",
+    "_load_neuro_brain",
     "_load_cogatlas_dataset",
     "_load_cogatlas_task_dataset",
     "_load_cogatlas_disorder_dataset",
@@ -42,75 +46,106 @@ __all__ = [
 ]
 
 
+def _download_from_hf(repo_id: str, filename: str, repo_type: str = "dataset") -> str:
+    """Download a file from HuggingFace and return the local path.
+
+    Args:
+        repo_id: Repository ID (e.g., 'neurovlm/embedded_text')
+        filename: Name of the file to download
+        repo_type: Type of repository - "dataset" or "model" (default: "dataset")
+    """
+    return hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+        repo_type=repo_type
+    )
+
+
 @lru_cache(maxsize=1)
 def _load_dataframe() -> pd.DataFrame:
-    """Load the publications DataFrame with a parquet engine fallback."""
-    data_dir = get_data_dir()
-    parquet_path = data_dir / "publications_more.parquet"
+    """Load the publications DataFrame from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/neuro_image_papers",
+        "publications_more.parquet"
+    )
     try:
         return pd.read_parquet(parquet_path, engine="pyarrow")
-    except Exception as exc:  # pragma: no cover - depends on local engines
+    except Exception as exc:  # pragma: no cover
         print(f"pyarrow failed: {exc}, trying fastparquet...")
         return pd.read_parquet(parquet_path, engine="fastparquet")
 
 
 @lru_cache(maxsize=1)
 def _load_neuro_wiki() -> pd.DataFrame:
-    """Load the NeuroWiki DataFrame with a parquet engine fallback."""
-    data_dir = get_data_dir()
-    parquet_path = data_dir / "neurowiki_with_ids.parquet"
+    """Load the NeuroWiki DataFrame from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/neuro_wiki",
+        "neurowiki_with_ids.parquet"
+    )
     try:
         return pd.read_parquet(parquet_path, engine="pyarrow")
-    except Exception as exc:  # pragma: no cover - depends on local engines
+    except Exception as exc:  # pragma: no cover
         print(f"pyarrow failed: {exc}, trying fastparquet...")
         return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_neuro_brain() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load the Neuro brain map embedding from HuggingFace."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_neuro_sparse.pt"
+    )
+    latent_payload = torch.load(
+        latent_path,
+        weights_only=False,
+    )
+
+    latent = latent_payload["latent"]
+    latent_pmid = np.asarray(latent_payload["pmid"])
+    return latent, latent_pmid
+
 
 @lru_cache(maxsize=1)
 def _load_cogatlas_dataset() -> pd.DataFrame:
-    """Load the CogAtlas DataFrame with a parquet engine fallback."""
-    data_dir = get_data_dir()
-    parquet_path = data_dir / "cogatlas.parquet"
+    """Load the CogAtlas DataFrame from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        "cogatlas.parquet"
+    )
     try:
         return pd.read_parquet(parquet_path, engine="pyarrow")
-    except Exception as exc:  # pragma: no cover - depends on local engines
+    except Exception as exc:  # pragma: no cover
         print(f"pyarrow failed: {exc}, trying fastparquet...")
         return pd.read_parquet(parquet_path, engine="fastparquet")
 
-def _load_cogatlas_task_dataset(filtered = False) -> pd.DataFrame:
-    """Load the CogAtlas DataFrame with a parquet engine fallback."""
-    data_dir = get_data_dir()
-    if filtered:
-        parquet_path = data_dir / "cogatlas_task_filtered.parquet"
-        try:
-            return pd.read_parquet(parquet_path, engine="pyarrow")
-        except Exception as exc:  # pragma: no cover - depends on local engines
-            print(f"pyarrow failed: {exc}, trying fastparquet...")
-            return pd.read_parquet(parquet_path, engine="fastparquet")
-    else:
-        parquet_path = data_dir / "cogatlas_task.parquet"
-        try:
-            return pd.read_parquet(parquet_path, engine="pyarrow")
-        except Exception as exc:  # pragma: no cover - depends on local engines
-            print(f"pyarrow failed: {exc}, trying fastparquet...")
-            return pd.read_parquet(parquet_path, engine="fastparquet")
 
-def _load_cogatlas_disorder_dataset(filtered = False) -> pd.DataFrame:
-    """Load the CogAtlas DataFrame with a parquet engine fallback."""
-    data_dir = get_data_dir()
-    if filtered:
-        parquet_path = data_dir / "cogatlas_disorder_filtered.parquet"
-        try:
-            return pd.read_parquet(parquet_path, engine="pyarrow")
-        except Exception as exc:  # pragma: no cover - depends on local engines
-            print(f"pyarrow failed: {exc}, trying fastparquet...")
-            return pd.read_parquet(parquet_path, engine="fastparquet")
-    else:
-        parquet_path = data_dir / "cogatlas_disorder.parquet"
-        try:
-            return pd.read_parquet(parquet_path, engine="pyarrow")
-        except Exception as exc:  # pragma: no cover - depends on local engines
-            print(f"pyarrow failed: {exc}, trying fastparquet...")
-            return pd.read_parquet(parquet_path, engine="fastparquet")
+def _load_cogatlas_task_dataset(filtered=False) -> pd.DataFrame:
+    """Load the CogAtlas task DataFrame from HuggingFace."""
+    filename = "cogatlas_task_filtered.parquet" if filtered else "cogatlas_task.parquet"
+    parquet_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        filename
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+def _load_cogatlas_disorder_dataset(filtered=False) -> pd.DataFrame:
+    """Load the CogAtlas disorder DataFrame from HuggingFace."""
+    filename = "cogatlas_disorder_filtered.parquet" if filtered else "cogatlas_disorder.parquet"
+    parquet_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        filename
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
 
 
 @lru_cache(maxsize=1)
@@ -121,10 +156,13 @@ def _load_specter() -> Specter:
 
 @lru_cache(maxsize=1)
 def _load_latent_text() -> Tuple[torch.Tensor, np.ndarray]:
-    """Load unit-normalized latent text embeddings and associated PubMed IDs."""
-    data_dir = get_data_dir()
+    """Load unit-normalized latent text embeddings from HuggingFace."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_specter2_adhoc.pt"
+    )
     latent_payload = torch.load(
-        data_dir / "latent_specter2_adhoc.pt",
+        latent_path,
         weights_only=False,
     )
 
@@ -135,10 +173,13 @@ def _load_latent_text() -> Tuple[torch.Tensor, np.ndarray]:
 
 @lru_cache(maxsize=1)
 def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
-    """Load unit-normalized latent wiki embeddings and their IDs."""
-    data_dir = get_data_dir()
+    """Load unit-normalized latent wiki embeddings from HuggingFace."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_specter_wiki.pt"
+    )
     latent_payload = torch.load(
-        data_dir / "latent_specter_wiki.pt",
+        latent_path,
         weights_only=False,
     )
 
@@ -149,23 +190,30 @@ def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
 
 @lru_cache(maxsize=1)
 def _load_latent_cogatlas() -> Tuple[torch.Tensor, np.ndarray]:
-    """Load unit-normalized latent cognitive atlas embeddings and their term IDs."""
-    data_dir = get_data_dir()
+    """Load unit-normalized latent cognitive atlas embeddings from HuggingFace."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_cogatlas.pt"
+    )
     latent_payload = torch.load(
-        data_dir / "latent_cogatlas.pt",
+        latent_path,
         weights_only=False,
     )
 
     latent = latent_payload["latent"]
     latent_terms = np.asarray(latent_payload["term"])
     return latent, latent_terms
+
 
 @lru_cache(maxsize=1)
 def _load_latent_cogatlas_disorder() -> Tuple[torch.Tensor, np.ndarray]:
-    """Load unit-normalized latent cognitive atlas embeddings and their term IDs."""
-    data_dir = get_data_dir()
+    """Load unit-normalized latent cognitive atlas disorder embeddings from HuggingFace."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_cogatlas_disorder.pt"
+    )
     latent_payload = torch.load(
-        data_dir / "latent_cogatlas_disorder.pt",
+        latent_path,
         weights_only=False,
     )
 
@@ -173,12 +221,16 @@ def _load_latent_cogatlas_disorder() -> Tuple[torch.Tensor, np.ndarray]:
     latent_terms = np.asarray(latent_payload["term"])
     return latent, latent_terms
 
+
 @lru_cache(maxsize=1)
 def _load_latent_cogatlas_task() -> Tuple[torch.Tensor, np.ndarray]:
-    """Load unit-normalized latent cognitive atlas embeddings and their term IDs."""
-    data_dir = get_data_dir()
+    """Load unit-normalized latent cognitive atlas task embeddings from HuggingFace."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_cogatlas_task.pt"
+    )
     latent_payload = torch.load(
-        data_dir / "latent_cogatlas_task.pt",
+        latent_path,
         weights_only=False,
     )
 
@@ -189,55 +241,110 @@ def _load_latent_cogatlas_task() -> Tuple[torch.Tensor, np.ndarray]:
 
 @lru_cache(maxsize=1)
 def _load_autoencoder() -> torch.nn.Module:
-    """Load and return the text encoder model."""
-    data_dir = get_data_dir()
-    encoder = torch.load(data_dir / "autoencoder.pt", weights_only=False, map_location="cpu")
+    """Load the autoencoder model from HuggingFace."""
+    model_path = _download_from_hf(
+        "neurovlm/encoder_and_proj_head",
+        "autoencoder.safetensors",
+        repo_type="model"
+    )
+    state_dict = load_safetensors(model_path)
+
+    # Reconstruct the autoencoder model from state dict
+    encoder = NeuroAutoEncoder(
+        out="logits",
+        dim_neuro=28_542,
+        dim_h0=1024,
+        dim_h1=512,
+        dim_latent=384
+    )
+    encoder.load_state_dict(state_dict)
     return encoder
 
 
 @lru_cache(maxsize=1)
 def _load_masker() -> nib.Nifti1Image:
-    """Load mask."""
-    data_dir = get_data_dir()
-    mask_arrays = np.load(data_dir / "mask.npz", allow_pickle=True)
-    mask_img = nib.Nifti1Image(mask_arrays["mask"].astype(float),  mask_arrays["affine"])
+    """Load mask from HuggingFace."""
+    mask_path = _download_from_hf(
+        "neurovlm/encoder_and_proj_head",
+        "mask.npz",
+        repo_type="model"
+    )
+    mask_arrays = np.load(mask_path, allow_pickle=True)
+    mask_img = nib.Nifti1Image(mask_arrays["mask"].astype(float), mask_arrays["affine"])
     masker = maskers.NiftiMasker(mask_img=mask_img, dtype=np.float32).fit()
     return masker
 
 
 @lru_cache(maxsize=1)
-def _load_networks() -> torch.nn.Module:
-    """Load network atlases."""
-    with gzip.open(get_data_dir() / "networks_arrays.pkl.gz", "rb") as f:
+def _load_networks() -> dict:
+    """Load network atlases from HuggingFace."""
+    networks_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "networks_arrays.pkl.gz"
+    )
+    with gzip.open(networks_path, "rb") as f:
         networks = pickle.load(f)
-
-    network_imgs = []
-    for k in networks.keys():
-        for a in networks[k].keys():
-            network_imgs.append((k, a, nib.Nifti1Image(networks[k][a]["array"], affine=networks[k][a]["affine"])))
 
     return networks
 
 
 @lru_cache(maxsize=1)
 def _proj_head_image_infonce() -> torch.nn.Module:
-    """Load and return the image projection head."""
-    data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_image_infonce.pt", weights_only=False, map_location="cpu")
-    return proj_head
+    """Load the image projection head from HuggingFace."""
+    proj_path = _download_from_hf(
+        "neurovlm/encoder_and_proj_head",
+        "proj_head_image_infonce.safetensors",
+        repo_type="model"
+    )
+    state_dict = load_safetensors(proj_path)
 
+    # Create TextAligner with the correct architecture for image projection
+    proj_head = TextAligner(
+        latent_text_dim=384,
+        hidden_dim=384,
+        latent_neuro_dim=384
+    )
+    proj_head.load_state_dict(state_dict)
+    proj_head.eval()
+    return proj_head
 
 @lru_cache(maxsize=1)
 def _proj_head_mse_sparse_adhoc() -> torch.nn.Module:
-    """Load and return the MSE projection head."""
-    data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_mse_sparse_adhoc", weights_only=False, map_location="cpu")
+    """Load the MSE projection head from HuggingFace."""
+    proj_path = _download_from_hf(
+        "neurovlm/encoder_and_proj_head",
+        "proj_head_text_mse.safetensors",
+        repo_type="model"
+    )
+    state_dict = load_safetensors(proj_path)
+
+    # Create TextAligner with the correct architecture for text MSE projection
+    proj_head = TextAligner(
+        latent_text_dim=768,
+        hidden_dim=512,
+        latent_neuro_dim=384
+    )
+    proj_head.load_state_dict(state_dict)
+    proj_head.eval()
     return proj_head
 
 
 @lru_cache(maxsize=1)
 def _proj_head_text_infonce() -> torch.nn.Module:
-    """Load and return the text projection head."""
-    data_dir = get_data_dir()
-    proj_head = torch.load(data_dir / "proj_head_text_infonce.pt", weights_only=False, map_location="cpu")
+    """Load the text projection head from HuggingFace."""
+    proj_path = _download_from_hf(
+        "neurovlm/encoder_and_proj_head",
+        "proj_head_text_infonce.safetensors",
+        repo_type="model"
+    )
+    state_dict = load_safetensors(proj_path)
+
+    # Create TextAligner with the correct architecture for text InfoNCE projection
+    proj_head = TextAligner(
+        latent_text_dim=768,
+        hidden_dim=512,
+        latent_neuro_dim=384
+    )
+    proj_head.load_state_dict(state_dict)
+    proj_head.eval()
     return proj_head

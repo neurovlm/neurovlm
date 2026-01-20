@@ -28,6 +28,9 @@ import torch
 from nilearn.image import resample_img
 from nilearn.maskers import NiftiMasker
 
+from nilearn import maskers
+from tqdm import tqdm
+
 from neurovlm.data import fetch_data, get_data_dir
 from neurovlm.train import which_device
 from neurovlm.retrieval_resources import (
@@ -42,13 +45,16 @@ from neurovlm.retrieval_resources import (
     _load_latent_cogatlas_disorder,
     _load_latent_cogatlas_task,
     _load_cogatlas_disorder_dataset,
-    _load_cogatlas_task_dataset
+    _load_cogatlas_task_dataset,
+    _load_masker,
+    _load_networks
 )
 data_dir = get_data_dir()
 
 warnings.filterwarnings("ignore")
 
 
+@torch.no_grad()
 def search_papers_from_brain(
     query: torch.Tensor,
     top_k: int = 5,
@@ -118,6 +124,7 @@ def search_papers_from_brain(
     return papers_context, titles, cos_sim_top
 
 
+@torch.no_grad()
 def search_wiki_from_brain(
     query: torch.Tensor,
     top_k: int = 2,
@@ -184,6 +191,7 @@ def search_wiki_from_brain(
     return wiki_context, titles, cos_sim_top
 
 
+@torch.no_grad()
 def search_cogatlas_from_brain(
     query: torch.Tensor,
     top_k: int = 5,
@@ -273,23 +281,34 @@ def load_metadata(data_dir: Path | str | None = data_dir) -> dict[str, pd.DataFr
         Optional path returned by :func:`fetch_data`. When omitted the data
         directory is fetched (or validated) automatically.
     """
+    # Load publications from HuggingFace
+    df_pubs = _load_dataframe()
+
+    # Coordinates are still loaded locally as they're not yet on HuggingFace
     root = Path(fetch_data() if data_dir is None else data_dir)
-    df_pubs = pd.read_parquet(root / "publications_more.parquet")
     df_coords = pd.read_parquet(root / "coordinates.parquet")
+
     return {"publications": df_pubs, "coordinates": df_coords}
 
 
 def _load_mask_bundle(
     data_dir: Path | str | None = None,
 ) -> tuple[dict[str, Any], nib.Nifti1Image, NiftiMasker]:
-    """Return mask arrays, image, and fitted masker."""
-    root = Path(fetch_data() if data_dir is None else data_dir)
-    mask_arrays = np.load(root / "mask.npz", allow_pickle=True)
-    mask_img = nib.Nifti1Image(
-        mask_arrays["mask"].astype(float),
-        mask_arrays["affine"],
-    )
-    masker = NiftiMasker(mask_img=mask_img, dtype=np.float32).fit()
+    """Return mask arrays, image, and fitted masker.
+
+    Note: The masker is loaded from HuggingFace via retrieval_resources.
+    The data_dir parameter is kept for backward compatibility but is now optional.
+    """
+    # Load masker from HuggingFace (already returns a fitted masker)
+    masker = _load_masker()
+    mask_img = masker.mask_img_
+
+    # Extract mask arrays from the mask image
+    mask_arrays = {
+        "mask": mask_img.get_fdata().astype(bool),
+        "affine": mask_img.affine
+    }
+
     return mask_arrays, mask_img, masker
 
 
@@ -371,24 +390,149 @@ def resample_array_nifti(
     return networks_resampled
 
 
+def resample_networks_to_mask(networks):
+    """
+    Resample network images to match the mask affine and resolution.
 
-def generate_llm_response_from_brain(query_vector: torch.Tensor):
+    For binary networks, uses nearest neighbor interpolation.
+    For continuous networks, applies thresholding at 95th percentile and binarizes.
+
+    Args:
+        networks: Dict of networks, where each network has nested dicts with 'array' and 'affine' keys,
+                  OR already flattened dict with 'array' and 'affine' keys
+
+    Returns:
+        networks_resampled: Dict mapping network names to resampled NIfTI images
+    """
+
+    # Flatten networks if needed (handle nested dict structure)
+    if any(isinstance(v, dict) and 'array' not in v for v in networks.values()):
+        networks = {k: v for _k in networks.keys() for k, v in networks[_k].items()}
+
+    # Load mask from HuggingFace
+    masker = _load_masker()
+    mask_img = masker.mask_img_
+    mask_arrays = {
+        "mask": mask_img.get_fdata().astype(bool),
+        "affine": mask_img.affine
+    }
+
+    networks_resampled = {}
+
+    for k in tqdm(networks.keys(), total=len(networks), desc="Resampling networks"):
+        img = nib.Nifti1Image(networks[k]["array"], affine=networks[k]["affine"])
+
+        if len(np.unique(networks[k]["array"])) == 2:
+            # Binary data: use nearest neighbor interpolation
+            img_resampled = resample_img(img, mask_arrays["affine"], interpolation="nearest")
+        else:
+            # Continuous data: resample, then threshold and binarize
+            img_resampled = resample_img(img, mask_arrays["affine"])
+            img_resampled_arr = img_resampled.get_fdata()
+
+            # Remove negative values
+            img_resampled_arr[img_resampled_arr < 0] = 0.
+
+            # Threshold at 95th percentile
+            thresh = np.percentile(img_resampled_arr.flatten(), 95)
+            img_resampled_arr[img_resampled_arr < thresh] = 0.
+            img_resampled_arr[img_resampled_arr >= thresh] = 1.
+
+            img_resampled = nib.Nifti1Image(img_resampled_arr, affine=mask_arrays["affine"])
+
+        networks_resampled[k] = img_resampled
+
+    return networks_resampled
+
+
+@torch.no_grad()
+def generate_llm_response_from_brain(
+    query_vector: torch.Tensor,
+    top_k_wiki: int = 5,
+    top_k_cogatlas_concepts: int = 5,
+    top_k_cogatlas_disorders: int = 5,
+    top_k_cogatlas_tasks: int = 5,
+    user_prompt: str = "",
+    backend: Literal["ollama", "huggingface"] = "ollama",
+    model_name: str | None = None,
+):
     """
     Generate an LLM response based on a brain-derived vector.
+
+    For brain input, focuses on NeuroWiki terms and CogAtlas terms (concepts, disorders, tasks).
+    Papers are NOT included for brain-based queries.
 
     Parameters
     ----------
     query_vector : torch.Tensor
         An already encoded brain-derived vector.
+    top_k_wiki : int
+        Number of top NeuroWiki entries to retrieve.
+    top_k_cogatlas_concepts : int
+        Number of top CogAtlas concept terms to retrieve.
+    top_k_cogatlas_disorders : int
+        Number of top CogAtlas disorder terms to retrieve.
+    top_k_cogatlas_tasks : int
+        Number of top CogAtlas task terms to retrieve.
+    user_prompt : str
+        Optional user query/prompt to provide context.
+    backend : {"ollama", "huggingface"}, optional
+        Which LLM backend to use. Default: "ollama" (faster, requires Ollama installed).
+    model_name : str, optional
+        Model name. If None, uses backend defaults.
 
     Returns
     -------
     str
         The generated response from the LLM.
+
+    Examples
+    --------
+    >>> # Use Ollama (default, fast)
+    >>> output = generate_llm_response_from_brain(brain_vector)
+
+    >>> # Use HuggingFace
+    >>> output = generate_llm_response_from_brain(
+    ...     brain_vector,
+    ...     backend="huggingface",
+    ...     model_name="Qwen/Qwen2.5-0.5B-Instruct"
+    ... )
     """
     from neurovlm.llm_summary import generate_response
 
-    return generate_response(query_vector, top_k_similar_papers=5)
+    # Retrieve top k for each category
+    wiki_context, wiki_titles, _ = search_wiki_from_brain(
+        query_vector, top_k=top_k_wiki, show_titles=False
+    )
+
+    cogatlas_concepts_context, cogatlas_concepts_terms, _ = search_cogatlas_from_brain(
+        query_vector, top_k=top_k_cogatlas_concepts, show_titles=False, category="cogatlas"
+    )
+
+    cogatlas_disorders_context, cogatlas_disorders_terms, _ = search_cogatlas_from_brain(
+        query_vector, top_k=top_k_cogatlas_disorders, show_titles=False, category="cogatlas_disorder"
+    )
+
+    cogatlas_tasks_context, cogatlas_tasks_terms, _ = search_cogatlas_from_brain(
+        query_vector, top_k=top_k_cogatlas_tasks, show_titles=False, category="cogatlas_task"
+    )
+
+    # Combine all cogatlas contexts
+    cogatlas_combined_context = "\n".join([
+        "Concepts:\n" + cogatlas_concepts_context,
+        "Disorders:\n" + cogatlas_disorders_context,
+        "Tasks:\n" + cogatlas_tasks_context,
+    ])
+
+    return generate_response(
+        query=query_vector,
+        papers_context=None,  # No papers for brain input
+        wiki_context=wiki_context,
+        cogatlas_context=cogatlas_combined_context,
+        user_prompt=user_prompt,
+        backend=backend,
+        model_name=model_name,
+    )
 
 
 __all__ = [
@@ -398,5 +542,6 @@ __all__ = [
     "search_papers_from_brain",
     "search_wiki_from_brain",
     "search_cogatlas_from_brain",
+    "resample_networks_to_mask",
     "generate_llm_response_from_brain",
 ]
