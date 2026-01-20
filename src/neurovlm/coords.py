@@ -10,7 +10,7 @@ from nimare.meta.kernel import ALEKernel
 from nimare.meta.utils import get_ale_kernel
 
 from .progress import select_tqdm
-from .data import fetch_data
+from .retrieval_resources import _load_masker
 
 
 def coords_to_vectors(df_coords: pd.DataFrame, fwhm: int) -> pd.DataFrame:
@@ -33,11 +33,9 @@ def coords_to_vectors(df_coords: pd.DataFrame, fwhm: int) -> pd.DataFrame:
     df = df_coords.copy()[['pmid', 'x', 'y', 'z']]
     df.rename(columns={"pmid": "id"}, inplace=True)
 
-    # Load neuroquery mask
-    data_dir = fetch_data(files=[])
-    mask_arrays = np.load(f"{data_dir}/mask.npz", allow_pickle=True)
-    mask_img = nib.Nifti1Image(mask_arrays["mask"].astype(float),  mask_arrays["affine"])
-    masker = maskers.NiftiMasker(mask_img=mask_img, dtype=np.float32).fit()
+    # Load mask from HuggingFace
+    masker = _load_masker()
+    mask_img = masker.mask_img_
 
     # Max value of convolutional kernel
     _, kernel = get_ale_kernel(masker.mask_img, fwhm=fwhm)
