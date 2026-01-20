@@ -22,7 +22,6 @@ import nibabel as nib
 from nilearn import maskers
 from huggingface_hub import hf_hub_download
 
-from neurovlm.data import get_data_dir
 from neurovlm.models import Specter, ProjHead, NeuroAutoEncoder
 from neurovlm.io import load_model
 
@@ -243,9 +242,13 @@ def _load_latent_cogatlas_task() -> Tuple[torch.Tensor, np.ndarray]:
 
 @lru_cache(maxsize=1)
 def _load_autoencoder() -> torch.nn.Module:
-    """Load and return the text encoder model."""
-    data_dir = get_data_dir()
-    autoencoder = load_model(NeuroAutoEncoder(seed=0, out="logit"), data_dir / "autoencoder.safetensors")
+    """Load and return the text encoder model from HuggingFace."""
+    model_path = _download_from_hf(
+        "neurovlm/encoder_and_proj_head",
+        "autoencoder.safetensors",
+        repo_type="model"
+    )
+    autoencoder = load_model(NeuroAutoEncoder(seed=0, out="logit"), model_path)
     return autoencoder
 
 
@@ -277,22 +280,34 @@ def _load_networks() -> dict:
 
 @lru_cache(maxsize=1)
 def _proj_head_image_infonce() -> torch.nn.Module:
-    """Load and return the image projection head."""
-    data_dir = get_data_dir()
-    proj_head = load_model(ProjHead(), data_dir / "proj_head_text_infonce.safetensors")
+    """Load and return the image projection head from HuggingFace."""
+    model_path = _download_from_hf(
+        "neurovlm/encoder_and_proj_head",
+        "proj_head_image_infonce.safetensors",
+        repo_type="model"
+    )
+    proj_head = load_model(ProjHead(), model_path)
     return proj_head
 
 @lru_cache(maxsize=1)
 def _proj_head_mse_sparse_adhoc() -> torch.nn.Module:
-    """Load and return the MSE projection head."""
-    data_dir = get_data_dir()
-    proj_head = load_model(ProjHead(), data_dir / "proj_head_text_mse.safetensors")
+    """Load and return the MSE projection head from HuggingFace."""
+    model_path = _download_from_hf(
+        "neurovlm/encoder_and_proj_head",
+        "proj_head_text_mse.safetensors",
+        repo_type="model"
+    )
+    proj_head = load_model(ProjHead(), model_path)
     return proj_head
 
 
 @lru_cache(maxsize=1)
 def _proj_head_text_infonce() -> torch.nn.Module:
-    """Load and return the text projection head."""
-    data_dir = get_data_dir()
-    proj_head = load_model(ProjHead(384, 384, 384), data_dir / "proj_head_image_infonce.safetensors")
+    """Load and return the text projection head from HuggingFace."""
+    model_path = _download_from_hf(
+        "neurovlm/encoder_and_proj_head",
+        "proj_head_text_infonce.safetensors",
+        repo_type="model"
+    )
+    proj_head = load_model(ProjHead(384, 384, 384), model_path)
     return proj_head
