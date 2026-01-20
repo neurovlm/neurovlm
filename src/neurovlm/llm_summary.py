@@ -121,6 +121,7 @@ def system_prompt(for_brain_input: bool = False) -> str:
         You will receive neuroscience concepts from NeuroWiki and cognitive terms from the Cognitive Atlas (including concepts, disorders, and tasks) associated with an input brain representation. Your task is to interpret what the brain activation pattern represents based on these neuroscience and cognitive terms.
 
         Your response must:
+        - Your response should address the user's query directly.
         - Start with a brief overview (2-4 sentences) summarizing the main cognitive functions, processes, or states implicated by the brain activation.
         - Ground every statement in the provided NeuroWiki concepts and Cognitive Atlas terms. Do not add outside knowledge or speculation.
         - Focus on what the NeuroWiki concepts reveal about the neuroscientific mechanisms and what the Cognitive Atlas terms (concepts, disorders, tasks) reveal about the cognitive and clinical significance.
@@ -135,9 +136,10 @@ def system_prompt(for_brain_input: bool = False) -> str:
     You will receive a set of publications and cognitive terms from the Cognitive Atlas (including concepts, disorders, and tasks) related to a user query. Your task is to summarize key findings and insights from these publications, using the Cognitive Atlas terms to provide additional context about cognitive functions, disorders, and tasks that may be relevant.
 
     Your response must:
+    - Your response should address the user's query directly.
     - Start with a brief overview (2-4 sentences) summarizing the main themes or takeaways from the publications in relation to the query.
     - Be entirely based on the information in the publications and how it directly ties to the user's query. Do not add outside knowledge or speculation.
-    - Identify how each publication relates to the query. If the publications directly answer the query, state the answer clearly. If they do not answer it fully, highlight relevant points, evidence, or gaps that inform the query.
+    - If the publications directly answer the query, state the answer clearly.
     - Use the Cognitive Atlas terms (concepts, disorders, tasks) as supplementary information to help contextualize the findings or to provide additional perspective on the cognitive phenomena discussed in the papers.
     - Synthesize across studies, noting key areas of agreement or convergence, and conflicting or divergent findings with balanced context (e.g., methods, populations, analyses).
     - Use paragraphs or bullet points depending on the query: bullet points for lists and comparisons; paragraphs for integrative summaries.
