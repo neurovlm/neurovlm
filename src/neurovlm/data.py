@@ -15,9 +15,11 @@ from neurovlm.retrieval_resources import (
     _load_dataframe,
     _load_coordinates,
     _load_neuro_wiki,
+    _load_neuro_wiki_graph,
     _load_cogatlas_dataset,
     _load_cogatlas_task_dataset,
     _load_cogatlas_disorder_dataset,
+    _load_cogatlas_graph_dataset,
     _load_latent_text,
     _load_latent_wiki,
     _load_latent_cogatlas,
@@ -184,9 +186,11 @@ def preload_all_data(cache_dir: Optional[str] = None, verbose: bool = True) -> N
     loaders = [
         ("Publications dataframe", _load_dataframe),
         ("NeuroWiki dataframe", _load_neuro_wiki),
+        ("NeuroWiki graph dataframe", _load_neuro_wiki_graph),
         ("CogAtlas concepts", _load_cogatlas_dataset),
         ("CogAtlas tasks", lambda: _load_cogatlas_task_dataset(filtered=True)),
         ("CogAtlas disorders", _load_cogatlas_disorder_dataset),
+        ("CogAtlas graph", _load_cogatlas_graph_dataset),
         ("Latent text embeddings", _load_latent_text),
         ("Latent wiki embeddings", _load_latent_wiki),
         ("Latent CogAtlas embeddings", _load_latent_cogatlas),
@@ -239,8 +243,12 @@ def load_dataset(name: str):
             return _load_coordinates()
         case "neurowiki":
             return _load_neuro_wiki()
+        case "neurowiki_graph":
+            return _load_neuro_wiki_graph()
         case "cogatlas":
             return _load_cogatlas_dataset()
+        case "cogatlas_graph":
+            return _load_cogatlas_graph_dataset()
         case "cogatlas_task":
             return _load_cogatlas_task_dataset()
         case "cogatlas_disorder":
@@ -248,8 +256,8 @@ def load_dataset(name: str):
         case "networks":
             return _load_networks()
         case _:
-            valid_names = ["publications", "coordinates", "neurowiki", "cogatlas",
-                           "cogatlas_task", "cogatlas_disorder", "networks"]
+            valid_names = ["publications", "coordinates", "neurowiki", "neurowiki_graph",
+                           "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks"]
             raise ValueError(f"{name} not in {valid_names}")
 
 

@@ -103,6 +103,19 @@ def _load_neuro_wiki() -> pd.DataFrame:
         print(f"pyarrow failed: {exc}, trying fastparquet...")
         return pd.read_parquet(parquet_path, engine="fastparquet")
 
+@lru_cache(maxsize=1)
+def _load_neuro_wiki_graph() -> pd.DataFrame:
+    """Load the NeuroWiki graph DataFrame from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/neuro_wiki",
+        "neurowiki_graph.parquet"
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
 
 @lru_cache(maxsize=1)
 def _load_latent_neuro() -> Tuple[torch.Tensor, np.ndarray]:
@@ -152,6 +165,20 @@ def _load_cogatlas_task_dataset(filtered=False) -> pd.DataFrame:
 def _load_cogatlas_disorder_dataset(filtered=False) -> pd.DataFrame:
     """Load the CogAtlas disorder DataFrame from HuggingFace."""
     filename = "cogatlas_disorder_filtered.parquet" if filtered else "cogatlas_disorder.parquet"
+    parquet_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        filename
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+def _load_cogatlas_graph_dataset(filtered=False) -> pd.DataFrame:
+    """Load the CogAtlas graph DataFrame from HuggingFace."""
+    filename = "cogatlas_graph.parquet"
     parquet_path = _download_from_hf(
         "neurovlm/cognitive_atlas",
         filename
