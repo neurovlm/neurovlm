@@ -319,6 +319,7 @@ def _load_networks() -> dict:
 
     return networks
 
+
 @lru_cache(maxsize=1)
 def _proj_head_image_infonce() -> torch.nn.Module:
     """Load and return the image projection head from HuggingFace."""
@@ -327,8 +328,9 @@ def _proj_head_image_infonce() -> torch.nn.Module:
         "proj_head_image_infonce.safetensors",
         repo_type="model"
     )
-    proj_head = load_model(ProjHead(), model_path)
+    proj_head = load_model(ProjHead(384, 384, 384), model_path)
     return proj_head
+
 
 @lru_cache(maxsize=1)
 def _proj_head_text_mse() -> torch.nn.Module:
@@ -338,7 +340,7 @@ def _proj_head_text_mse() -> torch.nn.Module:
         "proj_head_text_mse.safetensors",
         repo_type="model"
     )
-    proj_head = load_model(ProjHead(), model_path)
+    proj_head = load_model(ProjHead(768, 512, 384), model_path)
     return proj_head
 
 
@@ -350,5 +352,5 @@ def _proj_head_text_infonce() -> torch.nn.Module:
         "proj_head_text_infonce.safetensors",
         repo_type="model"
     )
-    proj_head = load_model(ProjHead(384, 384, 384), model_path)
+    proj_head = load_model(ProjHead(768, 512, 384), model_path)
     return proj_head
