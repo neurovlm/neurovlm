@@ -11,6 +11,28 @@ from typing import Optional, List
 from huggingface_hub import hf_hub_download, snapshot_download
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 
+from neurovlm.retrieval_resources import (
+    _load_dataframe,
+    _load_coordinates,
+    _load_neuro_wiki,
+    _load_cogatlas_dataset,
+    _load_cogatlas_task_dataset,
+    _load_cogatlas_disorder_dataset,
+    _load_latent_text,
+    _load_latent_wiki,
+    _load_latent_cogatlas,
+    _load_latent_cogatlas_disorder,
+    _load_latent_cogatlas_task,
+    _load_autoencoder,
+    _load_masker,
+    _load_networks,
+    _proj_head_image_infonce,
+    _proj_head_text_mse,
+    _proj_head_text_infonce,
+    _load_specter,
+)
+
+
 # Hugging Face repository information
 REPO_DATASETS = {
     "neuro_image_papers": "neurovlm/neuro_image_papers",
@@ -116,23 +138,25 @@ def fetch_data(
 def get_data_dir() -> Path:
     """Return the path to the Hugging Face cache directory.
 
-    This is where all NeuroVLM data from Hugging Face is stored.
-    The cache is managed by huggingface_hub and shared across all projects.
+    This is where all NeuroVLM intermediate files will be stored.
+
+    The main models/datasets/etc have been committed to huggingface_hub repositories:
+        See load_dataset, load_latent, load_mask for functions that load datasets from huggingface_hub.
+        See from_pretrained method in models.py for a method that loads models from huggingface_hub.
 
     Returns
     -------
     Path
-        Path to the Hugging Face cache directory.
+        Path to the cache directory.
 
     Notes
     -----
-    The default cache directory is typically:
-    - Linux/Mac: ~/.cache/huggingface/hub
-    - Windows: %USERPROFILE%\\.cache\\huggingface\\hub
-
-    You can override this by setting the HF_HOME environment variable.
+    The default cache directory: ~/.cache/neurovlm
     """
-    return Path(HUGGINGFACE_HUB_CACHE)
+    cache = Path.home() / ".cache" / "neurovlm"
+    if not cache.exists():
+        os.mkdir(cache)
+    return cache
 
 
 def preload_all_data(cache_dir: Optional[str] = None, verbose: bool = True) -> None:
@@ -157,26 +181,6 @@ def preload_all_data(cache_dir: Optional[str] = None, verbose: bool = True) -> N
         print("Preloading all NeuroVLM data from Hugging Face...")
 
     # Import retrieval functions
-    from neurovlm.retrieval_resources import (
-        _load_dataframe,
-        _load_neuro_wiki,
-        _load_cogatlas_dataset,
-        _load_cogatlas_task_dataset,
-        _load_cogatlas_disorder_dataset,
-        _load_latent_text,
-        _load_latent_wiki,
-        _load_latent_cogatlas,
-        _load_latent_cogatlas_disorder,
-        _load_latent_cogatlas_task,
-        _load_autoencoder,
-        _load_masker,
-        _load_networks,
-        _proj_head_image_infonce,
-        _proj_head_mse_sparse_adhoc,
-        _proj_head_text_infonce,
-        _load_specter,
-    )
-
     loaders = [
         ("Publications dataframe", _load_dataframe),
         ("NeuroWiki dataframe", _load_neuro_wiki),
@@ -192,7 +196,7 @@ def preload_all_data(cache_dir: Optional[str] = None, verbose: bool = True) -> N
         ("Brain masker", _load_masker),
         ("Network atlases", _load_networks),
         ("Image projection head", _proj_head_image_infonce),
-        ("MSE projection head", _proj_head_mse_sparse_adhoc),
+        ("Text MSE projection head", _proj_head_text_mse),
         ("Text projection head", _proj_head_text_infonce),
         ("SPECTER model", _load_specter),
     ]
@@ -214,3 +218,71 @@ def preload_all_data(cache_dir: Optional[str] = None, verbose: bool = True) -> N
 
 # For backward compatibility, keep data_dir
 data_dir = get_data_dir()
+
+# Unified interface for all datasets
+def load_dataset(name: str):
+    """Alias to _load_* functions in retrieval resources.
+
+    Parameters
+    ----------
+    name: str, {"publications", "neurowiki", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks"}
+        Name of dataset.
+
+    Returns
+    -------
+    dataset
+    """
+    match name:
+        case "publications":
+            return _load_dataframe()
+        case "coordinates":
+            return _load_coordinates()
+        case "neurowiki":
+            return _load_neuro_wiki()
+        case "cogatlas":
+            return _load_cogatlas_dataset()
+        case "cogatlas_task":
+            return _load_cogatlas_task_dataset()
+        case "cogatlas_disorder":
+            return _load_cogatlas_disorder_dataset()
+        case "networks":
+            return _load_networks()
+        case _:
+            valid_names = ["publications", "coordinates", "neurowiki", "cogatlas",
+                           "cogatlas_task", "cogatlas_disorder", "networks"]
+            raise ValueError(f"{name} not in {valid_names}")
+
+
+def load_latent(name: str):
+    """Alias to _load_latent* functions in retrieval resources.
+
+    Parameters
+    ----------
+    name: str, {"publications", "neurowiki", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks"}
+        Name of dataset.
+
+    Returns
+    -------
+    latent
+    """
+    match name:
+        case "publications":
+            return _load_latent_text()
+        case "neurowiki":
+            return _load_latent_wiki()
+        case "cogatlas":
+            return _load_latent_cogatlas()
+        case "cogatlas_task":
+            return _load_latent_cogatlas_task()
+        case "cogatlas_disorder":
+            return _load_latent_cogatlas_disorder()
+        case "networks":
+            raise NotImplementedError
+        case _:
+            valid_names = ["publications", "neurowiki", "cogatlas",
+                           "cogatlas_task", "cogatlas_disorder", "networks"]
+            raise ValueError(f"{name} not in {valid_names}")
+
+def load_masker():
+    """Masker alias."""
+    return _load_masker()

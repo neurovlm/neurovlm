@@ -95,6 +95,12 @@ class NeuroAutoEncoder(nn.Module):
         """
         return self.decoder(self.encoder(X))
 
+    @staticmethod
+    def from_pretrained() -> nn.Module:
+        """Load pretrained autoencoder."""
+        from neurovlm.retrieval_resources import _load_autoencoder
+        return _load_autoencoder()
+
 class ProjHead(nn.Module):
     """Align latent tensors.
 
@@ -148,6 +154,27 @@ class ProjHead(nn.Module):
             Aligned text-tensor.
         """
         return self.aligner(X)
+
+    @staticmethod
+    def from_pretrained(model_name: str) -> nn.Module:
+        """Load pretrained autoencoder.
+
+        Parameters
+        ----------
+        model_name : str, {"text_infonce", "image_infonce", "text_mse"}
+        """
+        match model_name:
+            # Contrastive models
+            case "text_infonce":
+                from neurovlm.retrieval_resources import _proj_head_text_infonce
+                return _proj_head_text_infonce()
+            case "image_infonce":
+                from neurovlm.retrieval_resources import _proj_head_image_infonce
+                return _proj_head_image_infonce()
+            # MSE text-to-brain model
+            case "text_mse":
+                from neurovlm.retrieval_resources import _proj_head_text_mse
+                return _proj_head_text_mse()
 
 class Specter:
     """Wrapper for Specter model."""
@@ -291,6 +318,12 @@ class Specter:
 
         return emb
 
+    @staticmethod
+    def from_pretrained() -> nn.Module:
+        """Load pretrained Specter - an alias to init to keep api consistent."""
+        return Specter()
+
+
 class ConceptClf(nn.Module):
     """Predict concepts from latent neuro embeddings."""
     def __init__(self, d_out):
@@ -302,6 +335,11 @@ class ConceptClf(nn.Module):
             nn.ReLU(),
             nn.Linear(1526, d_out)
         )
+
     def forward(self, X: torch.tensor):
         return self.seq(X)
-        
+
+    @staticmethod
+    def from_pretrained() -> nn.Module:
+        """Load pretrained Specter - an alias to init to keep api consistent."""
+        raise NotImplementedError

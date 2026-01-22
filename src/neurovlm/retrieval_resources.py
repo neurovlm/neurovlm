@@ -28,7 +28,7 @@ from neurovlm.io import load_model
 __all__ = [
     "_load_dataframe",
     "_load_neuro_wiki",
-    "_load_neuro_brain",
+    "_load_latent_neuro",
     "_load_cogatlas_dataset",
     "_load_cogatlas_task_dataset",
     "_load_cogatlas_disorder_dataset",
@@ -42,7 +42,7 @@ __all__ = [
     "_load_masker",
     "_load_networks",
     "_proj_head_image_infonce",
-    "_proj_head_mse_sparse_adhoc",
+    "_proj_head_text_mse",
     "_proj_head_text_infonce",
 ]
 
@@ -67,7 +67,21 @@ def _load_dataframe() -> pd.DataFrame:
     """Load the publications DataFrame from HuggingFace."""
     parquet_path = _download_from_hf(
         "neurovlm/neuro_image_papers",
-        "publications_more.parquet"
+        "publications.parquet"
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_coordinates() -> pd.DataFrame:
+    """Load the x, y, z coordinates DataFrame from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/neuro_image_papers",
+        "coordinates.parquet"
     )
     try:
         return pd.read_parquet(parquet_path, engine="pyarrow")
@@ -91,11 +105,11 @@ def _load_neuro_wiki() -> pd.DataFrame:
 
 
 @lru_cache(maxsize=1)
-def _load_neuro_brain() -> Tuple[torch.Tensor, np.ndarray]:
+def _load_latent_neuro() -> Tuple[torch.Tensor, np.ndarray]:
     """Load the Neuro brain map embedding from HuggingFace."""
     latent_path = _download_from_hf(
         "neurovlm/embedded_text",
-        "latent_neuro_sparse.pt"
+        "latent_neuro.pt"
     )
     latent_payload = torch.load(
         latent_path,
@@ -290,7 +304,7 @@ def _proj_head_image_infonce() -> torch.nn.Module:
     return proj_head
 
 @lru_cache(maxsize=1)
-def _proj_head_mse_sparse_adhoc() -> torch.nn.Module:
+def _proj_head_text_mse() -> torch.nn.Module:
     """Load and return the MSE projection head from HuggingFace."""
     model_path = _download_from_hf(
         "neurovlm/encoder_and_proj_head",
