@@ -21,6 +21,7 @@ from neurovlm.retrieval_resources import (
     _load_cogatlas_disorder_dataset,
     _load_cogatlas_graph_dataset,
     _load_latent_text,
+    _load_latent_neuro,
     _load_latent_wiki,
     _load_latent_cogatlas,
     _load_latent_cogatlas_disorder,
@@ -235,6 +236,15 @@ def load_dataset(name: str):
     Returns
     -------
     dataset
+
+    Notes
+    -----
+
+    - "publications": dataframe that includes doi, pmid, pmcid, titles, abstracts
+    - "neurowiki": dataframe that includes article title and description
+    - "cogatlas": dataframe that contains terms
+    - "networks": dict that contains atlas and network name keys, and .nii.gz keys.
+
     """
     match name:
         case "publications":
@@ -272,10 +282,22 @@ def load_latent(name: str):
     Returns
     -------
     latent
+
+    Notes
+    -----
+
+    - "publications": pubmed papers passed through specter.
+    - "neuro": encoded neuroimages from pubmed coordinate tables
+    - "neurowiki": wikipedia articles pass through specter
+    - "cogatlas": cogatlas terms and definitions passed through specter
+    - "networks": encoded network images
+
     """
     match name:
         case "publications":
             return _load_latent_text()
+        case "neuro":
+            return _load_latent_neuro()
         case "neurowiki":
             return _load_latent_wiki()
         case "cogatlas":
