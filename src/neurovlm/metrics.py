@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 from skimage.metrics import structural_similarity as ssim
-from sklearn.metrics import mean_squared_error, f1_score
+from sklearn.metrics import roc_curve, auc
 
 def compute_metrics(
     original: torch.Tensor,
@@ -121,44 +121,105 @@ def recall_at_k(cos_sim: torch.Tensor, k: int) -> float:
     hit = (ranks[:, :k] == correct[:, None]).any(dim=1)
     return hit.float().mean().item()
 
-def recall_curve(latent_text: torch.Tensor, latent_image: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Compute recall@k across all k, in both directions.
 
-    Parameters
-    ----------
-    latent_text : 2d tensor
-        Latent text embeddings.
-    latent_image : 2d tensor
-        Latent image embeddings.
+@torch.no_grad()
+def recall_curve(latent_text: torch.Tensor,
+                 latent_image: torch.Tensor,
+                 step: int = 1) -> tuple[torch.Tensor, torch.Tensor]:
 
-    Returns
-    -------
-    t_to_i : 1d tensor
-        Recall@k for text-to-image direction, stepping across all k.
-    i_to_t : 1d tensor
-        Recall@k for image-to-text direction, stepping across all k.
-    """
-    # Unit vectors
-    if not (latent_text.norm(dim=1) == 1).all():
-        latent_text_norm = F.normalize(latent_text, dim=1, eps=1e-8)
-    else:
-        latent_text_norm = latent_text
+    t = F.normalize(latent_text, dim=1, eps=1e-8)
+    v = F.normalize(latent_image, dim=1, eps=1e-8)
 
-    if not (latent_image.norm(dim=1) == 1).all():
-        latent_image_norm = F.normalize(latent_image, dim=1, eps=1e-8)
-    else:
-        latent_image_norm = latent_image
-        
-    # Text-to-image
-    cos_t_to_i = latent_text_norm @ latent_image_norm.T
-    t_to_i = torch.zeros(latent_text_norm.shape[0])
-    for k in range(len(latent_text_norm)):
-        t_to_i[k] = recall_at_k(cos_t_to_i, k + 1)
+    n = t.shape[0]
+    device = t.device
+    ks = torch.arange(0, n, step, device=device) + 1
 
-    # Image-to-text
-    cos_i_to_t = latent_image_norm @ latent_text_norm.T
-    i_to_t = torch.zeros(latent_image_norm.shape[0])
-    for k in range(len(latent_text_norm)):
-        i_to_t[k] = recall_at_k(cos_i_to_t, k + 1)
+    def _curve_from_sim(sim: torch.Tensor) -> torch.Tensor:
+        ranks = sim.argsort(dim=1, descending=True)
+        correct = torch.arange(n, device=sim.device)
+        pos = ranks.eq(correct[:, None]).to(torch.int32).argmax(dim=1)  # FIX
 
+        counts = torch.bincount(pos, minlength=n)
+        recall_all = counts.cumsum(0).float() / float(n)
+        return recall_all.index_select(0, ks - 1)
+
+    sim = t @ v.T
+    t_to_i = _curve_from_sim(sim)
+    i_to_t = _curve_from_sim(sim.T)
     return t_to_i, i_to_t
+
+
+def bernoulli_bce(y, p, eps=1e-7):
+    """Elementwise Bernoulli negative log-likelihood (cross-entropy), in nats."""
+    p = np.clip(p, eps, 1 - eps)
+    y = np.clip(y, 0.0, 1.0)
+    return -(y * np.log(p) + (1 - y) * np.log(1 - p))
+
+
+def eval_recon_bpp(y_true, logits, *, baseline="per_pixel", eps=1e-7):
+    """
+    y_true: (N, D) floats in [0,1]
+    logits: (N, D) raw logits from decoder (before sigmoid)
+
+    Returns dict with:
+      - bpp_model_per_image
+      - bpp_base_per_image
+      - delta_bpp_per_image (base - model)
+      - delta_bpp_per_pixel (mean over N, in bits)  # for a skill map
+    """
+    y_true = np.asarray(y_true)
+    logits = np.asarray(logits)
+    assert y_true.shape == logits.shape, f"shape mismatch: {y_true.shape} vs {logits.shape}"
+    N, D = y_true.shape
+
+    p = 1 / (1 + np.exp(-logits)) # sigmoid(logits)
+
+    # Model BCE per image (mean over pixels), then to bits
+    bce_model = bernoulli_bce(y_true, p, eps=eps).mean(axis=1)  # (N,)
+    bpp_model = bce_model / np.log(2)
+
+    # Baseline probabilities
+    if baseline == "global":
+        p0 = float(y_true.mean())
+        p_base = np.full((N, D), p0, dtype=np.float64)
+    elif baseline == "per_pixel":
+        p0 = y_true.mean(axis=0, keepdims=True)  # (1, D)
+        p_base = np.repeat(p0, repeats=N, axis=0)  # (N, D)
+    else:
+        raise ValueError("baseline must be 'global' or 'per_pixel'")
+
+    bce_base = bernoulli_bce(y_true, p_base, eps=eps).mean(axis=1)  # (N,)
+    bpp_base = bce_base / np.log(2)
+
+    delta_bpp = bpp_base - bpp_model  # (N,) improvement over baseline, bits/pixel
+
+    # Per-pixel skill map (average improvement over images)
+    bce_model_px = bernoulli_bce(y_true, p, eps=eps)          # (N, D)
+    bce_base_px  = bernoulli_bce(y_true, p_base, eps=eps)     # (N, D)
+    delta_bpp_px = (bce_base_px - bce_model_px).mean(axis=0) / np.log(2)  # (D,)
+
+    return dict(
+        bpp_model_per_image=bpp_model,
+        bpp_base_per_image=bpp_base,
+        delta_bpp_per_image=delta_bpp,
+        delta_bpp_per_pixel=delta_bpp_px,
+        baseline=baseline,
+    )
+
+
+def compute_ae_performance(X: torch.Tensor, X_re: torch.Tensor):
+    """Autoencoder performance metrics."""
+    fpr, tpr, _ = roc_curve(
+        X.numpy().reshape(-1) > 0.5,
+        torch.sigmoid(X_re).numpy().reshape(-1)
+    )
+    roc_auc = auc(fpr, tpr)
+
+    res = eval_recon_bpp(X, X_re, baseline="per_pixel")
+
+    delta = res["delta_bpp_per_image"]
+    bpp_base = res["bpp_base_per_image"]
+
+    pct = 100.0 * (delta / np.clip(bpp_base, 1e-12, None))
+
+    return fpr, tpr, pct, roc_auc

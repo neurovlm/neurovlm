@@ -230,7 +230,7 @@ def load_dataset(name: str):
 
     Parameters
     ----------
-    name: str, {"publications", "neurowiki", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks"}
+    name: str, {"publications", "coordinate", "neurowiki", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks"}
         Name of dataset.
 
     Returns

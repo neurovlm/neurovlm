@@ -28,6 +28,7 @@ from neurovlm.io import load_model
 __all__ = [
     "_load_dataframe",
     "_load_neuro_wiki",
+    "_load_coordinates",
     "_load_latent_neuro",
     "_load_cogatlas_dataset",
     "_load_cogatlas_task_dataset",
