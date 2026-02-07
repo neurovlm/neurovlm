@@ -156,7 +156,7 @@ def bernoulli_bce(y, p, eps=1e-7):
     return -(y * np.log(p) + (1 - y) * np.log(1 - p))
 
 
-def eval_recon_bpp(y_true, logits, *, baseline="per_pixel", eps=1e-7):
+def bits_per_pixel(y_true, logits, *, baseline="per_pixel", eps=1e-7):
     """
     y_true: (N, D) floats in [0,1]
     logits: (N, D) raw logits from decoder (before sigmoid)
@@ -215,7 +215,7 @@ def compute_ae_performance(X: torch.Tensor, X_re: torch.Tensor):
     )
     roc_auc = auc(fpr, tpr)
 
-    res = eval_recon_bpp(X, X_re, baseline="per_pixel")
+    res = bits_per_pixel(X, X_re, baseline="per_pixel")
 
     delta = res["delta_bpp_per_image"]
     bpp_base = res["bpp_base_per_image"]

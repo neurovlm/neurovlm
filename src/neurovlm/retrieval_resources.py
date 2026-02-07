@@ -26,9 +26,9 @@ from neurovlm.models import Specter, ProjHead, NeuroAutoEncoder
 from neurovlm.io import load_model
 
 __all__ = [
-    "_load_dataframe",
+    "_load_pubmed_dataframe",
     "_load_neuro_wiki",
-    "_load_coordinates",
+    "_load_pubmed_coordinates",
     "_load_latent_neuro",
     "_load_cogatlas_dataset",
     "_load_cogatlas_task_dataset",
@@ -64,7 +64,7 @@ def _download_from_hf(repo_id: str, filename: str, repo_type: str = "dataset") -
 
 
 @lru_cache(maxsize=1)
-def _load_dataframe() -> pd.DataFrame:
+def _load_pubmed_dataframe() -> pd.DataFrame:
     """Load the publications DataFrame from HuggingFace."""
     parquet_path = _download_from_hf(
         "neurovlm/neuro_image_papers",
@@ -78,7 +78,7 @@ def _load_dataframe() -> pd.DataFrame:
 
 
 @lru_cache(maxsize=1)
-def _load_coordinates() -> pd.DataFrame:
+def _load_pubmed_coordinates() -> pd.DataFrame:
     """Load the x, y, z coordinates DataFrame from HuggingFace."""
     parquet_path = _download_from_hf(
         "neurovlm/neuro_image_papers",

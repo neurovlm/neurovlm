@@ -34,7 +34,7 @@ from tqdm import tqdm
 from neurovlm.data import fetch_data, get_data_dir
 from neurovlm.train import which_device
 from neurovlm.retrieval_resources import (
-    _load_dataframe,
+    _load_pubmed_dataframe,
     _load_latent_text,
     _load_latent_wiki,
     _load_latent_cogatlas,
@@ -64,7 +64,7 @@ def search_papers_from_brain(
     if not isinstance(query, torch.Tensor):
         raise TypeError("query must be a torch.Tensor for brain-based retrieval")
 
-    df = _load_dataframe()
+    df = _load_pubmed_dataframe()
     latent_text, latent_pmids = _load_latent_text()
     proj_head_img = _proj_head_image_infonce()
     proj_head_text = _proj_head_text_infonce()
@@ -282,7 +282,7 @@ def load_metadata(data_dir: Path | str | None = data_dir) -> dict[str, pd.DataFr
         directory is fetched (or validated) automatically.
     """
     # Load publications from HuggingFace
-    df_pubs = _load_dataframe()
+    df_pubs = _load_pubmed_dataframe()
 
     # Coordinates are still loaded locally as they're not yet on HuggingFace
     root = Path(fetch_data() if data_dir is None else data_dir)

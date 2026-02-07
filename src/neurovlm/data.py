@@ -10,10 +10,10 @@ from pathlib import Path
 from typing import Optional, List
 from huggingface_hub import hf_hub_download, snapshot_download
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
-
+import pandas as pd
 from neurovlm.retrieval_resources import (
-    _load_dataframe,
-    _load_coordinates,
+    _load_pubmed_dataframe,
+    _load_pubmed_coordinates,
     _load_neuro_wiki,
     _load_neuro_wiki_graph,
     _load_cogatlas_dataset,
@@ -185,7 +185,7 @@ def preload_all_data(cache_dir: Optional[str] = None, verbose: bool = True) -> N
 
     # Import retrieval functions
     loaders = [
-        ("Publications dataframe", _load_dataframe),
+        ("Publications dataframe", _load_pubmed_dataframe),
         ("NeuroWiki dataframe", _load_neuro_wiki),
         ("NeuroWiki graph dataframe", _load_neuro_wiki_graph),
         ("CogAtlas concepts", _load_cogatlas_dataset),
@@ -225,32 +225,37 @@ def preload_all_data(cache_dir: Optional[str] = None, verbose: bool = True) -> N
 data_dir = get_data_dir()
 
 # Unified interface for all datasets
-def load_dataset(name: str):
+def load_dataset(name: str) -> pd.DataFrame:
     """Alias to _load_* functions in retrieval resources.
 
     Parameters
     ----------
-    name: str, {"publications", "coordinate", "neurowiki", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks"}
+    name: str, {"publications", "coordinate", "neurowiki", "cogatlas",
+                "cogatlas_task", "cogatlas_graph", "cogatlas_disorder", "networks"}
         Name of dataset.
 
     Returns
     -------
-    dataset
+    dataset : pd.DataFrame
 
     Notes
     -----
 
-    - "publications": dataframe that includes doi, pmid, pmcid, titles, abstracts
-    - "neurowiki": dataframe that includes article title and description
-    - "cogatlas": dataframe that contains terms
+    - "publications": dataframe that includes pubmed dois, pmids, pmcids, titles, abstracts
+    - "coordinates": pubmed coordinate tables
+    - "neurowiki": wikipedia article titles and descriptions
+    - "cogatlas": all cogatlas terms
+    - "cogatlas_task": cogatlas task terms
+    - "cogatlas_disorder": cogatlas disorder terms
+    - "cogatlas_graph": how cogatlas terms are related
     - "networks": dict that contains atlas and network name keys, and .nii.gz keys.
 
     """
     match name:
         case "publications":
-            return _load_dataframe()
+            return _load_pubmed_dataframe()
         case "coordinates":
-            return _load_coordinates()
+            return _load_pubmed_coordinates()
         case "neurowiki":
             return _load_neuro_wiki()
         case "neurowiki_graph":
