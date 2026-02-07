@@ -4,7 +4,7 @@
 API Documentation
 =================
 
-API reference for the timescales module.
+API reference for the `neurovlm` module.
 
 Table of Contents
 =================
@@ -16,7 +16,7 @@ Table of Contents
 Data
 ----
 
-Fetches from huggingface and loads as tensors or dataframes.
+Fetches from huggingface and loads.
 
 Fetching
 ~~~~~~~~
@@ -32,7 +32,7 @@ Fetching
 Embeddings
 ~~~~~~~~~~
 
-Precomputed latent vectors for text and neuroimages.
+Pre-computed latent vectors for text and neuroimages.
 
 .. currentmodule:: neurovlm.data
 
