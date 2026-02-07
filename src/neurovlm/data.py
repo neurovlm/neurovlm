@@ -96,45 +96,54 @@ def fetch_data(
     if cache_dir is None:
         cache_dir = HUGGINGFACE_HUB_CACHE
 
-    print(f"Downloading NeuroVLM data to: {cache_dir}")
+    status_width = 0
+
+    def _print_status(message: str) -> None:
+        nonlocal status_width
+        status_width = max(status_width, len(message))
+        # Keep progress on a single line and erase leftovers from prior messages.
+        print(f"\r{message.ljust(status_width)}", end="", flush=True)
+
+    _print_status(f"Downloading NeuroVLM data to: {cache_dir}")
 
     # Download datasets
     for dataset_key in datasets:
         if dataset_key not in REPO_DATASETS:
-            print(f"Warning: Unknown dataset key '{dataset_key}', skipping...")
+            _print_status(f"Warning: Unknown dataset key '{dataset_key}', skipping...")
             continue
 
         repo_id = REPO_DATASETS[dataset_key]
-        print(f"Downloading dataset: {repo_id}")
+        _print_status(f"Downloading dataset: {repo_id}")
         try:
             snapshot_download(
                 repo_id=repo_id,
                 repo_type="dataset",
                 cache_dir=cache_dir,
             )
-            print(f"✓ Successfully downloaded {repo_id}")
+            _print_status(f"✓ Successfully downloaded {repo_id}")
         except Exception as e:
-            print(f"✗ Error downloading {repo_id}: {e}")
+            _print_status(f"✗ Error downloading {repo_id}: {e}")
 
     # Download models
     for model_key in models:
         if model_key not in REPO_MODELS:
-            print(f"Warning: Unknown model key '{model_key}', skipping...")
+            _print_status(f"Warning: Unknown model key '{model_key}', skipping...")
             continue
 
         repo_id = REPO_MODELS[model_key]
-        print(f"Downloading model: {repo_id}")
+        _print_status(f"Downloading model: {repo_id}")
         try:
             snapshot_download(
                 repo_id=repo_id,
                 repo_type="model",
                 cache_dir=cache_dir,
             )
-            print(f"✓ Successfully downloaded {repo_id}")
+            _print_status(f"✓ Successfully downloaded {repo_id}")
         except Exception as e:
-            print(f"✗ Error downloading {repo_id}: {e}")
+            _print_status(f"✗ Error downloading {repo_id}: {e}")
 
-    print(f"\n✓ Data fetch complete. Cache directory: {cache_dir}")
+    print(f"\r{' ' * status_width}\r", end="", flush=True)
+    print(f"✓ Data fetch complete. Cache directory: {cache_dir}")
     return cache_dir
 
 
@@ -157,8 +166,7 @@ def get_data_dir() -> Path:
     The default cache directory: ~/.cache/neurovlm
     """
     cache = Path.home() / ".cache" / "neurovlm"
-    if not cache.exists():
-        os.mkdir(cache)
+    cache.mkdir(exist_ok=True, parents=True)
     return cache
 
 
