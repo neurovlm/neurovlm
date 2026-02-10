@@ -1,23 +1,60 @@
-# <em>neuro</em>vlm
+# NeuroVLM
 
-Neuro vision-language models.
+NeuroVLM maps between neuroimaging activation maps and neuroscience text.
 
-### Model
+![model](https://github.com/neurovlm/neurovlm_data/blob/13dd7769f9603c036a9338b7da4adc2f3a03ec94/docs/model.png)
 
-The <em>neuro</em>vlm model is trained on text-neuro pairs and includes a neuro-autoencoder and a text encoder-aligner.
-The neuro-autoencoder is first trained. The text aligner converts latent text vectors, from a pre-trained text
-transformer, to the latent neuro space. This results in text-to-brain mappings.
+## Install
 
-![model](https://github.com/neurovlm/neurovlm_data/blob/08ad84c1460a4e7e46929ed5c8e89c6e462b9994/docs/model.png)
+```bash
+pip install -e .
+```
 
-### Module
+## Quickstart
 
-`neurovlm.models`: pytorch models
+Fetch NeuroVLM's datasets:
 
-`neurovlm.train`: train models
+```python
+from neurovlm.data import fetch_data
+fetch_data()
+```
 
-`neurovlm.coords`: extract neuro-vectors from MNI coordinates
+Use the `NeuroVLM` object for text-to-brain, brain-to-text, text-to-text, and brain-to-brain:
 
-`neurovlm.data`: fetch dataset
-  
+```python
+from neurovlm import NeuroVLM
+from neurovlm.data import load_latent, load_dataset
 
+# Load networks examples images
+networks = load_latent("networks_neuro")
+
+# Text-to-brain: generative
+nvlm = NeuroVLM()
+res = nvlm.to_brain("default mode network", model="mse")
+imgs = res.to_nifti() # returns nib.Nifti1Image
+
+# Brain-to-text: contrastive
+res = nvlm.to_text(networks["Du"]["DN-A"])
+res.top_k(1) # returns pd.DataFrame
+
+# Text-to-brain: contrastive
+res = nvlm.to_brain("default mode network", model="infonce")
+imgs = res.top_k(3).to_nifti()
+
+# Text-to-text
+res = nvlm.to_text("default mode network", project=False)
+res.top_k(1) # returns pd.DataFrame
+
+# Brain-to-brain
+res = nvlm.to_brain(networks["Du"]["DN-A"], model="infonce")
+res.top_k(5) # returns pd.DataFrame
+```
+
+## Data and API
+
+- Data/model fetch and loaders: `neurovlm.data`
+- Full API reference: `docs/api.rst`
+
+## License
+
+Apache-2.0 (`LICENSE`).
