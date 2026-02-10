@@ -20,19 +20,23 @@ from neurovlm.retrieval_resources import (
     _load_cogatlas_task_dataset,
     _load_cogatlas_disorder_dataset,
     _load_cogatlas_graph_dataset,
+    _load_networks,
+    _load_networks_labels,
+    _load_networks_canonical,
     _load_latent_text,
     _load_latent_neuro,
+    _load_latent_networks_neuro,
+    _load_latent_networks_canonical_text,
     _load_latent_wiki,
     _load_latent_cogatlas,
     _load_latent_cogatlas_disorder,
     _load_latent_cogatlas_task,
     _load_autoencoder,
     _load_masker,
-    _load_networks,
     _proj_head_image_infonce,
     _proj_head_text_mse,
     _proj_head_text_infonce,
-    _load_specter,
+    _load_specter
 )
 
 
@@ -41,13 +45,12 @@ REPO_DATASETS = {
     "neuro_image_papers": "neurovlm/neuro_image_papers",
     "neuro_wiki": "neurovlm/neuro_wiki",
     "cognitive_atlas": "neurovlm/cognitive_atlas",
-    "embedded_text": "neurovlm/embedded_text",
+    "embedded_text": "neurovlm/embedded_text"
 }
 
 REPO_MODELS = {
     "encoder_and_proj_head": "neurovlm/encoder_and_proj_head",
 }
-
 
 def fetch_data(
     datasets: Optional[List[str]] = None,
@@ -120,9 +123,9 @@ def fetch_data(
                 repo_type="dataset",
                 cache_dir=cache_dir,
             )
-            _print_status(f"✓ Successfully downloaded {repo_id}")
+            _print_status(f"Successfully downloaded {repo_id}")
         except Exception as e:
-            _print_status(f"✗ Error downloading {repo_id}: {e}")
+            _print_status(f"Error downloading {repo_id}: {e}")
 
     # Download models
     for model_key in models:
@@ -138,12 +141,12 @@ def fetch_data(
                 repo_type="model",
                 cache_dir=cache_dir,
             )
-            _print_status(f"✓ Successfully downloaded {repo_id}")
+            _print_status(f"Successfully downloaded {repo_id}")
         except Exception as e:
-            _print_status(f"✗ Error downloading {repo_id}: {e}")
+            _print_status(f"Error downloading {repo_id}: {e}")
 
     print(f"\r{' ' * status_width}\r", end="", flush=True)
-    print(f"✓ Data fetch complete. Cache directory: {cache_dir}")
+    print(f"Data fetch complete. Cache directory: {cache_dir}")
     return cache_dir
 
 
@@ -223,10 +226,10 @@ def preload_all_data(cache_dir: Optional[str] = None, verbose: bool = True) -> N
                 print("✓")
         except Exception as e:
             if verbose:
-                print(f"✗ Error: {e}")
+                print(f"Error: {e}")
 
     if verbose:
-        print("\n✓ All data preloaded successfully!")
+        print("\nAll data preloaded successfully!")
 
 
 # For backward compatibility, keep data_dir
@@ -260,11 +263,11 @@ def load_dataset(name: str) -> pd.DataFrame:
 
     """
     match name:
-        case "publications":
+        case "publications" | "pubmed":
             return _load_pubmed_dataframe()
-        case "coordinates":
+        case "coordinates" | "pubmed_coordinates":
             return _load_pubmed_coordinates()
-        case "neurowiki":
+        case "wiki" | "neurowiki":
             return _load_neuro_wiki()
         case "neurowiki_graph":
             return _load_neuro_wiki_graph()
@@ -278,9 +281,11 @@ def load_dataset(name: str) -> pd.DataFrame:
             return _load_cogatlas_disorder_dataset()
         case "networks":
             return _load_networks()
+        case "networks_canonical":
+            return _load_networks_canonical()
         case _:
-            valid_names = ["publications", "coordinates", "neurowiki", "neurowiki_graph",
-                           "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks"]
+            valid_names = ["publications", "pubmed", "coordinates", "pubmed_coordinates", "wiki", "neurowiki",
+                           "neurowiki_graph", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks"]
             raise ValueError(f"{name} not in {valid_names}")
 
 
@@ -307,11 +312,11 @@ def load_latent(name: str):
 
     """
     match name:
-        case "publications":
+        case "publications" | "pubmed":
             return _load_latent_text()
         case "neuro":
             return _load_latent_neuro()
-        case "neurowiki":
+        case "wiki" | "neurowiki":
             return _load_latent_wiki()
         case "cogatlas":
             return _load_latent_cogatlas()
@@ -319,11 +324,14 @@ def load_latent(name: str):
             return _load_latent_cogatlas_task()
         case "cogatlas_disorder":
             return _load_latent_cogatlas_disorder()
-        case "networks":
-            raise NotImplementedError
+        case "networks_text":
+            return _load_latent_networks_canonical_text()
+        case "networks_neuro":
+            return _load_latent_networks_neuro()
         case _:
-            valid_names = ["publications", "neurowiki", "cogatlas",
-                           "cogatlas_task", "cogatlas_disorder", "networks"]
+            valid_names = ["publications", "pubmed", "neurowiki", "cogatlas",
+                           "cogatlas_task", "cogatlas_disorder", "networks_text",
+                           "networks_neuro"]
             raise ValueError(f"{name} not in {valid_names}")
 
 def load_masker():

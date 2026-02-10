@@ -281,6 +281,34 @@ def _load_latent_cogatlas_task() -> Tuple[torch.Tensor, np.ndarray]:
     latent_terms = np.asarray(latent_payload["term"])
     return latent, latent_terms
 
+@lru_cache(maxsize=1)
+def _load_latent_networks_canonical_text() -> dict:
+    """Load latent network atlases."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_networks_text.pt"
+    )
+    latents = torch.load(
+        latent_path,
+        weights_only=False,
+    )
+
+    return latents
+
+@lru_cache(maxsize=1)
+def _load_latent_networks_neuro() -> dict:
+    """Load latent network atlases."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_networks_image.pt"
+    )
+    latents = torch.load(
+        latent_path,
+        weights_only=False,
+    )
+
+    return latents
+
 
 @lru_cache(maxsize=1)
 def _load_autoencoder() -> torch.nn.Module:
@@ -319,6 +347,26 @@ def _load_networks() -> dict:
         networks = pickle.load(f)
 
     return networks
+
+
+@lru_cache(maxsize=1)
+def _load_networks_labels() -> dict:
+    """Load network atlases from HuggingFace."""
+    networks_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "networks_labels.parquet"
+    )
+    return pd.read_parquet(networks_path)
+
+
+@lru_cache(maxsize=1)
+def _load_networks_canonical() -> pd.DataFrame:
+    """Load names and descriptions of common networks."""
+    networks_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "network_text.parquet"
+    )
+    return pd.read_parquet(networks_path)
 
 
 @lru_cache(maxsize=1)

@@ -376,3 +376,7 @@ def load_model(name: str):
             return NeuroAutoEncoder.from_pretrained()
         case "specter":
             return Specter()
+        case _:
+            valid_names = ["proj_head_text_infonce", "proj_head_image_infonce", "proj_head_text_mse",
+                           "autoencoder", "specter"]
+            raise ValueError(f"{name} not in {valid_names}")
