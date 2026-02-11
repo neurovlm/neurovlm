@@ -8,6 +8,7 @@ default cache mechanism.
 import os
 from pathlib import Path
 from typing import Optional, List
+import torch
 from huggingface_hub import hf_hub_download, snapshot_download
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 import pandas as pd
@@ -31,6 +32,12 @@ from neurovlm.retrieval_resources import (
     _load_latent_cogatlas,
     _load_latent_cogatlas_disorder,
     _load_latent_cogatlas_task,
+    _load_latent_neurovault_images,
+    _load_latent_neurovault_text,
+    _load_publications_neurovault_dataframe,
+    _load_images_neurovault_dataframe,
+    _load_neurovault_images,
+    _load_pubmed_images,
     _load_autoencoder,
     _load_masker,
     _proj_head_image_infonce,
@@ -235,38 +242,62 @@ def preload_all_data(cache_dir: Optional[str] = None, verbose: bool = True) -> N
 # For backward compatibility, keep data_dir
 data_dir = get_data_dir()
 
+
+def _without_grad(payload):
+    """Recursively detach tensors and disable gradients."""
+    if isinstance(payload, torch.Tensor):
+        out = payload.detach()
+        if out.requires_grad:
+            out = out.requires_grad_(False)
+        return out
+    if isinstance(payload, tuple):
+        return tuple(_without_grad(item) for item in payload)
+    if isinstance(payload, list):
+        return [_without_grad(item) for item in payload]
+    if isinstance(payload, dict):
+        return {key: _without_grad(value) for key, value in payload.items()}
+    return payload
+
 # Unified interface for all datasets
-def load_dataset(name: str) -> pd.DataFrame:
+def load_dataset(name: str):
     """Alias to _load_* functions in retrieval resources.
 
     Parameters
     ----------
     name: str, {"publications", "coordinate", "neurowiki", "cogatlas",
-                "cogatlas_task", "cogatlas_graph", "cogatlas_disorder", "networks"}
+                "cogatlas_task", "cogatlas_graph", "cogatlas_disorder", "networks",
+                "publications_neurovault", "images_neurovault", "neurovault_images",
+                "pubmed_images"}
         Name of dataset.
 
     Returns
     -------
-    dataset : pd.DataFrame
+    dataset
 
     Notes
     -----
 
-    - "publications": dataframe that includes pubmed dois, pmids, pmcids, titles, abstracts
-    - "coordinates": pubmed coordinate tables
+    - "pubmed_text": dataframe that includes pubmed dois, pmids, pmcids, titles, abstracts
+    - "pubmed_coordinates": pubmed coordinate tables
+    - "pubmed_images": tensor containing pubmed images
     - "neurowiki": wikipedia article titles and descriptions
     - "cogatlas": all cogatlas terms
     - "cogatlas_task": cogatlas task terms
     - "cogatlas_disorder": cogatlas disorder terms
     - "cogatlas_graph": how cogatlas terms are related
     - "networks": dict that contains atlas and network name keys, and .nii.gz keys.
-
+    - "publications_neurovault": neurovault-linked publication metadata (titles, abstracts, dois)
+    - "neurovault_text": publication data for each neurovault image
+    - "neurovault_images": tensor containing neurovault images
+    - "neurovault_images_meta" dataframe the maps each image to a study
     """
     match name:
-        case "publications" | "pubmed":
+        case "pubmed_text":
             return _load_pubmed_dataframe()
-        case "coordinates" | "pubmed_coordinates":
+        case "pubmed_coordinates":
             return _load_pubmed_coordinates()
+        case "pubmed_images":
+            return _load_pubmed_images()
         case "wiki" | "neurowiki":
             return _load_neuro_wiki()
         case "neurowiki_graph":
@@ -283,9 +314,17 @@ def load_dataset(name: str) -> pd.DataFrame:
             return _load_networks()
         case "networks_canonical":
             return _load_networks_canonical()
+        case "neurovault_text":
+            return _load_publications_neurovault_dataframe()
+        case "neurovault_images_meta":
+            return _load_images_neurovault_dataframe()
+        case "neurovault_images":
+            return _load_neurovault_images()
         case _:
             valid_names = ["publications", "pubmed", "coordinates", "pubmed_coordinates", "wiki", "neurowiki",
-                           "neurowiki_graph", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks"]
+                           "neurowiki_graph", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks",
+                           "networks_canonical", "publications_neurovault", "images_neurovault",
+                           "neurovault_images", "pubmed_images"]
             raise ValueError(f"{name} not in {valid_names}")
 
 
@@ -294,7 +333,8 @@ def load_latent(name: str):
 
     Parameters
     ----------
-    name: str, {"publications", "neurowiki", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks"}
+    name: str, {"publications", "neurowiki", "cogatlas", "cogatlas_task", "cogatlas_disorder",
+                "networks", "latent_neurovault_images", "latent_neurovault_text"}
         Name of dataset.
 
     Returns
@@ -304,35 +344,44 @@ def load_latent(name: str):
     Notes
     -----
 
-    - "publications": pubmed papers passed through specter.
-    - "neuro": encoded neuroimages from pubmed coordinate tables
+    - "pubmed_text": pubmed papers passed through specter.
+    - "pubmed_images": encoded neuroimages from pubmed coordinate tables
     - "neurowiki": wikipedia articles pass through specter
     - "cogatlas": cogatlas terms and definitions passed through specter
     - "networks": encoded network images
+    - "neurovault_images": latent embeddings for neurovault images
+    - "neurovault_text": latent embeddings for neurovault-linked text
 
     """
     match name:
-        case "publications" | "pubmed":
-            return _load_latent_text()
-        case "neuro":
-            return _load_latent_neuro()
+        case "pubmed_text":
+            payload = _load_latent_text()
+        case "pubmed_images":
+            payload = _load_latent_neuro()
         case "wiki" | "neurowiki":
-            return _load_latent_wiki()
+            payload = _load_latent_wiki()
         case "cogatlas":
-            return _load_latent_cogatlas()
+            payload = _load_latent_cogatlas()
         case "cogatlas_task":
-            return _load_latent_cogatlas_task()
+            payload = _load_latent_cogatlas_task()
         case "cogatlas_disorder":
-            return _load_latent_cogatlas_disorder()
+            payload = _load_latent_cogatlas_disorder()
         case "networks_text":
-            return _load_latent_networks_canonical_text()
+            payload = _load_latent_networks_canonical_text()
         case "networks_neuro":
-            return _load_latent_networks_neuro()
+            payload = _load_latent_networks_neuro()
+        case "neurovault_images":
+            payload = _load_latent_neurovault_images()
+        case "neurovault_text":
+            payload = _load_latent_neurovault_text()
         case _:
             valid_names = ["publications", "pubmed", "neurowiki", "cogatlas",
                            "cogatlas_task", "cogatlas_disorder", "networks_text",
-                           "networks_neuro"]
+                           "networks_neuro", "latent_neurovault_images",
+                           "latent_neurovault_text"]
             raise ValueError(f"{name} not in {valid_names}")
+    return _without_grad(payload)
+
 
 def load_masker():
     """Masker alias."""

@@ -45,6 +45,12 @@ __all__ = [
     "_proj_head_image_infonce",
     "_proj_head_text_mse",
     "_proj_head_text_infonce",
+    "_load_images_neurovault_dataframe",
+    "_load_publications_neurovault_dataframe",
+    "_load_latent_neurovault_images",
+    "_load_latent_neurovault_text",
+    "_load_neurovault_images",
+    "_load_pubmed_images",
 ]
 
 
@@ -286,6 +292,100 @@ def _load_latent_cogatlas_task() -> Tuple[torch.Tensor, np.ndarray]:
     latent = latent_payload["latent"]
     latent_terms = np.asarray(latent_payload["term"])
     return latent, latent_terms
+
+
+@lru_cache(maxsize=1)
+def _load_images_neurovault_dataframe() -> pd.DataFrame:
+    """Load NeuroVault image metadata from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "images_neurovault.parquet"
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_publications_neurovault_dataframe() -> pd.DataFrame:
+    """Load NeuroVault publication metadata from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "publications_neurovault.parquet"
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_latent_neurovault_images() -> torch.Tensor:
+    """Load NeuroVault image latent tensor from HuggingFace on CPU."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_neurovault_images.pt"
+    )
+    latent = torch.load(
+        latent_path,
+        weights_only=False,
+        map_location="cpu"
+    )
+    if not isinstance(latent, torch.Tensor):
+        raise TypeError("Expected `latent_neurovault_images.pt` to contain a torch.Tensor.")
+    return latent.cpu()
+
+
+@lru_cache(maxsize=1)
+def _load_latent_neurovault_text() -> torch.Tensor:
+    """Load NeuroVault text latent tensor from HuggingFace on CPU."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_neurovault_text.pt"
+    )
+    latent = torch.load(
+        latent_path,
+        weights_only=False,
+        map_location="cpu"
+    )
+    if not isinstance(latent, torch.Tensor):
+        raise TypeError("Expected `latent_neurovault_text.pt` to contain a torch.Tensor.")
+    return latent.cpu()
+
+
+@lru_cache(maxsize=1)
+def _load_neurovault_images() -> torch.Tensor:
+    """Load NeuroVault image tensor from HuggingFace on CPU."""
+    image_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "neurovault_images.pt"
+    )
+    images = torch.load(
+        image_path,
+        weights_only=False,
+        map_location="cpu"
+    )
+    if not isinstance(images, torch.Tensor):
+        raise TypeError("Expected `neurovault_images.pt` to contain a torch.Tensor.")
+    return images.cpu()
+
+
+@lru_cache(maxsize=1)
+def _load_pubmed_images() -> torch.Tensor:
+    """Load PubMed image tensor from HuggingFace on CPU."""
+    image_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "pubmed_images.pt"
+    )
+    images, pmids = torch.load(
+        image_path,
+        weights_only=False,
+        map_location="cpu"
+    ).values()
+    return images, pmids
 
 @lru_cache(maxsize=1)
 def _load_latent_networks_canonical_text() -> dict:

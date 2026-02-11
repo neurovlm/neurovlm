@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -41,6 +41,21 @@ DATASET_ID_COLUMNS = {
     "networks": "title",
 }
 
+TEXT_DATASET_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
+    "pubmed": ("pubmed_text", "publications", "pubmed"),
+    "wiki": ("wiki", "neurowiki"),
+    "cogatlas": ("cogatlas",),
+    "cogatlas_task": ("cogatlas_task",),
+    "cogatlas_disorder": ("cogatlas_disorder",),
+}
+TEXT_LATENT_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
+    "pubmed": ("pubmed_text", "publications", "pubmed"),
+    "wiki": ("wiki", "neurowiki"),
+    "cogatlas": ("cogatlas",),
+    "cogatlas_task": ("cogatlas_task",),
+    "cogatlas_disorder": ("cogatlas_disorder",),
+}
+
 
 def _l2_normalize(x: torch.Tensor) -> torch.Tensor:
     """Row-wise L2 normalization with numerical guard."""
@@ -57,6 +72,32 @@ class BrainTopKResult:
     def to_nifti(self) -> List[nib.Nifti1Image]:
         """Decode NIfTI images aligned with this top-k table."""
         return self.parent.niftis_for(self.table)
+
+    def to_dataset_nifti(self) -> List[nib.Nifti1Image]:
+        """Load dataset-native NIfTI images aligned with this top-k table."""
+        return self.parent.dataset_niftis_for(self.table)
+
+    def plot_row(
+        self,
+        index: int = 0,
+        source: Literal["dataset", "decoded"] = "dataset",
+        threshold: Union[str, float] = "auto",
+        display_mode: str = "ortho",
+        cut_coords: Optional[Sequence[float]] = None,
+        colorbar: bool = True,
+        title: Optional[str] = None,
+    ) -> Any:
+        """Plot one ranked row from this top-k output."""
+        return self.parent.plot_topk_row(
+            self.table,
+            index=index,
+            source=source,
+            threshold=threshold,
+            display_mode=display_mode,
+            cut_coords=cut_coords,
+            colorbar=colorbar,
+            title=title,
+        )
 
     def to_pandas(self) -> pd.DataFrame:
         """Return the underlying pandas dataframe."""
@@ -186,6 +227,18 @@ class TextSearchResult:
         """Print top-k text results."""
         print(self.format(k=k, query_index=query_index, dataset=dataset))
 
+    def plot(self, *args: Any, **kwargs: Any) -> Any:
+        """Text results are not directly plottable as brain maps."""
+        raise ValueError("plot is only available for brain outputs.")
+
+    @property
+    def df(self) -> pd.DataFrame:
+        """Return a dataframe view of ranked text retrieval results."""
+        if not self.scores_by_dataset:
+            return pd.DataFrame(columns=["dataset", "title", "description", "cosine_similarity"])
+        k = max(int(scores.shape[0]) for scores in self.scores_by_dataset.values())
+        return self.top_k(k=k)
+
     @staticmethod
     def _resolve_query_indices(query_index: Optional[int], n_queries: int) -> List[int]:
         """Validate and resolve query index selection."""
@@ -208,6 +261,7 @@ class BrainSearchResult:
     generated_flatmaps: Optional[torch.Tensor] = None
     masker: Any = None
     decoder: Any = None
+    dataset_image_getter: Optional[Callable[[str, int], nib.Nifti1Image]] = None
 
     def top_k(self, k: int = 5, query_index: Optional[int] = None) -> BrainTopKResult:
         """Return top-k brain matches.
@@ -224,9 +278,11 @@ class BrainSearchResult:
         -------
         BrainTopKResult
             Chainable table-like result with ranked rows.
+            Rows include ``dataset_index`` so they can be plotted via
+            ``plot_topk_item`` or ``BrainTopKResult.plot_row``.
         """
         if self.scores is None or self.metadata is None:
-            raise ValueError("top_k is only available for retrieval outputs (e.g., model='infonce').")
+            raise ValueError("top_k is only available for retrieval outputs (e.g., head='infonce').")
 
         if k <= 0:
             raise ValueError("k must be > 0")
@@ -267,17 +323,29 @@ class BrainSearchResult:
 
             if "dataset" not in top_meta.columns:
                 top_meta["dataset"] = "pubmed"
+            if "_dataset_index" not in top_meta.columns:
+                top_meta["_dataset_index"] = np.arange(len(top_meta), dtype=np.int64)
             if "title" not in top_meta.columns:
                 top_meta["title"] = ""
             if "description" not in top_meta.columns:
                 top_meta["description"] = ""
             if n_queries > 1:
                 top_meta.insert(0, "query_index", q_idx)
-            keep = ["dataset", "title", "description", "cosine_similarity", "_brain_index"]
+            keep = ["dataset", "_dataset_index", "title", "description", "cosine_similarity", "_brain_index"]
             if n_queries > 1:
                 keep = ["query_index"] + keep
             top_meta = top_meta.loc[:, keep]
             out_blocks.append(top_meta)
+
+        if not out_blocks:
+            columns = ["dataset", "dataset_index", "title", "description", "cosine_similarity"]
+            if n_queries > 1:
+                columns = ["query_index"] + columns
+            out = pd.DataFrame(columns=columns)
+            out.attrs["brain_indices"] = []
+            out.attrs["dataset_names"] = []
+            out.attrs["dataset_indices"] = []
+            return BrainTopKResult(table=out, parent=self)
 
         out = pd.concat(out_blocks, ignore_index=True)
         if n_queries > 1:
@@ -285,13 +353,31 @@ class BrainSearchResult:
         else:
             out = out.sort_values(["dataset", "cosine_similarity"], ascending=[True, False]).reset_index(drop=True)
         brain_indices = out["_brain_index"].astype(int).tolist()
-        out = out.drop(columns=["_brain_index"])
+        dataset_names = out["dataset"].astype(str).tolist()
+        dataset_indices = out["_dataset_index"].astype(int).tolist()
+        out = out.drop(columns=["_brain_index"]).rename(columns={"_dataset_index": "dataset_index"})
         out.attrs["brain_indices"] = brain_indices
+        out.attrs["dataset_names"] = dataset_names
+        out.attrs["dataset_indices"] = dataset_indices
         return BrainTopKResult(table=out, parent=self)
 
     def print(self, k: int = 5, query_index: Optional[int] = None) -> None:
         """Print top-k brain results."""
         print(self.top_k(k=k, query_index=query_index).to_string(index=False))
+
+    @property
+    def df(self) -> pd.DataFrame:
+        """Return a dataframe view of ranked brain retrieval results."""
+        if self.scores is None or self.metadata is None:
+            raise ValueError("df is only available for retrieval outputs (e.g., head='infonce').")
+        return self.top_k(k=int(self.scores.shape[0])).to_pandas()
+
+    @property
+    def images(self) -> List[nib.Nifti1Image]:
+        """Return generated NIfTI images."""
+        if self.generated_flatmaps is None:
+            raise ValueError("images is only available for generated outputs (head='mse').")
+        return self.to_nifti()
 
     def niftis_for(self, table: Union[pd.DataFrame, BrainTopKResult]) -> List[nib.Nifti1Image]:
         """Decode NIfTI images aligned with rows from ``top_k`` output."""
@@ -303,6 +389,109 @@ class BrainSearchResult:
         if brain_indices is None:
             raise ValueError("Expected a DataFrame returned by `top_k` (missing row-to-brain index mapping).")
         return self._decode_nifti_indices(brain_indices)
+
+    def dataset_niftis_for(self, table: Union[pd.DataFrame, BrainTopKResult]) -> List[nib.Nifti1Image]:
+        """Load dataset-native NIfTI images aligned with rows from ``top_k`` output."""
+        if isinstance(table, BrainTopKResult):
+            table = table.table
+        if self.dataset_image_getter is None:
+            raise ValueError("Dataset image loading is not attached to this result.")
+
+        dataset_names = table.attrs.get("dataset_names")
+        dataset_indices = table.attrs.get("dataset_indices")
+        if dataset_names is None or dataset_indices is None:
+            if "dataset" in table.columns and "dataset_index" in table.columns:
+                dataset_names = table["dataset"].astype(str).tolist()
+                dataset_indices = table["dataset_index"].astype(int).tolist()
+            else:
+                raise ValueError("Expected a DataFrame returned by `top_k` with dataset row mapping.")
+
+        out: List[nib.Nifti1Image] = []
+        for ds_name, ds_index in zip(dataset_names, dataset_indices):
+            out.append(self.dataset_image_getter(str(ds_name), int(ds_index)))
+        return out
+
+    @staticmethod
+    def _dataset_row_ref(table: pd.DataFrame, index: int) -> Tuple[str, int]:
+        """Resolve (dataset, dataset_index) tuple for one top-k row."""
+        dataset_names = table.attrs.get("dataset_names")
+        dataset_indices = table.attrs.get("dataset_indices")
+        if dataset_names is not None and dataset_indices is not None:
+            return str(dataset_names[index]), int(dataset_indices[index])
+        if "dataset" in table.columns and "dataset_index" in table.columns:
+            return str(table.iloc[index]["dataset"]), int(table.iloc[index]["dataset_index"])
+        raise ValueError("Expected a DataFrame returned by `top_k` with dataset row mapping.")
+
+    def plot_topk_row(
+        self,
+        table: Union[pd.DataFrame, BrainTopKResult],
+        index: int = 0,
+        source: Literal["dataset", "decoded"] = "dataset",
+        threshold: Union[str, float] = "auto",
+        display_mode: str = "ortho",
+        cut_coords: Optional[Sequence[float]] = None,
+        colorbar: bool = True,
+        title: Optional[str] = None,
+    ) -> Any:
+        """Plot one row from a ``top_k`` table using dataset-native or decoded image."""
+        if isinstance(table, BrainTopKResult):
+            table = table.table
+        if index < 0 or index >= len(table):
+            raise IndexError(f"index={index} out of range for {len(table)} rows.")
+
+        row = table.iloc[index]
+        if source == "dataset":
+            if self.dataset_image_getter is None:
+                raise ValueError("Dataset image loading is not attached to this result.")
+            ds_name, ds_index = self._dataset_row_ref(table, index)
+            image = self.dataset_image_getter(ds_name, ds_index)
+        else:
+            brain_indices = table.attrs.get("brain_indices")
+            if brain_indices is None:
+                raise ValueError("Decoded plotting expects a DataFrame returned by `top_k`.")
+            image = self.to_nifti(index=int(brain_indices[index]))
+
+        if title is None and "title" in row and pd.notna(row["title"]):
+            title = str(row["title"])
+            if len(title) > 55:
+                title = title[:55] + "..."
+        return NeuroVLM.plot(
+            image=image,
+            threshold=threshold,
+            display_mode=display_mode,
+            cut_coords=cut_coords,
+            colorbar=colorbar,
+            title=title,
+        )
+
+    def plot_topk_item(
+        self,
+        row: pd.Series,
+        threshold: Union[str, float] = "auto",
+        display_mode: str = "ortho",
+        cut_coords: Optional[Sequence[float]] = None,
+        colorbar: bool = True,
+        title: Optional[str] = None,
+    ) -> Any:
+        """Plot one row selected from ``results.top_k(...).iloc[...]``."""
+        if not isinstance(row, pd.Series):
+            raise TypeError("plot_topk_item expects a pandas.Series from `top_k(...).iloc[...]`.")
+        if self.dataset_image_getter is None:
+            raise ValueError("Dataset image loading is not attached to this result.")
+        if "dataset" not in row.index or "dataset_index" not in row.index:
+            raise ValueError("Row must include `dataset` and `dataset_index` columns.")
+
+        image = self.dataset_image_getter(str(row["dataset"]), int(row["dataset_index"]))
+        if title is None and "title" in row.index and pd.notna(row["title"]):
+            title = str(row["title"])
+        return NeuroVLM.plot(
+            image=image,
+            threshold=threshold,
+            display_mode=display_mode,
+            cut_coords=cut_coords,
+            colorbar=colorbar,
+            title=title,
+        )
 
     def top_k_niftis(
         self,
@@ -370,6 +559,81 @@ class BrainSearchResult:
                 images.append(self.masker.inverse_transform(flat))
         return images
 
+    def plot(
+        self,
+        index: int = 0,
+        query_index: int = 0,
+        threshold: Union[str, float] = "auto",
+        display_mode: str = "ortho",
+        cut_coords: Optional[Sequence[float]] = None,
+        colorbar: bool = True,
+        title: Optional[str] = None,
+    ) -> Any:
+        """Plot one brain image from this result."""
+        if index < 0:
+            raise ValueError("index must be >= 0")
+
+        if self.generated_flatmaps is not None:
+            total = int(self.generated_flatmaps.shape[0])
+            if index >= total:
+                raise IndexError(f"index={index} out of range for {total} generated maps.")
+            image = self.to_nifti(index=index)
+        else:
+            if self.scores is None:
+                raise ValueError("plot is only available when brain images can be decoded from this result.")
+            n_queries = int(self.scores.shape[1])
+            if query_index < 0 or query_index >= n_queries:
+                raise IndexError(f"query_index={query_index} out of range for {n_queries} queries.")
+            score_vec = self.scores[:, query_index]
+            if index >= int(score_vec.shape[0]):
+                raise IndexError(f"index={index} out of range for {int(score_vec.shape[0])} candidates.")
+            ordered = torch.topk(score_vec, k=index + 1, largest=True, sorted=True).indices
+            corpus_index = int(ordered[index].item())
+            image = self.to_nifti(index=corpus_index)
+            if title is None and self.metadata is not None:
+                row = self.metadata.iloc[corpus_index]
+                if "title" in row and pd.notna(row["title"]):
+                    title = str(row["title"])
+                elif "pmid" in row and pd.notna(row["pmid"]):
+                    title = f"PMID {row['pmid']}"
+
+        return NeuroVLM.plot(
+            image=image,
+            threshold=threshold,
+            display_mode=display_mode,
+            cut_coords=cut_coords,
+            colorbar=colorbar,
+            title=title,
+        )
+
+
+@dataclass
+class _QueryBuilder:
+    """Chainable query wrapper used by ``NeuroVLM.text(...)`` and ``NeuroVLM.brain(...)``."""
+
+    parent: "NeuroVLM"
+    payload: Any
+    source: Literal["text", "brain"]
+
+    def to_brain(
+        self,
+        head: Literal["mse", "infonce"] = "mse",
+        project: bool = True,
+        dataset: Optional[Union[str, Sequence[str]]] = None,
+    ) -> BrainSearchResult:
+        """Run text/brain query against the brain target space."""
+        return self.parent.to_brain(self.payload, head=head, project=project, dataset=dataset)
+
+    def to_text(
+        self,
+        head: Literal["mse", "infonce"] = "infonce",
+        datasets: Optional[Sequence[str]] = None,
+    ) -> TextSearchResult:
+        """Run text/brain query against the text target space."""
+        if head != "infonce":
+            raise ValueError("to_text only supports head='infonce'.")
+        return self.parent.to_text(self.payload, datasets=datasets, project=True)
+
 
 class NeuroVLM:
     """Unified interface for text-to-brain and brain-to-text retrieval.
@@ -378,8 +642,6 @@ class NeuroVLM:
     ----------
     datasets : sequence of str, optional
         Text corpora to include for ``to_text``.
-    text_to_brain_model : {"mse", "infonce"}, optional
-        Default text-to-brain projection mode.
     device : str, optional
         Torch device for inference.
     """
@@ -387,12 +649,9 @@ class NeuroVLM:
     def __init__(
         self,
         datasets: Optional[Sequence[str]] = None,
-        text_to_brain_model: Literal["mse", "infonce"] = "mse",
         device: str = "cpu",
     ) -> None:
         self.device = torch.device(device)
-        self.text_to_brain_model = text_to_brain_model
-        self._validate_text_to_brain_model(text_to_brain_model)
 
         self.datasets = tuple(self._canonicalize_datasets(datasets or DEFAULT_TEXT_DATASETS))
 
@@ -417,6 +676,15 @@ class NeuroVLM:
         self._network_brain_latent_cpu: Optional[torch.Tensor] = None
         self._network_brain_embeddings_infonce: Optional[torch.Tensor] = None
         self._network_brain_metadata: Optional[pd.DataFrame] = None
+        self._neurovault_brain_latent: Optional[torch.Tensor] = None
+        self._neurovault_brain_latent_cpu: Optional[torch.Tensor] = None
+        self._neurovault_brain_embeddings_infonce: Optional[torch.Tensor] = None
+        self._neurovault_brain_metadata: Optional[pd.DataFrame] = None
+
+        self._pubmed_images_flat: Optional[torch.Tensor] = None
+        self._pubmed_image_pmids: Optional[np.ndarray] = None
+        self._pubmed_pmid_to_image_index: Optional[Dict[Any, int]] = None
+        self._neurovault_images_flat: Optional[torch.Tensor] = None
 
         self._pub_df: Optional[pd.DataFrame] = None
         self._pub_lookup: Optional[pd.DataFrame] = None
@@ -424,6 +692,22 @@ class NeuroVLM:
         self.last_text_result: Optional[TextSearchResult] = None
         self.last_brain_result: Optional[BrainSearchResult] = None
         self.last_generated_brain_flat: Optional[torch.Tensor] = None
+        self._last_result: Optional[Union[TextSearchResult, BrainSearchResult]] = None
+
+    @property
+    def results(self) -> Union[TextSearchResult, BrainSearchResult]:
+        """Return the latest retrieval/generation result object."""
+        if self._last_result is None:
+            raise ValueError("No results available yet. Run a query first.")
+        return self._last_result
+
+    def text(self, X: Any) -> _QueryBuilder:
+        """Start a text-driven chain."""
+        return _QueryBuilder(parent=self, payload=X, source="text")
+
+    def brain(self, X: Any) -> _QueryBuilder:
+        """Start a brain-driven chain."""
+        return _QueryBuilder(parent=self, payload=X, source="brain")
 
     def to_text(
         self,
@@ -471,12 +755,13 @@ class NeuroVLM:
             retrieval_space=retrieval_space,
         )
         self.last_text_result = result
+        self._last_result = result
         return result
 
     def to_brain(
         self,
         X: Any,
-        model: Optional[Literal["mse", "infonce"]] = None,
+        head: Literal["mse", "infonce"] = "mse",
         project: bool = True,
         dataset: Optional[Union[str, Sequence[str]]] = None,
     ) -> BrainSearchResult:
@@ -486,14 +771,14 @@ class NeuroVLM:
         ----------
         X : Any
             Query payload with same supported types as ``to_text``.
-        model : {"mse", "infonce"}, optional
+        head : {"mse", "infonce"}, optional
             Projection mode for text-to-brain retrieval.
         project : bool, optional
             Whether to use projection heads. Required for text-to-brain retrieval.
         dataset : str or sequence of str, optional
             Retrieval corpus/corpora for InfoNCE text-to-brain search.
-            Defaults to ``("pubmed", "networks")`` for InfoNCE.
-            Ignored when ``model="mse"`` because MSE directly generates
+            Defaults to ``("pubmed", "networks", "neurovault")`` for InfoNCE.
+            Ignored when ``head="mse"`` because MSE directly generates
             brain maps from projected text.
 
         Returns
@@ -501,9 +786,8 @@ class NeuroVLM:
         BrainSearchResult
             Retrieval object exposing ``top_k``/``print``.
         """
-        mode = self.text_to_brain_model if model is None else model
-        self._validate_text_to_brain_model(mode)
-        query, retrieval_space = self._prepare_brain_query(X, model=mode, project=project)
+        self._validate_head(head)
+        query, retrieval_space = self._prepare_brain_query(X, head=head, project=project)
 
         # MSE path: decode projected text latents directly to brain flatmaps.
         if retrieval_space == "mse":
@@ -522,8 +806,10 @@ class NeuroVLM:
                 generated_flatmaps=flatmaps,
                 masker=self._masker,
                 decoder=self._autoencoder.decoder,
+                dataset_image_getter=self._get_dataset_nifti,
             )
             self.last_brain_result = result
+            self._last_result = result
             return result
 
         # InfoNCE path: retrieve over one or more brain corpora.
@@ -551,6 +837,15 @@ class NeuroVLM:
                 meta = self._network_brain_metadata.copy()
                 lat = self._network_brain_latent_cpu
                 meta["dataset"] = "networks"
+            elif corpus_name == "neurovault":
+                self._ensure_neurovault_brain_index()
+                assert self._neurovault_brain_embeddings_infonce is not None
+                assert self._neurovault_brain_metadata is not None
+                assert self._neurovault_brain_latent_cpu is not None
+                emb = self._neurovault_brain_embeddings_infonce
+                meta = self._neurovault_brain_metadata.copy()
+                lat = self._neurovault_brain_latent_cpu
+                meta["dataset"] = "neurovault"
             else:
                 raise ValueError(f"Unsupported corpus '{corpus_name}'.")
 
@@ -558,8 +853,10 @@ class NeuroVLM:
                 meta["title"] = ""
             if "description" not in meta.columns:
                 meta["description"] = ""
+            if "_dataset_index" not in meta.columns:
+                meta["_dataset_index"] = np.arange(len(meta), dtype=np.int64)
             embeddings_list.append(emb)
-            metadata_list.append(meta[["dataset", "title", "description"]].reset_index(drop=True))
+            metadata_list.append(meta[["dataset", "_dataset_index", "title", "description"]].reset_index(drop=True))
             latents_list.append(lat)
 
         corpus = torch.vstack(embeddings_list)
@@ -578,9 +875,11 @@ class NeuroVLM:
             generated_flatmaps=None,
             masker=self._masker,
             decoder=self._autoencoder.decoder,
+            dataset_image_getter=self._get_dataset_nifti,
         )
         self.last_brain_result = result
         self.last_generated_brain_flat = None
+        self._last_result = result
         return result
 
     def top_k(
@@ -602,74 +901,29 @@ class NeuroVLM:
             raise ValueError("No brain retrieval available. Call `to_brain` first.")
         return self.last_brain_result.top_k(k=k, query_index=query_index)
 
-    def print_text(self, k: int = 5, query_index: Optional[int] = None, dataset: Optional[str] = None) -> None:
-        """Print top-k rows from latest text retrieval."""
-        if self.last_text_result is None:
-            raise ValueError("No text retrieval available. Call `to_text` first.")
-        self.last_text_result.print(k=k, query_index=query_index, dataset=dataset)
-
-    def print_brain(self, k: int = 5, query_index: Optional[int] = None) -> None:
-        """Print top-k rows from latest brain retrieval."""
-        if self.last_brain_result is None:
-            raise ValueError("No brain retrieval available. Call `to_brain` first.")
-        self.last_brain_result.print(k=k, query_index=query_index)
-
-    def show_brain(
-        self,
-        index: int = 0,
-        query_index: int = 0,
+    @staticmethod
+    def plot(
+        image: nib.Nifti1Image,
         threshold: Union[str, float] = "auto",
         display_mode: str = "ortho",
         cut_coords: Optional[Sequence[float]] = None,
         colorbar: bool = True,
         title: Optional[str] = None,
     ) -> Any:
-        """Decode and plot one ranked brain result."""
-        if self.last_brain_result is None:
-            raise ValueError("No brain retrieval available. Call `to_brain` first.")
-        if index < 0:
-            raise ValueError("index must be >= 0")
-
-        # MSE generation path: index corresponds to generated query index.
-        if self.last_brain_result.generated_flatmaps is not None:
-            maps = self.last_brain_result.generated_flatmaps
-            if index >= int(maps.shape[0]):
-                raise IndexError(f"index={index} out of range for {int(maps.shape[0])} generated maps.")
-            img = self.last_brain_result.to_nifti(index=index)
-            corpus_index = index
-        else:
-            scores = self.last_brain_result.scores
-            assert scores is not None
-            n_queries = int(scores.shape[1])
-            if query_index < 0 or query_index >= n_queries:
-                raise IndexError(f"query_index={query_index} out of range for {n_queries} queries.")
-
-            score_vec = scores[:, query_index]
-            if index >= int(score_vec.shape[0]):
-                raise IndexError(f"index={index} out of range for {int(score_vec.shape[0])} candidates.")
-
-            ordered = torch.topk(score_vec, k=index + 1, largest=True, sorted=True).indices
-            corpus_index = int(ordered[index].item())
-            latent = self.last_brain_result.latents[corpus_index]
-            img = self.decode_brain(latent)
-
+        """Plot a provided NIfTI image."""
+        if not isinstance(image, nib.Nifti1Image):
+            raise TypeError("plot expects a nib.Nifti1Image.")
         from nilearn.plotting import plot_stat_map
 
-        fig_title = title
-        if fig_title is None and self.last_brain_result.metadata is not None:
-            row = self.last_brain_result.metadata.iloc[corpus_index]
-            if "title" in row and pd.notna(row["title"]):
-                fig_title = str(row["title"])
-            elif "pmid" in row and pd.notna(row["pmid"]):
-                fig_title = f"PMID {row['pmid']}"
-
         return plot_stat_map(
-            img,
+            image,
             threshold=threshold,
             display_mode=display_mode,
             cut_coords=cut_coords,
             colorbar=colorbar,
-            title=fig_title,
+            title=title,
+            draw_cross=False,
+            cmap="hot"
         )
 
     def get_niftis(
@@ -762,7 +1016,7 @@ class NeuroVLM:
     def _prepare_brain_query(
         self,
         X: Any,
-        model: Literal["mse", "infonce"],
+        head: Literal["mse", "infonce"],
         project: bool,
     ) -> Tuple[torch.Tensor, Literal["mse", "infonce"]]:
         """Prepare query vectors for brain retrieval."""
@@ -770,11 +1024,11 @@ class NeuroVLM:
             if not project:
                 raise ValueError("text-to-brain retrieval requires `project=True`.")
             text_emb = self._encode_text(X)
-            return self._project_text_to_brain_space(text_emb, model=model)
+            return self._project_text_to_brain_space(text_emb, head=head)
 
         if isinstance(X, nib.Nifti1Image):
             latent = self._encode_brain_image(X)
-            return self._project_brain_latent_for_brain_search(latent, model=model, project=project)
+            return self._project_brain_latent_for_brain_search(latent, head=head, project=project)
 
         tensor = self._coerce_numeric_query(X)
         if tensor is None:
@@ -786,14 +1040,14 @@ class NeuroVLM:
         if dim == TEXT_EMBED_DIM:
             if not project:
                 raise ValueError("text-to-brain retrieval requires `project=True`.")
-            return self._project_text_to_brain_space(tensor.to(self.device), model=model)
+            return self._project_text_to_brain_space(tensor.to(self.device), head=head)
 
         if dim == BRAIN_FLAT_DIM:
             latent = self._encode_brain_flat(tensor)
-            return self._project_brain_latent_for_brain_search(latent, model=model, project=project)
+            return self._project_brain_latent_for_brain_search(latent, head=head, project=project)
 
         if dim == LATENT_DIM:
-            return self._project_brain_latent_for_brain_search(tensor.to(self.device), model=model, project=project)
+            return self._project_brain_latent_for_brain_search(tensor.to(self.device), head=head, project=project)
 
         raise ValueError(
             f"Unsupported embedding dim {dim}. Expected {TEXT_EMBED_DIM}, {LATENT_DIM}, or {BRAIN_FLAT_DIM}."
@@ -802,13 +1056,13 @@ class NeuroVLM:
     def _project_text_to_brain_space(
         self,
         text_embedding: torch.Tensor,
-        model: Literal["mse", "infonce"],
+        head: Literal["mse", "infonce"],
     ) -> Tuple[torch.Tensor, Literal["mse", "infonce"]]:
         """Project text embedding into the requested brain retrieval space."""
         self._ensure_projection_heads()
         text_embedding = _l2_normalize(text_embedding.to(self.device))
         with torch.no_grad():
-            if model == "mse":
+            if head == "mse":
                 out = self._proj_head_text_mse(text_embedding.to(self.device))
                 return out, "mse"
             out = self._proj_head_text_infonce(text_embedding.to(self.device))
@@ -817,11 +1071,11 @@ class NeuroVLM:
     def _project_brain_latent_for_brain_search(
         self,
         latent: torch.Tensor,
-        model: Literal["mse", "infonce"],
+        head: Literal["mse", "infonce"],
         project: bool,
     ) -> Tuple[torch.Tensor, Literal["mse", "infonce"]]:
         """Prepare latent brain embeddings for brain retrieval."""
-        if model == "infonce" and project:
+        if head == "infonce" and project:
             self._ensure_projection_heads()
             with torch.no_grad():
                 out = self._proj_head_image(latent.to(self.device))
@@ -833,14 +1087,15 @@ class NeuroVLM:
         for dataset in datasets:
             if dataset not in self._text_raw_embeddings:
                 if dataset == "networks":
-                    latent = self._extract_networks_canonical_text_latent(load_latent("networks_text"))
+                    latent_payload = self._load_latent_compat("networks_text")
+                    latent = self._extract_networks_canonical_text_latent(latent_payload)
                     latent = self._as_2d_tensor(latent).to(self.device)
-                    table = load_dataset("networks_canonical").copy()
+                    table = self._load_dataset_compat("networks_canonical").copy()
                     metadata = self._build_networks_canonical_metadata(table, n_rows=int(latent.shape[0]))
                 else:
-                    latent, ids = load_latent(dataset)
+                    latent, ids = self._load_text_latent_with_ids(dataset)
                     latent = self._as_2d_tensor(latent).to(self.device)
-                    table = load_dataset(dataset).copy()
+                    table = self._load_text_dataset_table(dataset).copy()
                     lookup = self._build_lookup(dataset, table)
                     metadata = self._build_aligned_text_metadata(dataset, np.asarray(ids), table, lookup)
 
@@ -856,7 +1111,10 @@ class NeuroVLM:
     def _ensure_brain_index(self, require_infonce: bool) -> None:
         """Load and cache brain corpus embeddings and aligned metadata."""
         if self._brain_latent is None:
-            latent, pmids = load_latent("neuro")
+            latent, pmids = self._unpack_latent_with_ids(
+                self._load_latent_compat("pubmed_images", "neuro"),
+                default_id_key="pmid",
+            )
             latent = self._as_2d_tensor(latent).to(self.device)
             pmids = np.asarray(pmids)
 
@@ -865,6 +1123,7 @@ class NeuroVLM:
             self._brain_embeddings_mse = _l2_normalize(latent)
             self._brain_pmids = pmids
             self._brain_metadata = self._build_aligned_brain_metadata(pmids)
+            self._brain_metadata["_dataset_index"] = self._resolve_pubmed_dataset_indices(pmids)
 
         if require_infonce and self._brain_embeddings_infonce is None:
             self._ensure_projection_heads()
@@ -877,8 +1136,9 @@ class NeuroVLM:
         if self._network_brain_embeddings_infonce is not None:
             return
 
-        raw_payload = load_latent("networks_neuro")
+        raw_payload = self._load_latent_compat("networks_neuro")
         latent_tensor, metadata = self._flatten_networks_neuro_payload(raw_payload)
+        metadata["_dataset_index"] = np.arange(len(metadata), dtype=np.int64)
 
         self._ensure_projection_heads()
         with torch.no_grad():
@@ -888,6 +1148,62 @@ class NeuroVLM:
         self._network_brain_latent_cpu = latent_tensor.detach().cpu()
         self._network_brain_embeddings_infonce = _l2_normalize(shared)
         self._network_brain_metadata = metadata
+
+    def _ensure_neurovault_brain_index(self) -> None:
+        """Load and cache NeuroVault latent brains for InfoNCE retrieval."""
+        if self._neurovault_brain_embeddings_infonce is not None:
+            return
+
+        latent_payload = self._load_latent_compat("neurovault_images", "latent_neurovault_images")
+        latent = self._extract_latent_tensor(latent_payload)
+        latent_tensor = self._as_2d_tensor(latent).to(self.device)
+
+        self._ensure_projection_heads()
+        with torch.no_grad():
+            shared = self._proj_head_image(latent_tensor.to(self.device))
+
+        self._neurovault_brain_latent = latent_tensor
+        self._neurovault_brain_latent_cpu = latent_tensor.detach().cpu()
+        self._neurovault_brain_embeddings_infonce = _l2_normalize(shared)
+        self._neurovault_brain_metadata = self._build_neurovault_brain_metadata(n_rows=int(latent_tensor.shape[0]))
+
+    def _build_neurovault_brain_metadata(self, n_rows: int) -> pd.DataFrame:
+        """Build NeuroVault metadata aligned with latent/image order."""
+        images_meta = self._load_dataset_compat("neurovault_images_meta", "images_neurovault")
+        if not isinstance(images_meta, pd.DataFrame):
+            raise TypeError("Expected NeuroVault image metadata to be a pandas.DataFrame.")
+
+        frame = images_meta.copy().reset_index(drop=True)
+        text_meta = self._load_dataset_compat("neurovault_text", "publications_neurovault")
+        if isinstance(text_meta, pd.DataFrame) and "doi" in frame.columns and "doi" in text_meta.columns:
+            pubs = text_meta.copy().drop_duplicates("doi").reset_index(drop=True)
+            frame = frame.merge(
+                pubs,
+                on="doi",
+                how="left",
+                suffixes=("", "_pub"),
+            )
+
+        rows: List[Dict[str, Any]] = []
+        for idx in range(n_rows):
+            row = frame.iloc[idx] if idx < len(frame) else None
+            fallback = f"neurovault_{idx}"
+            if row is not None:
+                for key in ("name", "image_name", "id", "image_id"):
+                    if key in row and pd.notna(row[key]):
+                        candidate = self._clean_text(str(row[key]))
+                        if candidate:
+                            fallback = candidate
+                            break
+            title, description = self._extract_title_description(row, fallback_title=fallback)
+            rows.append(
+                {
+                    "title": title,
+                    "description": description,
+                    "_dataset_index": idx,
+                }
+            )
+        return pd.DataFrame(rows)
 
     def _build_aligned_text_metadata(
         self,
@@ -993,6 +1309,229 @@ class NeuroVLM:
         metadata = pd.DataFrame(rows)
         return matrix, metadata
 
+    @staticmethod
+    def _normalize_record_id(value: Any) -> Any:
+        """Normalize identifier values used for lookup joins."""
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return None
+        if isinstance(value, np.generic):
+            value = value.item()
+        if isinstance(value, (int, np.integer)):
+            return int(value)
+        if isinstance(value, (float, np.floating)):
+            if np.isnan(value):
+                return None
+            if float(value).is_integer():
+                return int(value)
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.isdigit():
+            return int(text)
+        return text
+
+    def _load_dataset_compat(self, *names: str) -> Any:
+        """Try multiple dataset loader keys for backward compatibility."""
+        if not names:
+            raise ValueError("At least one dataset key must be provided.")
+        last_error: Optional[Exception] = None
+        for name in names:
+            try:
+                return load_dataset(name)
+            except ValueError as exc:
+                last_error = exc
+            except Exception:
+                raise
+        message = ", ".join(names)
+        raise ValueError(f"Unable to load dataset using keys: {message}") from last_error
+
+    def _load_latent_compat(self, *names: str) -> Any:
+        """Try multiple latent loader keys for backward compatibility."""
+        if not names:
+            raise ValueError("At least one latent key must be provided.")
+        last_error: Optional[Exception] = None
+        for name in names:
+            try:
+                return load_latent(name)
+            except ValueError as exc:
+                last_error = exc
+            except Exception:
+                raise
+        message = ", ".join(names)
+        raise ValueError(f"Unable to load latent using keys: {message}") from last_error
+
+    def _load_text_dataset_table(self, dataset: str) -> pd.DataFrame:
+        """Load one text metadata table using canonical dataset name."""
+        keys = TEXT_DATASET_LOAD_KEYS.get(dataset, (dataset,))
+        payload = self._load_dataset_compat(*keys)
+        if not isinstance(payload, pd.DataFrame):
+            raise TypeError(f"Expected dataset '{dataset}' to resolve to pandas.DataFrame.")
+        return payload
+
+    def _load_text_latent_with_ids(self, dataset: str) -> Tuple[torch.Tensor, np.ndarray]:
+        """Load one text latent matrix and aligned IDs."""
+        keys = TEXT_LATENT_LOAD_KEYS.get(dataset, (dataset,))
+        payload = self._load_latent_compat(*keys)
+        default_id_key = DATASET_ID_COLUMNS.get(dataset, "id")
+        latent, ids = self._unpack_latent_with_ids(payload, default_id_key=default_id_key)
+        return self._as_2d_tensor(latent), np.asarray(ids)
+
+    def _extract_latent_tensor(self, payload: Any) -> torch.Tensor:
+        """Extract latent tensor from flexible payload shapes."""
+        if isinstance(payload, torch.Tensor):
+            return payload
+        if isinstance(payload, np.ndarray):
+            return torch.from_numpy(payload)
+        if isinstance(payload, tuple) and len(payload) > 0:
+            first = payload[0]
+            if isinstance(first, (torch.Tensor, np.ndarray)):
+                return self._as_2d_tensor(first)
+        if isinstance(payload, dict):
+            for key in ("latent", "embeddings", "tensor", "images", "X"):
+                if key in payload and isinstance(payload[key], (torch.Tensor, np.ndarray)):
+                    return self._as_2d_tensor(payload[key])
+        raise ValueError("Unable to extract tensor from latent payload.")
+
+    def _unpack_latent_with_ids(
+        self,
+        payload: Any,
+        default_id_key: str,
+    ) -> Tuple[torch.Tensor, np.ndarray]:
+        """Extract (latent, ids) from tuple/dict payloads, with row-index fallback IDs."""
+        latent: Optional[torch.Tensor] = None
+        ids: Optional[np.ndarray] = None
+
+        if isinstance(payload, tuple):
+            if len(payload) >= 1:
+                latent = self._as_2d_tensor(payload[0])
+            if len(payload) >= 2:
+                ids = np.asarray(payload[1])
+        elif isinstance(payload, dict):
+            for key in ("latent", "embeddings", "tensor"):
+                value = payload.get(key)
+                if isinstance(value, (torch.Tensor, np.ndarray)):
+                    latent = self._as_2d_tensor(value)
+                    break
+            for key in (default_id_key, "pmid", "id", "term", "title", "name"):
+                if key in payload:
+                    ids = np.asarray(payload[key])
+                    break
+        elif isinstance(payload, (torch.Tensor, np.ndarray)):
+            latent = self._as_2d_tensor(payload)
+        else:
+            raise ValueError("Unsupported latent payload format.")
+
+        if latent is None:
+            raise ValueError("Could not extract latent tensor from payload.")
+        if ids is None:
+            ids = np.arange(int(latent.shape[0]))
+        return latent, ids
+
+    def _ensure_pubmed_images_flat(self) -> None:
+        """Lazy-load flattened PubMed images and PMID lookup."""
+        if self._pubmed_images_flat is not None:
+            return
+
+        payload = self._load_dataset_compat("pubmed_images")
+        images: Optional[torch.Tensor] = None
+        pmids: Optional[np.ndarray] = None
+
+        if isinstance(payload, tuple):
+            if len(payload) >= 1 and isinstance(payload[0], (torch.Tensor, np.ndarray)):
+                images = self._as_2d_tensor(payload[0]).detach().cpu()
+            if len(payload) >= 2:
+                pmids = np.asarray(payload[1])
+        elif isinstance(payload, dict):
+            for key in ("images", "image", "X", "data"):
+                if key in payload and isinstance(payload[key], (torch.Tensor, np.ndarray)):
+                    images = self._as_2d_tensor(payload[key]).detach().cpu()
+                    break
+            for key in ("pmid", "pmids", "id"):
+                if key in payload:
+                    pmids = np.asarray(payload[key])
+                    break
+        elif isinstance(payload, (torch.Tensor, np.ndarray)):
+            images = self._as_2d_tensor(payload).detach().cpu()
+
+        if images is None:
+            raise ValueError("Unable to load flattened PubMed images.")
+
+        self._pubmed_images_flat = images
+        self._pubmed_image_pmids = pmids
+        if pmids is not None:
+            lookup: Dict[Any, int] = {}
+            for i, pmid in enumerate(pmids):
+                key = self._normalize_record_id(pmid)
+                if key is not None and key not in lookup:
+                    lookup[key] = i
+            self._pubmed_pmid_to_image_index = lookup
+        else:
+            self._pubmed_pmid_to_image_index = None
+
+    def _ensure_neurovault_images_flat(self) -> None:
+        """Lazy-load flattened NeuroVault images."""
+        if self._neurovault_images_flat is not None:
+            return
+        payload = self._load_dataset_compat("neurovault_images")
+        if not isinstance(payload, (torch.Tensor, np.ndarray)):
+            raise TypeError("Expected NeuroVault images to load as a tensor.")
+        self._neurovault_images_flat = self._as_2d_tensor(payload).detach().cpu()
+
+    def _resolve_pubmed_dataset_indices(self, pmids: np.ndarray) -> np.ndarray:
+        """Map latent PubMed rows to dataset image indices."""
+        self._ensure_pubmed_images_flat()
+        if self._pubmed_pmid_to_image_index is None:
+            return np.arange(len(pmids), dtype=np.int64)
+
+        idxs: List[int] = []
+        fallback_cap = int(self._pubmed_images_flat.shape[0]) if self._pubmed_images_flat is not None else len(pmids)
+        if fallback_cap <= 0:
+            raise ValueError("PubMed image dataset is empty.")
+        for i, pmid in enumerate(pmids):
+            key = self._normalize_record_id(pmid)
+            mapped = self._pubmed_pmid_to_image_index.get(key) if key is not None else None
+            if mapped is None:
+                mapped = i if i < fallback_cap else fallback_cap - 1
+            idxs.append(int(mapped))
+        return np.asarray(idxs, dtype=np.int64)
+
+    def _get_dataset_nifti(self, dataset: str, dataset_index: int) -> nib.Nifti1Image:
+        """Load one dataset-native image and return it as NIfTI."""
+        if dataset_index < 0:
+            raise IndexError("dataset_index must be >= 0.")
+
+        self._ensure_masker()
+        key = str(dataset).strip().lower()
+
+        if key in {"pubmed", "neuro", "publications", "papers"}:
+            self._ensure_pubmed_images_flat()
+            assert self._pubmed_images_flat is not None
+            if dataset_index >= int(self._pubmed_images_flat.shape[0]):
+                raise IndexError(f"dataset_index={dataset_index} out of range for pubmed images.")
+            flat = self._pubmed_images_flat[dataset_index:dataset_index + 1].numpy()
+            return self._masker.inverse_transform(flat)
+
+        if key in {"neurovault", "neurovault_images"}:
+            self._ensure_neurovault_images_flat()
+            assert self._neurovault_images_flat is not None
+            if dataset_index >= int(self._neurovault_images_flat.shape[0]):
+                raise IndexError(f"dataset_index={dataset_index} out of range for neurovault images.")
+            flat = self._neurovault_images_flat[dataset_index:dataset_index + 1].numpy()
+            return self._masker.inverse_transform(flat)
+
+        if key in {"network", "networks"}:
+            self._ensure_network_brain_index()
+            if self._network_brain_latent_cpu is None:
+                raise ValueError("Network latent corpus is not available.")
+            if dataset_index >= int(self._network_brain_latent_cpu.shape[0]):
+                raise IndexError(f"dataset_index={dataset_index} out of range for network corpus.")
+            self._ensure_autoencoder()
+            with torch.no_grad():
+                flat = torch.sigmoid(self._autoencoder.decoder(self._network_brain_latent_cpu[dataset_index:dataset_index + 1].to(self.device)))
+            return self._masker.inverse_transform(flat.detach().cpu().numpy())
+
+        raise ValueError(f"Unsupported dataset '{dataset}' for image plotting.")
+
     def _lookup_publication_row(self, pmid: Any, fallback_index: int) -> Optional[pd.Series]:
         """Resolve publication row by PMID, fallback to row index when needed."""
         self._ensure_publication_lookup()
@@ -1008,7 +1547,7 @@ class NeuroVLM:
     def _ensure_publication_lookup(self) -> None:
         """Lazy-load publication metadata lookup."""
         if self._pub_df is None:
-            self._pub_df = load_dataset("publications").copy()
+            self._pub_df = self._load_dataset_compat("pubmed_text", "publications", "pubmed").copy()
         if self._pub_lookup is None and "pmid" in self._pub_df.columns:
             self._pub_lookup = self._pub_df.drop_duplicates("pmid").set_index("pmid", drop=False)
 
@@ -1181,15 +1720,19 @@ class NeuroVLM:
         key = str(dataset).strip().lower()
         aliases = {
             "pubmed": "neuro",
+            "pubmed_images": "neuro",
             "publications": "neuro",
             "papers": "neuro",
             "neuro": "neuro",
             "network": "networks",
             "networks": "networks",
+            "neurovault": "neurovault",
+            "neurovault_images": "neurovault",
+            "nv": "neurovault",
         }
         key = aliases.get(key, key)
-        if key not in {"neuro", "networks"}:
-            raise ValueError("dataset must be one of: 'neuro', 'pubmed', 'networks'.")
+        if key not in {"neuro", "networks", "neurovault"}:
+            raise ValueError("dataset must be one of: 'neuro', 'pubmed', 'networks', 'neurovault'.")
         return key
 
     def _resolve_brain_datasets(
@@ -1198,7 +1741,7 @@ class NeuroVLM:
     ) -> List[str]:
         """Resolve one or many brain corpora for InfoNCE retrieval."""
         if dataset is None:
-            requested: List[str] = ["neuro", "networks"]
+            requested: List[str] = ["neuro", "networks", "neurovault"]
         elif isinstance(dataset, str):
             requested = [self._canonicalize_brain_dataset(dataset)]
         else:
@@ -1217,7 +1760,7 @@ class NeuroVLM:
         return self._canonicalize_datasets(datasets)
 
     @staticmethod
-    def _validate_text_to_brain_model(model: str) -> None:
-        """Validate text-to-brain model mode."""
-        if model not in {"mse", "infonce"}:
-            raise ValueError("text_to_brain_model must be either 'mse' or 'infonce'.")
+    def _validate_head(head: str) -> None:
+        """Validate retrieval head mode."""
+        if head not in {"mse", "infonce"}:
+            raise ValueError("head must be either 'mse' or 'infonce'.")
