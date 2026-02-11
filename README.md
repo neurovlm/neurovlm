@@ -25,29 +25,26 @@ Use the `NeuroVLM` object for text-to-brain, brain-to-text, text-to-text, and br
 from neurovlm import NeuroVLM
 from neurovlm.data import load_latent, load_dataset
 
-# Load networks examples images
-networks = load_latent("networks_neuro")
-
-# Text-to-brain: generative
 nvlm = NeuroVLM()
-res = nvlm.to_brain("default mode network", model="mse")
-imgs = res.to_nifti() # returns nib.Nifti1Image
 
-# Brain-to-text: contrastive
-res = nvlm.to_text(networks["Du"]["DN-A"])
-res.top_k(1) # returns pd.DataFrame
+# Text-to-brain generation
+result = nvlm.text(["vision", "default mode network"]).to_brain(head="mse")
+result.to_nifti() # returns list of nib.Nifti1Image
+result.plot(0, threshold=0.25) # plot image for vision
+result.plot(1, threshold=0.15) # plot image for DMN
 
-# Text-to-brain: contrastive
-res = nvlm.to_brain("default mode network", model="infonce")
-imgs = res.top_k(3).to_nifti()
+# Text-to-brain ranking and retrieval
+nvlm = NeuroVLM()
+result = nvlm.text("motor").to_brain(head='infonce')
+top = result.top_k(2) # each row pairs to a neuorimage that is most similar to the text query
+top.plot_row(1, threshold=0.1) # WashU atlas
+top.plot_row(2, threshold=2.5) # NeuroVault
+top.plot_row(4, threshold=0.1) # PubMed
 
-# Text-to-text
-res = nvlm.to_text("default mode network", project=False)
-res.top_k(1) # returns pd.DataFrame
-
-# Brain-to-brain
-res = nvlm.to_brain(networks["Du"]["DN-A"], model="infonce")
-res.top_k(5) # returns pd.DataFrame
+# Brain-to-text ranking and retrieval
+nvlm = NeuroVLM()
+result = nvlm.brain(load_latent("networks_neuro")["Du"]["AUD"]).to_text()
+result.top_k(5).query("cosine_similarity > 0.4") # return up to 5 examples per dataset
 ```
 
 ## Data and API
