@@ -128,6 +128,7 @@ def _load_latent_neuro() -> Tuple[torch.Tensor, np.ndarray]:
     latent_payload = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     latent = latent_payload["latent"]
@@ -207,6 +208,7 @@ def _load_latent_text() -> Tuple[torch.Tensor, np.ndarray]:
     latent_payload = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     latent = latent_payload["latent"]
@@ -224,6 +226,7 @@ def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
     latent_payload = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     latent = latent_payload["latent"]
@@ -241,6 +244,7 @@ def _load_latent_cogatlas() -> Tuple[torch.Tensor, np.ndarray]:
     latent_payload = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     latent = latent_payload["latent"]
@@ -258,6 +262,7 @@ def _load_latent_cogatlas_disorder() -> Tuple[torch.Tensor, np.ndarray]:
     latent_payload = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     latent = latent_payload["latent"]
@@ -275,6 +280,7 @@ def _load_latent_cogatlas_task() -> Tuple[torch.Tensor, np.ndarray]:
     latent_payload = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     latent = latent_payload["latent"]
@@ -291,6 +297,7 @@ def _load_latent_networks_canonical_text() -> dict:
     latents = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     return latents
@@ -305,6 +312,7 @@ def _load_latent_networks_neuro() -> dict:
     latents = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     return latents
@@ -403,3 +411,30 @@ def _proj_head_text_infonce() -> torch.nn.Module:
     )
     proj_head = load_model(ProjHead(768, 512, 384), model_path)
     return proj_head
+
+
+@lru_cache(maxsize=1)
+def _load_latent_ngram() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load the Neuro brain map embedding from HuggingFace."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "ngram_embeddings.pt"
+    )
+    latent = torch.load(
+        latent_path,
+        weights_only=False,
+        map_location="cpu"
+    )
+    return latent
+
+@lru_cache(maxsize=1)
+def _load_ngram() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load the Neuro brain map embedding from HuggingFace."""
+    labels_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "ngram_labels.npy"
+    )
+    labels = np.load(
+        labels_path
+    )
+    return labels
