@@ -6,8 +6,16 @@ NeuroVLM maps between neuroimaging activation maps and neuroscience text.
 
 ## Install
 
+Minimal, inference-only installation:
+
 ```bash
-pip install -e .
+pip install neurovlm
+```
+
+With optional dependencies needed to train and reproduce analyses:
+
+```bash
+pip install "neurovlm[full]"
 ```
 
 ## Quickstart
