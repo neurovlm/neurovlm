@@ -1,0 +1,136 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Publish target"
+        required: true
+        type: choice
+        default: testpypi
+        options:
+          - testpypi
+          - pypi
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi') && 'testpypi' || 'pypi' }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Setup Python
+        run: uv python install 3.12
+
+      - name: Validate tag matches pyproject version
+        if: ${{ github.event_name == 'push' }}
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import sys
+          import tomllib
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
+          expected = f"v{version}"
+
+          if tag != expected:
+              print(f"Tag/version mismatch: tag={tag}, pyproject={version}")
+              sys.exit(1)
+          print(f"Tag/version check passed: {tag}")
+          PY
+
+      - name: Build distributions
+        run: uv build --sdist --wheel
+
+      - name: Validate built artifacts do not contain data blobs
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import sys
+          import tarfile
+          import zipfile
+
+          dist_dir = pathlib.Path("dist")
+          blocked_suffixes = [
+              ".pt",
+              ".npy",
+              ".npz",
+              ".parquet",
+              ".nii",
+              ".nii.gz",
+              ".zip",
+          ]
+          blocked_fragments = [
+              "neurovlm_data_back/",
+              "__pycache__/",
+          ]
+          bad = []
+
+          for sdist in dist_dir.glob("*.tar.gz"):
+              with tarfile.open(sdist, "r:gz") as tf:
+                  for member in tf.getnames():
+                      name = member.lower()
+                      if any(fragment in name for fragment in blocked_fragments):
+                          bad.append((sdist.name, member))
+                          continue
+                      if any(name.endswith(suffix) for suffix in blocked_suffixes):
+                          bad.append((sdist.name, member))
+
+          for wheel in dist_dir.glob("*.whl"):
+              with zipfile.ZipFile(wheel) as zf:
+                  for member in zf.namelist():
+                      name = member.lower()
+                      if any(fragment in name for fragment in blocked_fragments):
+                          bad.append((wheel.name, member))
+                          continue
+                      if any(name.endswith(suffix) for suffix in blocked_suffixes):
+                          bad.append((wheel.name, member))
+
+          if bad:
+              print("Blocked files found in built artifacts:")
+              for archive, member in bad:
+                  print(f"- {archive}: {member}")
+              sys.exit(1)
+
+          print("Artifact content check passed.")
+          PY
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+      - name: Publish to TestPyPI
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi' }}
+        run: >
+          uv publish
+          --trusted-publishing always
+          --publish-url https://test.pypi.org/legacy/
+          --check-url https://test.pypi.org/simple
+
+      - name: Publish to PyPI
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.repository == 'pypi') }}
+        run: >
+          uv publish
+          --trusted-publishing always
+          --check-url https://pypi.org/simple

@@ -35,3 +35,15 @@ classifiers = [
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+
+[tool.hatch.build.targets.wheel]
+only-include = ["src/neurovlm/**/*.py"]
+sources = ["src"]
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+  "src/neurovlm/**/*.py",
+  "pyproject.toml",
+  "README.md",
+  "LICENSE",
+]
