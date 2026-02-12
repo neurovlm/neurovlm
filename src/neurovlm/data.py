@@ -290,6 +290,7 @@ def load_dataset(name: str):
     - "neurovault_text": publication data for each neurovault image
     - "neurovault_images": tensor containing neurovault images
     - "neurovault_images_meta" dataframe the maps each image to a study
+
     """
     match name:
         case "pubmed_text":

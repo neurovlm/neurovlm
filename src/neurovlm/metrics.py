@@ -3,8 +3,6 @@ from typing import Optional
 import numpy as np
 import torch
 from torch.nn import functional as F
-from skimage.metrics import structural_similarity as ssim
-from sklearn.metrics import roc_curve, auc
 
 def compute_metrics(
     original: torch.Tensor,
@@ -34,6 +32,8 @@ def compute_metrics(
     dice_score_t : 1d tensor
         Dice score at each threshold.
     """
+
+    from skimage.metrics import structural_similarity as ssim
 
     if hasattr(original, "detach"):  # torch tensor
         original = original.detach().cpu().numpy()
@@ -209,6 +209,8 @@ def bits_per_pixel(y_true, logits, *, baseline="per_pixel", eps=1e-7):
 
 def compute_ae_performance(X: torch.Tensor, X_re: torch.Tensor):
     """Autoencoder performance metrics."""
+    from sklearn.metrics import roc_curve, auc
+
     fpr, tpr, _ = roc_curve(
         X.numpy().reshape(-1) > 0.5,
         torch.sigmoid(X_re).numpy().reshape(-1)

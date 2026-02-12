@@ -13,6 +13,22 @@ Table of Contents
    :local:
    :depth: 1
 
+Inference
+---------
+
+The high-level interface for inference.
+
+.. currentmodule:: neurovlm.core
+
+.. autosummary::
+   :toctree: generated/
+
+   NeuroVLM
+   BrainSearchResult
+   TextSearchResult
+   BrainTopKResult
+
+
 Data
 ----
 

@@ -636,7 +636,7 @@ class _QueryBuilder:
 
 
 class NeuroVLM:
-    """Unified interface for text-to-brain and brain-to-text retrieval.
+    """Unified interface for text-to-brain and brain-to-text.
 
     Parameters
     ----------
