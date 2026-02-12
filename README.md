@@ -27,7 +27,7 @@ from neurovlm.data import fetch_data
 fetch_data()
 ```
 
-Use the `NeuroVLM` object for text-to-brain, brain-to-text, text-to-text, and brain-to-brain:
+Use the `NeuroVLM` object for text-to-brain and brain-to-text:
 
 ```python
 from neurovlm import NeuroVLM
@@ -54,10 +54,9 @@ result = nvlm.brain(load_latent("networks_neuro")["Du"]["AUD"]).to_text()
 result.top_k(5).query("cosine_similarity > 0.4") # return up to 5 examples per dataset
 ```
 
-## Data and API
+## Documentation
 
-- Data/model fetch and loaders: `neurovlm.data`
-- Full API reference: `docs/api.rst`
+See the [docs](https://neurovlm.github.io/neurovlm/) for the [API](https://neurovlm.github.io/neurovlm/api.html) and [tutorials](https://neurovlm.github.io/neurovlm/tutorials/index.html).
 
 ## License
 
