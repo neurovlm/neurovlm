@@ -84,10 +84,19 @@ jobs:
               "__pycache__/",
           ]
           bad = []
+          missing = []
 
           for sdist in dist_dir.glob("*.tar.gz"):
               with tarfile.open(sdist, "r:gz") as tf:
-                  for member in tf.getnames():
+                  members = tf.getnames()
+                  if not any(member.endswith("src/neurovlm/__init__.py") for member in members):
+                      missing.append((sdist.name, "src/neurovlm/__init__.py"))
+                  if not any(
+                      member.endswith(".py") and "src/neurovlm/" in member
+                      for member in members
+                  ):
+                      missing.append((sdist.name, "src/neurovlm/*.py"))
+                  for member in members:
                       name = member.lower()
                       if any(fragment in name for fragment in blocked_fragments):
                           bad.append((sdist.name, member))
@@ -97,13 +106,27 @@ jobs:
 
           for wheel in dist_dir.glob("*.whl"):
               with zipfile.ZipFile(wheel) as zf:
-                  for member in zf.namelist():
+                  members = zf.namelist()
+                  if "neurovlm/__init__.py" not in members:
+                      missing.append((wheel.name, "neurovlm/__init__.py"))
+                  if not any(
+                      member.startswith("neurovlm/") and member.endswith(".py")
+                      for member in members
+                  ):
+                      missing.append((wheel.name, "neurovlm/*.py"))
+                  for member in members:
                       name = member.lower()
                       if any(fragment in name for fragment in blocked_fragments):
                           bad.append((wheel.name, member))
                           continue
                       if any(name.endswith(suffix) for suffix in blocked_suffixes):
                           bad.append((wheel.name, member))
+
+          if missing:
+              print("Required package files missing from built artifacts:")
+              for archive, expected in missing:
+                  print(f"- {archive}: expected {expected}")
+              sys.exit(1)
 
           if bad:
               print("Blocked files found in built artifacts:")

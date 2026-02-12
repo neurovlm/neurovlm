@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "neurovlm"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
   "numpy",
   "pandas",
@@ -57,6 +57,13 @@ notebook = [
 llm = [
   "ollama",
 ]
+docs = [
+  "sphinx>=7.2,<9",
+  "sphinx-book-theme>=1.1,<2",
+  "myst-parser>=2.0,<4",
+  "myst-nb>=1.1,<2",
+  "sphinx-design>=0.6,<1",
+]
 full = [
   "scikit-learn",
   "scikit-image",
@@ -72,11 +79,12 @@ full = [
 ]
 
 [tool.hatch.build.targets.wheel]
-only-include = ["src/neurovlm/**/*.py"]
+# Ensure the importable package is present in the wheel, but keep it source-only.
+include = ["src/neurovlm/**/*.py"]
 sources = ["src"]
 
 [tool.hatch.build.targets.sdist]
-only-include = [
+include = [
   "src/neurovlm/**/*.py",
   "pyproject.toml",
   "README.md",
