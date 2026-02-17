@@ -32,6 +32,11 @@ __all__ = [
     "_load_cogatlas_dataset",
     "_load_cogatlas_task_dataset",
     "_load_cogatlas_disorder_dataset",
+    "_load_cogatlas_term_data",
+    "_load_cogatlas_term_threshold_data",
+    "_load_ngram_data",
+    "_load_threshold_analysis_cache",
+    "_load_threshold_analysis_text_cache",
     "_load_specter",
     "_load_latent_text",
     "_load_latent_wiki",
@@ -50,15 +55,43 @@ __all__ = [
 def _download_from_hf(repo_id: str, filename: str, repo_type: str = "dataset") -> str:
     """Download a file from HuggingFace and return the local path.
 
+    Uses local cache first, only downloads if not cached.
+
     Args:
         repo_id: Repository ID (e.g., 'neurovlm/embedded_text')
         filename: Name of the file to download
         repo_type: Type of repository - "dataset" or "model" (default: "dataset")
     """
+    import os
+    try:
+        return hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            repo_type=repo_type,
+            local_files_only=True,
+        )
+    except Exception:
+        pass
+
+    if os.environ.get("HF_HUB_OFFLINE", "0") == "1":
+        # Scan all snapshots for the file as a fallback
+        from huggingface_hub.constants import HF_HUB_CACHE
+        repo_folder_name = f"{'models' if repo_type == 'model' else 'datasets'}--{repo_id.replace('/', '--')}"
+        snapshots_dir = os.path.join(HF_HUB_CACHE, repo_folder_name, "snapshots")
+        if os.path.isdir(snapshots_dir):
+            for snapshot in os.listdir(snapshots_dir):
+                candidate = os.path.join(snapshots_dir, snapshot, filename)
+                if os.path.exists(candidate):
+                    return candidate
+        raise FileNotFoundError(
+            f"Cannot find {filename} in local HF cache for {repo_id} "
+            f"and offline mode is enabled."
+        )
+
     return hf_hub_download(
         repo_id=repo_id,
         filename=filename,
-        repo_type=repo_type
+        repo_type=repo_type,
     )
 
 
@@ -127,6 +160,7 @@ def _load_latent_neuro() -> Tuple[torch.Tensor, np.ndarray]:
     latent_payload = torch.load(
         latent_path,
         weights_only=False,
+        map_location=torch.device("cpu"),
     )
 
     latent = latent_payload["latent"]
@@ -188,6 +222,140 @@ def _load_cogatlas_graph_dataset(filtered=False) -> pd.DataFrame:
     except Exception as exc:  # pragma: no cover
         print(f"pyarrow failed: {exc}, trying fastparquet...")
         return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+def _load_cogatlas_term_data() -> Tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    """Load CogAtlas term classification training data from HuggingFace.
+
+    Returns:
+        matrix: Document-term co-occurrence matrix (n_documents x n_terms)
+        labels: Term labels/names
+        pmids: Publication IDs
+        category_info: Dictionary with term category information
+    """
+    matrix_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        "cogatlas_term_matrix.npy"
+    )
+    labels_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        "cogatlas_term_labels.npy"
+    )
+    pmids_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        "cogatlas_term_pmids.npy"
+    )
+    category_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        "cogatlas_term_category_info.json"
+    )
+
+    import json
+    matrix = np.load(matrix_path)
+    labels = np.load(labels_path)
+    pmids = np.load(pmids_path)
+    with open(category_path, 'r') as f:
+        category_info = json.load(f)
+
+    return matrix, labels, pmids, category_info
+
+
+def _load_cogatlas_term_threshold_data(threshold: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    """Load CogAtlas term classification data filtered by threshold from HuggingFace.
+
+    Args:
+        threshold: Similarity threshold used to filter terms (e.g., 0.6, 0.65)
+
+    Returns:
+        matrix: Document-term co-occurrence matrix (n_documents x n_terms)
+        labels: Term labels/names
+        pmids: Publication IDs
+        category_info: Dictionary with term category information
+    """
+    # Format threshold as string with underscore (e.g., 0.6 -> "0_6000", 0.65 -> "0_6500")
+    threshold_str = f"{threshold:.4f}".replace(".", "_")
+
+    matrix_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        f"cogatlas_term_threshold_{threshold_str}_matrix.npy"
+    )
+    labels_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        f"cogatlas_term_threshold_{threshold_str}_labels.npy"
+    )
+    pmids_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        f"cogatlas_term_threshold_{threshold_str}_pmids.npy"
+    )
+    category_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        f"cogatlas_term_threshold_{threshold_str}_category_info.json"
+    )
+
+    import json
+    matrix = np.load(matrix_path)
+    labels = np.load(labels_path)
+    pmids = np.load(pmids_path)
+    with open(category_path, 'r') as f:
+        category_info = json.load(f)
+
+    return matrix, labels, pmids, category_info
+
+
+def _load_ngram_data() -> Tuple[np.ndarray, np.ndarray]:
+    """Load n-gram classification data from HuggingFace.
+
+    Returns:
+        matrix: Document-ngram co-occurrence matrix
+        labels: N-gram labels
+    """
+    matrix_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        "ngram_matrix.npy"
+    )
+    labels_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        "ngram_labels.npy"
+    )
+
+    matrix = np.load(matrix_path)
+    labels = np.load(labels_path)
+
+    return matrix, labels
+
+
+def _load_threshold_analysis_cache():
+    """Load threshold analysis similarities cache from HuggingFace.
+
+    Returns:
+        Cache dictionary containing precomputed similarities for threshold analysis
+    """
+    cache_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        "threshold_analysis_similarities_cache.pkl"
+    )
+
+    with open(cache_path, 'rb') as f:
+        cache = pickle.load(f)
+
+    return cache
+
+
+def _load_threshold_analysis_text_cache():
+    """Load threshold analysis text similarities cache from HuggingFace.
+
+    Returns:
+        Cache dictionary containing precomputed text similarities for threshold analysis
+    """
+    cache_path = _download_from_hf(
+        "neurovlm/cognitive_atlas",
+        "threshold_analysis_text_similarities_cache.pkl"
+    )
+
+    with open(cache_path, 'rb') as f:
+        cache = pickle.load(f)
+
+    return cache
 
 
 @lru_cache(maxsize=1)

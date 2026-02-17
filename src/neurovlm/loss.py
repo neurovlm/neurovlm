@@ -3,6 +3,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import numpy as np
+from typing import Optional
 
 class FocalLoss(nn.Module):
     def __init__(self, alpha=1, gamma=2):
@@ -15,6 +16,50 @@ class FocalLoss(nn.Module):
         pt = torch.exp(-bce_loss)
         focal_loss = self.alpha * (1-pt)**self.gamma * bce_loss
         return focal_loss.mean()
+
+
+class FocalWithLogitsLoss(nn.Module):
+    """Focal loss operating on raw logits (numerically stable).
+
+    Focal loss down-weights easy negatives so the model focuses on
+    hard-to-classify examples. Particularly useful when the label
+    distribution has a long tail of rare terms.
+
+    Parameters
+    ----------
+    gamma : float
+        Focusing parameter. gamma=0 recovers standard BCE.
+        Higher values focus more on hard examples. Default 2.0.
+    pos_weight : torch.Tensor or None
+        Per-label positive class weight (same as BCEWithLogitsLoss).
+    """
+
+    def __init__(self, gamma: float = 2.0, pos_weight: Optional[torch.Tensor] = None):
+        super().__init__()
+        self.gamma = gamma
+        self.register_buffer('pos_weight', pos_weight)
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # Numerically stable sigmoid
+        p = torch.sigmoid(logits)
+
+        # Standard BCE from logits (stable)
+        bce = nn.functional.binary_cross_entropy_with_logits(
+            logits, targets, reduction='none'
+        )
+
+        # Focal modulating factor
+        p_t = targets * p + (1 - targets) * (1 - p)
+        focal_weight = (1 - p_t) ** self.gamma
+
+        loss = focal_weight * bce
+
+        # Apply pos_weight: scale the positive-class loss terms
+        if self.pos_weight is not None:
+            weight = targets * self.pos_weight.unsqueeze(0) + (1 - targets)
+            loss = loss * weight
+
+        return loss.mean()
 
 class InfoNCELoss(torch.nn.Module):
     """Compute InfoNCE loss between image and text embeddings."""
