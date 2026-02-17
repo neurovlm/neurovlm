@@ -15,7 +15,7 @@ import pandas as pd
 import torch
 
 from neurovlm.retrieval_resources import (
-    _load_dataframe,
+    _load_pubmed_dataframe,
     _load_latent_text,
     _load_latent_wiki,
     _load_latent_cogatlas,
@@ -42,7 +42,7 @@ def search_papers_from_text(
     if not isinstance(query, str):
         raise TypeError("query must be a string for text-based retrieval")
 
-    df = _load_dataframe()
+    df = _load_pubmed_dataframe()
     latent_text, latent_pmids = _load_latent_text()
 
     specter = _load_specter()

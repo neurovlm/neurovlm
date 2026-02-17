@@ -26,8 +26,9 @@ from neurovlm.models import Specter, ProjHead, NeuroAutoEncoder
 from neurovlm.io import load_model
 
 __all__ = [
-    "_load_dataframe",
+    "_load_pubmed_dataframe",
     "_load_neuro_wiki",
+    "_load_pubmed_coordinates",
     "_load_latent_neuro",
     "_load_cogatlas_dataset",
     "_load_cogatlas_task_dataset",
@@ -49,6 +50,12 @@ __all__ = [
     "_proj_head_image_infonce",
     "_proj_head_text_mse",
     "_proj_head_text_infonce",
+    "_load_images_neurovault_dataframe",
+    "_load_publications_neurovault_dataframe",
+    "_load_latent_neurovault_images",
+    "_load_latent_neurovault_text",
+    "_load_neurovault_images",
+    "_load_pubmed_images",
 ]
 
 
@@ -96,7 +103,7 @@ def _download_from_hf(repo_id: str, filename: str, repo_type: str = "dataset") -
 
 
 @lru_cache(maxsize=1)
-def _load_dataframe() -> pd.DataFrame:
+def _load_pubmed_dataframe() -> pd.DataFrame:
     """Load the publications DataFrame from HuggingFace."""
     parquet_path = _download_from_hf(
         "neurovlm/neuro_image_papers",
@@ -110,7 +117,7 @@ def _load_dataframe() -> pd.DataFrame:
 
 
 @lru_cache(maxsize=1)
-def _load_coordinates() -> pd.DataFrame:
+def _load_pubmed_coordinates() -> pd.DataFrame:
     """Load the x, y, z coordinates DataFrame from HuggingFace."""
     parquet_path = _download_from_hf(
         "neurovlm/neuro_image_papers",
@@ -374,6 +381,7 @@ def _load_latent_text() -> Tuple[torch.Tensor, np.ndarray]:
     latent_payload = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     latent = latent_payload["latent"]
@@ -391,6 +399,7 @@ def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
     latent_payload = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     latent = latent_payload["latent"]
@@ -408,6 +417,7 @@ def _load_latent_cogatlas() -> Tuple[torch.Tensor, np.ndarray]:
     latent_payload = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     latent = latent_payload["latent"]
@@ -425,6 +435,7 @@ def _load_latent_cogatlas_disorder() -> Tuple[torch.Tensor, np.ndarray]:
     latent_payload = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     latent = latent_payload["latent"]
@@ -442,11 +453,136 @@ def _load_latent_cogatlas_task() -> Tuple[torch.Tensor, np.ndarray]:
     latent_payload = torch.load(
         latent_path,
         weights_only=False,
+        map_location="cpu"
     )
 
     latent = latent_payload["latent"]
     latent_terms = np.asarray(latent_payload["term"])
     return latent, latent_terms
+
+
+@lru_cache(maxsize=1)
+def _load_images_neurovault_dataframe() -> pd.DataFrame:
+    """Load NeuroVault image metadata from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "images_neurovault.parquet"
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_publications_neurovault_dataframe() -> pd.DataFrame:
+    """Load NeuroVault publication metadata from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "publications_neurovault.parquet"
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_latent_neurovault_images() -> torch.Tensor:
+    """Load NeuroVault image latent tensor from HuggingFace on CPU."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_neurovault_images.pt"
+    )
+    latent = torch.load(
+        latent_path,
+        weights_only=False,
+        map_location="cpu"
+    )
+    if not isinstance(latent, torch.Tensor):
+        raise TypeError("Expected `latent_neurovault_images.pt` to contain a torch.Tensor.")
+    return latent.cpu()
+
+
+@lru_cache(maxsize=1)
+def _load_latent_neurovault_text() -> torch.Tensor:
+    """Load NeuroVault text latent tensor from HuggingFace on CPU."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_neurovault_text.pt"
+    )
+    latent = torch.load(
+        latent_path,
+        weights_only=False,
+        map_location="cpu"
+    )
+    if not isinstance(latent, torch.Tensor):
+        raise TypeError("Expected `latent_neurovault_text.pt` to contain a torch.Tensor.")
+    return latent.cpu()
+
+
+@lru_cache(maxsize=1)
+def _load_neurovault_images() -> torch.Tensor:
+    """Load NeuroVault image tensor from HuggingFace on CPU."""
+    image_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "neurovault_images.pt"
+    )
+    images = torch.load(
+        image_path,
+        weights_only=False,
+        map_location="cpu"
+    )
+    if not isinstance(images, torch.Tensor):
+        raise TypeError("Expected `neurovault_images.pt` to contain a torch.Tensor.")
+    return images.cpu()
+
+
+@lru_cache(maxsize=1)
+def _load_pubmed_images() -> torch.Tensor:
+    """Load PubMed image tensor from HuggingFace on CPU."""
+    image_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "pubmed_images.pt"
+    )
+    images, pmids = torch.load(
+        image_path,
+        weights_only=False,
+        map_location="cpu"
+    ).values()
+    return images, pmids
+
+@lru_cache(maxsize=1)
+def _load_latent_networks_canonical_text() -> dict:
+    """Load latent network atlases."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_networks_text.pt"
+    )
+    latents = torch.load(
+        latent_path,
+        weights_only=False,
+        map_location="cpu"
+    )
+
+    return latents
+
+@lru_cache(maxsize=1)
+def _load_latent_networks_neuro() -> dict:
+    """Load latent network atlases."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_networks_image.pt"
+    )
+    latents = torch.load(
+        latent_path,
+        weights_only=False,
+        map_location="cpu"
+    )
+
+    return latents
 
 
 @lru_cache(maxsize=1)
@@ -489,6 +625,26 @@ def _load_networks() -> dict:
 
 
 @lru_cache(maxsize=1)
+def _load_networks_labels() -> dict:
+    """Load network atlases from HuggingFace."""
+    networks_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "networks_labels.parquet"
+    )
+    return pd.read_parquet(networks_path)
+
+
+@lru_cache(maxsize=1)
+def _load_networks_canonical() -> pd.DataFrame:
+    """Load names and descriptions of common networks."""
+    networks_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "network_text.parquet"
+    )
+    return pd.read_parquet(networks_path)
+
+
+@lru_cache(maxsize=1)
 def _proj_head_image_infonce() -> torch.nn.Module:
     """Load and return the image projection head from HuggingFace."""
     model_path = _download_from_hf(
@@ -522,3 +678,30 @@ def _proj_head_text_infonce() -> torch.nn.Module:
     )
     proj_head = load_model(ProjHead(768, 512, 384), model_path)
     return proj_head
+
+
+@lru_cache(maxsize=1)
+def _load_latent_ngram() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load the Neuro brain map embedding from HuggingFace."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "ngram_embeddings.pt"
+    )
+    latent = torch.load(
+        latent_path,
+        weights_only=False,
+        map_location="cpu"
+    )
+    return latent
+
+@lru_cache(maxsize=1)
+def _load_ngram() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load the Neuro brain map embedding from HuggingFace."""
+    labels_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "ngram_labels.npy"
+    )
+    labels = np.load(
+        labels_path
+    )
+    return labels

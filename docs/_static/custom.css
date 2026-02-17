@@ -1,0 +1,18 @@
+/* Keep a light, technical look inspired by JAX docs. */
+
+.bd-main .bd-content .bd-article-container {
+  max-width: 76rem;
+}
+
+h1 {
+  letter-spacing: -0.02em;
+}
+
+.sd-card {
+  border-radius: 0.6rem;
+}
+
+.navbar-brand img {
+  max-height: 5rem;
+  width: auto;
+}

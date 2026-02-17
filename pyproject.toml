@@ -4,34 +4,90 @@ build-backend = "hatchling.build"
 
 [project]
 name = "neurovlm"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
   "numpy",
   "pandas",
   "torch",
-  "scikit-learn",
-  "scikit-image",
-  "torch",
-  "sentence-transformers",
-  "adapters",
-  "peft",
   "nibabel",
   "nilearn",
-  "nimare",
-  "tqdm",
-  "matplotlib",
-  "pyarrow",
-  "tqdm"
+  "huggingface-hub",
+  "safetensors",
+  "adapters",
+  "transformers",
+  "pyarrow"
 ]
 authors = [
   { name="Ryan Hammonds", email="ryanphammonds@gmail.com" },
 ]
 description = "Neuro vision-language models."
 readme = "README.md"
-requires-python = ">=3.8, <3.13"
+requires-python = ">=3.10, <3.13"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+
+[project.optional-dependencies]
+metrics = [
+  "scikit-learn",
+  "scikit-image",
+]
+coords = [
+  "nimare",
+]
+crawling = [
+  "requests",
+  "beautifulsoup4",
+  "tqdm",
+]
+cogatlas = [
+  "networkx",
+]
+viz = [
+  "matplotlib",
+  "seaborn",
+]
+notebook = [
+  "ipython",
+  "tqdm",
+]
+llm = [
+  "ollama",
+]
+docs = [
+  "sphinx>=7.2,<9",
+  "sphinx-book-theme>=1.1,<2",
+  "myst-parser>=2.0,<4",
+  "myst-nb>=1.1,<2",
+  "sphinx-design>=0.6,<1",
+  "sphinx-copybutton>=0.5,<1",
+]
+full = [
+  "scikit-learn",
+  "scikit-image",
+  "nimare",
+  "requests",
+  "beautifulsoup4",
+  "tqdm",
+  "networkx",
+  "matplotlib",
+  "seaborn",
+  "ipython",
+  "ollama",
+]
+
+[tool.hatch.build.targets.wheel]
+# Ensure the importable package is present in the wheel, but keep it source-only.
+include = ["src/neurovlm/**/*.py"]
+sources = ["src"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/neurovlm/**/*.py",
+  "pyproject.toml",
+  "README.md",
+  "LICENSE",
+]

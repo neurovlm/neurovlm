@@ -232,7 +232,7 @@ class Specter:
                     tokens["attention_mask"],
                     method=self.pooling
                 )
-                self.ref= self.ref / self.ref.norm()
+                self.ref = self.ref / self.ref.norm()
             self.f_transform = self.orthogonalize
         else:
             self.f_transform = lambda i : i
@@ -324,6 +324,13 @@ class Specter:
         """Load pretrained Specter - an alias to init to keep api consistent."""
         return Specter()
 
+    def to(self, device):
+        """Move model to device."""
+        self.device = device
+        self.specter = self.specter.to(device).eval()
+        self.ref = self.ref.to(device)
+        return self
+
 
 class ConceptClf(nn.Module):
     """Predict concepts from latent neuro embeddings."""
@@ -342,5 +349,35 @@ class ConceptClf(nn.Module):
 
     @staticmethod
     def from_pretrained() -> nn.Module:
-        """Load pretrained Specter - an alias to init to keep api consistent."""
+        """Load pretrained model - an alias to init to keep api consistent."""
         raise NotImplementedError
+
+
+# Unified interface for all datasets
+def load_model(name: str):
+    """Alias to .from_pretrained methods in model classes.
+
+    Parameters
+    ----------
+    name: str, {"proj_head_text_infonce", "proj_head_image_infonce", "proj_head_text_mse", "autoencoder", "specter"}
+        Name of model.
+
+    Returns
+    -------
+    model
+    """
+    match name:
+        case "proj_head_text_infonce":
+            return ProjHead().from_pretrained("text_infonce")
+        case "proj_head_image_infonce":
+            return ProjHead().from_pretrained("image_infonce")
+        case "proj_head_text_mse":
+            return ProjHead().from_pretrained("text_mse")
+        case "autoencoder":
+            return NeuroAutoEncoder.from_pretrained()
+        case "specter":
+            return Specter()
+        case _:
+            valid_names = ["proj_head_text_infonce", "proj_head_image_infonce", "proj_head_text_mse",
+                           "autoencoder", "specter"]
+            raise ValueError(f"{name} not in {valid_names}")
