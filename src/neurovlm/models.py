@@ -4,10 +4,6 @@ import pandas as pd
 import torch
 from torch import nn
 import torch.nn.functional as F
-from adapters import AutoAdapterModel
-from transformers import AutoTokenizer, AutoModel
-from transformers.utils.logging import disable_progress_bar
-disable_progress_bar()
 
 class NormalizeLayer(nn.Module):
     def forward(self, x):
@@ -189,6 +185,11 @@ class Specter:
         adapter : {"adhoc_query", "classification", "regression", "proximity"}
             Adapter to attach to the model, for specific use cases.
         """
+        from adapters import AutoAdapterModel
+        from transformers import AutoTokenizer, AutoModel
+        from transformers.utils.logging import disable_progress_bar
+        disable_progress_bar()
+
         self.device = torch.device(device)
         tokenizer = AutoTokenizer.from_pretrained(f'{model}_base')
         self.sep_token = tokenizer.sep_token

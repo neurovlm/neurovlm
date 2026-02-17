@@ -209,23 +209,31 @@ def search_cogatlas_from_text(
         raise ValueError(f"Unknown category: {category}")
 
     proj_head = _proj_head_text_infonce()
+    proj_head.eval()
+
+    # Ensure everything runs on the same device as the projection head
+    try:
+        device = next(proj_head.parameters()).device
+    except StopIteration:
+        device = torch.device("cpu")
 
     # Handle string vs tensor query
     if isinstance(query, str):
         specter = _load_specter()
-        encoded_query = specter(query)[0].detach().to("cpu")
-        encoded_query = encoded_query / encoded_query.norm()
+        encoded_query = specter(query)[0].detach().to(device)
+        encoded_query = encoded_query / (encoded_query.norm() + 1e-12)
         proj_query = proj_head(encoded_query)
-        proj_query = proj_query / proj_query.norm()
+        proj_query = proj_query / (proj_query.norm() + 1e-12)
     else:
-        # Query is already a tensor embedding
-        encoded_query = query / query.norm()
+        encoded_query = query.detach().to(device)
+        encoded_query = encoded_query / (encoded_query.norm() + 1e-12)
         proj_query = proj_head(encoded_query)
-        proj_query = proj_query / proj_query.norm()
+        proj_query = proj_query / (proj_query.norm() + 1e-12)
 
-    cogatlas_embed = latent_cogatlas / latent_cogatlas.norm(dim=1)[:, None]
+    latent_cogatlas = latent_cogatlas.to(device)
+    cogatlas_embed = latent_cogatlas / (latent_cogatlas.norm(dim=1, keepdim=True) + 1e-12)
     proj_cogatlas = proj_head(cogatlas_embed)
-    proj_cogatlas = proj_cogatlas / proj_cogatlas.norm(dim=1)[:, None]
+    proj_cogatlas = proj_cogatlas / (proj_cogatlas.norm(dim=1, keepdim=True) + 1e-12)
     cos_sim = proj_cogatlas @ proj_query
 
     inds = torch.argsort(cos_sim, descending=True)

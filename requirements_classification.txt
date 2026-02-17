@@ -1,0 +1,35 @@
+# Classification Pipeline Requirements
+# Install with: pip install -r requirements_classification.txt
+
+# Core ML libraries
+numpy>=2.0.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+scipy>=1.10.0
+
+# Deep learning
+torch>=2.1.0
+torchvision>=0.16.0
+torchaudio>=2.1.0
+
+# Gradient boosting
+xgboost>=2.0.0
+lightgbm>=4.0.0
+catboost>=1.2.0
+
+# Local LLM (Ollama)
+ollama>=0.6.0
+pydantic>=2.0.0
+
+# Visualization
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Utilities
+tqdm>=4.65.0
+jupyter>=1.0.0
+jupyterlab>=4.0.0
+
+# Already in neurovlm
+# huggingface_hub
+# safetensors
