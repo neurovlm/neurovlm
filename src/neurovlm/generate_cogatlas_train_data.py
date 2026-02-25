@@ -50,7 +50,8 @@ def generate_train_data_from_brain(
         Array of PMIDs corresponding to rows in term_matrix
     """
     from neurovlm.retrieval_resources import _load_latent_neuro
-    from neurovlm.brain_input import search_cogatlas_from_brain
+    from neurovlm.core import NeuroVLM
+    import torch
 
     print("="*70)
     print("GENERATING TRAINING DATA FROM BRAIN IMAGES")
@@ -66,6 +67,10 @@ def generate_train_data_from_brain(
     brain_vectors, pmids = _load_latent_neuro()
     print(f"Loaded {len(pmids)} brain vectors")
 
+    # Initialize NeuroVLM with CogAtlas datasets
+    print("\nInitializing NeuroVLM...")
+    nvlm = NeuroVLM(datasets=["cogatlas", "cogatlas_disorder", "cogatlas_task"])
+
     # Process each paper
     print("\nSearching CogAtlas for all papers...")
     results = []
@@ -77,25 +82,19 @@ def generate_train_data_from_brain(
 
         try:
             # Search concepts
-            _, top_concepts, _ = search_cogatlas_from_brain(
-                brain_vector,
-                top_k=k_concepts,
-                category="cogatlas"
-            )
+            concepts_result = nvlm.brain(brain_vector).to_text(datasets=["cogatlas"])
+            concepts_df = concepts_result.top_k(k=k_concepts)
+            top_concepts = concepts_df["title"].tolist()
 
             # Search disorders
-            _, top_disorders, _ = search_cogatlas_from_brain(
-                brain_vector,
-                top_k=k_disorders,
-                category="cogatlas_disorder"
-            )
+            disorders_result = nvlm.brain(brain_vector).to_text(datasets=["cogatlas_disorder"])
+            disorders_df = disorders_result.top_k(k=k_disorders)
+            top_disorders = disorders_df["title"].tolist()
 
             # Search tasks
-            _, top_tasks, _ = search_cogatlas_from_brain(
-                brain_vector,
-                top_k=k_tasks,
-                category="cogatlas_task"
-            )
+            tasks_result = nvlm.brain(brain_vector).to_text(datasets=["cogatlas_task"])
+            tasks_df = tasks_result.top_k(k=k_tasks)
+            top_tasks = tasks_df["title"].tolist()
 
             results.append({
                 'pmid': int(pmid),
@@ -236,7 +235,8 @@ def generate_train_data_from_text(
         Array of PMIDs corresponding to rows in term_matrix
     """
     from neurovlm.retrieval_resources import _load_latent_text
-    from neurovlm.text_input import search_cogatlas_from_text
+    from neurovlm.core import NeuroVLM
+    import torch
 
     print("="*70)
     print("GENERATING TRAINING DATA FROM TEXT EMBEDDINGS")
@@ -252,6 +252,10 @@ def generate_train_data_from_text(
     text_embeddings, pmids = _load_latent_text()
     print(f"Loaded {len(pmids)} text embeddings")
 
+    # Initialize NeuroVLM with CogAtlas datasets
+    print("\nInitializing NeuroVLM...")
+    nvlm = NeuroVLM(datasets=["cogatlas", "cogatlas_disorder", "cogatlas_task"])
+
     # Process each paper
     print("\nSearching CogAtlas for all papers...")
     results = []
@@ -263,25 +267,19 @@ def generate_train_data_from_text(
 
         try:
             # Search concepts using text embedding
-            _, top_concepts, _ = search_cogatlas_from_text(
-                text_embedding,
-                top_k=k_concepts,
-                category="cogatlas"
-            )
+            concepts_result = nvlm.text(text_embedding).to_text(datasets=["cogatlas"])
+            concepts_df = concepts_result.top_k(k=k_concepts)
+            top_concepts = concepts_df["title"].tolist()
 
             # Search disorders
-            _, top_disorders, _ = search_cogatlas_from_text(
-                text_embedding,
-                top_k=k_disorders,
-                category="cogatlas_disorder"
-            )
+            disorders_result = nvlm.text(text_embedding).to_text(datasets=["cogatlas_disorder"])
+            disorders_df = disorders_result.top_k(k=k_disorders)
+            top_disorders = disorders_df["title"].tolist()
 
             # Search tasks
-            _, top_tasks, _ = search_cogatlas_from_text(
-                text_embedding,
-                top_k=k_tasks,
-                category="cogatlas_task"
-            )
+            tasks_result = nvlm.text(text_embedding).to_text(datasets=["cogatlas_task"])
+            tasks_df = tasks_result.top_k(k=k_tasks)
+            top_tasks = tasks_df["title"].tolist()
 
             results.append({
                 'pmid': int(pmid),

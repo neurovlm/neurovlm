@@ -693,6 +693,7 @@ class NeuroVLM:
         self.last_brain_result: Optional[BrainSearchResult] = None
         self.last_generated_brain_flat: Optional[torch.Tensor] = None
         self._last_result: Optional[Union[TextSearchResult, BrainSearchResult]] = None
+        self._last_text_query: Optional[str] = None
 
     @property
     def results(self) -> Union[TextSearchResult, BrainSearchResult]:
@@ -786,6 +787,18 @@ class NeuroVLM:
         BrainSearchResult
             Retrieval object exposing ``top_k``/``print``.
         """
+        # Track original text query so generate_llm_response can run text-to-text
+        # retrieval internally for context when the user is in text-to-brain mode.
+        if self._is_text_payload(X):
+            if isinstance(X, str):
+                self._last_text_query = X
+            elif isinstance(X, (list, tuple)) and X and isinstance(X[0], str):
+                self._last_text_query = X[0] if len(X) == 1 else None
+            else:
+                self._last_text_query = None
+        else:
+            self._last_text_query = None
+
         self._validate_head(head)
         query, retrieval_space = self._prepare_brain_query(X, head=head, project=project)
 
@@ -903,7 +916,7 @@ class NeuroVLM:
 
     @staticmethod
     def plot(
-        image: nib.Nifti1Image,
+        image: Union[nib.Nifti1Image, torch.Tensor],
         threshold: Union[str, float] = "auto",
         display_mode: str = "ortho",
         cut_coords: Optional[Sequence[float]] = None,
@@ -911,8 +924,15 @@ class NeuroVLM:
         title: Optional[str] = None,
     ) -> Any:
         """Plot a provided NIfTI image."""
-        if not isinstance(image, nib.Nifti1Image):
+
+        if isinstance(image, torch.Tensor):
+            image = image.detach().squeeze()
+            assert len(image) == BRAIN_FLAT_DIM, f"tensor input must be length {BRAIN_FLAT_DIM}"
+            masker = load_masker()
+            image = masker.inverse_transform(image.numpy())
+        elif not isinstance(image, nib.Nifti1Image):
             raise TypeError("plot expects a nib.Nifti1Image.")
+
         from nilearn.plotting import plot_stat_map
 
         return plot_stat_map(
@@ -1758,6 +1778,289 @@ class NeuroVLM:
         if datasets is None:
             return list(self.datasets)
         return self._canonicalize_datasets(datasets)
+
+    # ------------------------------------------------------------------
+    # LLM generation
+    # ------------------------------------------------------------------
+
+    def generate_llm_response(
+        self,
+        backend: Literal["ollama", "huggingface"],
+        model_name: str,
+        table: Optional[pd.DataFrame] = None,
+        k: Optional[int] = 5,
+        user_prompt: Optional[str] = "",
+        max_new_tokens: Optional[int] = 512,
+        verbose: Optional[bool] = False,
+        think: Optional[bool] = False
+    ) -> str:
+        """Generate an LLM summary using the last retrieval result as context.
+
+        Call this after ``brain(...).to_text()`` (brain-to-text mode) or
+        ``text(...).to_brain()`` (text-to-brain mode).
+
+        Parameters
+        ----------
+        backend : {"ollama", "huggingface"}
+            LLM backend to use.
+
+            - ``"ollama"``: requires Ollama installed and running locally (fast).
+            - ``"huggingface"``: loads the model directly (slower, works offline).
+
+        model_name : str
+            **Required** – model identifier to use.
+
+            - Ollama examples: ``"llama3.2:3b"``, ``"qwen2.5:3b-instruct"``
+            - HuggingFace examples: ``"Qwen/Qwen2.5-1.5B-Instruct"``,
+              ``"HuggingFaceTB/SmolLM2-360M-Instruct"``
+
+        table : pandas.DataFrame, optional
+            Pre-built context table to pass to the LLM.  When provided the
+            ``k`` parameter is ignored and this exact table is used as context.
+
+            Pass the output of ``result.top_k(...).query(...)`` (or any filtered
+            slice of it) to control precisely which rows the LLM sees::
+
+                result = nvlm.brain(img).to_text()
+                filtered = result.top_k(5).query("cosine_similarity > 0.4")
+                nvlm.generate_llm_response(..., table=filtered)
+
+            When ``None`` (default), the top ``k`` rows from the stored result
+            are used automatically.
+
+        k : int, optional
+            Number of top results used when ``table`` is not provided. Default 5.
+        user_prompt : str, optional
+            Extra instructions or a question appended to the LLM prompt.
+        max_new_tokens : int, optional
+            Maximum tokens to generate (HuggingFace backend only). Default 512.
+        verbose : bool, optional
+            Print progress messages. Default True.
+        think : bool, optional, default: False
+            Passing think mode to LLM for text generation.
+
+        Returns
+        -------
+        str
+            LLM-generated response text.
+
+        Notes
+        -----
+        **Brain-to-text mode** (after ``brain(...).to_text()``):
+            The LLM receives the top-k text matches (publications,
+            NeuroWiki concepts, CogAtlas terms) that were most similar to the
+            input brain image and defines/explains them in that neuroimaging
+            context.
+
+        **Text-to-brain mode** (after ``text(...).to_brain()``):
+            The original text query is used internally to run a text-to-text
+            similarity search. The LLM then defines the user's term and explains
+            how it relates to the top matching neuroscience concepts. The stored
+            brain result is not overwritten.
+
+        Examples
+        --------
+        Brain-to-text with filtered table::
+
+            result = nvlm.brain(nifti_img).to_text()
+            filtered = result.top_k(5).query("cosine_similarity > 0.4")
+            response = nvlm.generate_llm_response(
+                backend="ollama",
+                model_name="llama3.2:3b",
+                table=filtered,
+            )
+
+        Text-to-brain::
+
+            nvlm.text("working memory").to_brain()
+            response = nvlm.generate_llm_response(
+                backend="huggingface",
+                model_name="Qwen/Qwen2.5-1.5B-Instruct",
+            )
+        """
+        if self._last_result is None:
+            raise ValueError(
+                "No results available. Run brain(...).to_text() or "
+                "text(...).to_brain() first."
+            )
+
+        if isinstance(self._last_result, TextSearchResult):
+            return self._generate_brain_to_text_response(
+                backend=backend,
+                model_name=model_name,
+                table=table,
+                k=k,
+                user_prompt=user_prompt,
+                max_new_tokens=max_new_tokens,
+                verbose=verbose,
+                think=think
+            )
+        else:
+            return self._generate_text_to_brain_response(
+                backend=backend,
+                model_name=model_name,
+                table=table,
+                k=k,
+                user_prompt=user_prompt,
+                max_new_tokens=max_new_tokens,
+                verbose=verbose,
+            )
+
+    def _generate_brain_to_text_response(
+        self,
+        backend: str,
+        model_name: str,
+        table: Optional[pd.DataFrame],
+        k: int,
+        user_prompt: str,
+        max_new_tokens: int,
+        verbose: bool,
+        think: bool=False
+    ) -> str:
+        """LLM generation for brain-to-text mode.
+
+        The top-k text matches (publications, NeuroWiki, CogAtlas) that were
+        retrieved for the brain image are passed as context.  The LLM is
+        prompted to define and explain the terms knowing they originated from
+        neuroimage similarity, not a text query.
+        """
+        from neurovlm.llm_summary import generate_response as _gen_response
+
+        assert self.last_text_result is not None
+        if table is None:
+            table = self.last_text_result.top_k(k=k)
+        papers_ctx, wiki_ctx, cogatlas_ctx = self._format_table_as_context(table)
+
+        # Passing the query_embeddings tensor (not a str) triggers
+        # for_brain_input=True inside llm_summary.generate_response so the
+        # system prompt correctly frames the terms as brain-derived.
+        return _gen_response(
+            query=self.last_text_result.query_embeddings,
+            papers_context=papers_ctx,
+            wiki_context=wiki_ctx,
+            cogatlas_context=cogatlas_ctx,
+            user_prompt=user_prompt,
+            backend=backend,
+            model_name=model_name,
+            max_new_tokens=max_new_tokens,
+            verbose=verbose,
+            think=think,
+        )
+
+    def _generate_text_to_brain_response(
+        self,
+        backend: str,
+        model_name: str,
+        table: pd.DataFrame,
+        k: int,
+        user_prompt: str,
+        max_new_tokens: int,
+        verbose: bool,
+        think: Optional[bool]=False
+    ) -> str:
+        """LLM generation for text-to-brain mode.
+
+        A text-to-text similarity search is run internally (the user is not
+        required to do this explicitly) to gather neuroscience context for the
+        LLM.  The LLM is prompted to define the user's original term and
+        explain how it relates to the matching concepts.
+
+        The existing brain result stored on the instance is preserved.
+        When ``table`` is provided the internal retrieval is skipped entirely.
+        """
+        from neurovlm.llm_summary import generate_response as _gen_response
+
+        if table is not None:
+            # User supplied a pre-built context table — use it directly.
+            papers_ctx, wiki_ctx, cogatlas_ctx = self._format_table_as_context(table)
+        else:
+            if self._last_text_query is None:
+                raise ValueError(
+                    "Original text query not found. "
+                    "Ensure you ran text(...).to_brain() with a string query before "
+                    "calling generate_llm_response()."
+                )
+
+            if verbose:
+                print(
+                    f"[text-to-brain] Running internal text-to-text retrieval for "
+                    f"query: '{self._last_text_query}' to build LLM context..."
+                )
+
+            # Run text-to-text retrieval without overwriting the user's stored results.
+            saved_last_result = self._last_result
+            saved_last_text_result = self.last_text_result
+            try:
+                text_result = self.to_text(self._last_text_query)
+                _table = text_result.top_k(k=k)
+                papers_ctx, wiki_ctx, cogatlas_ctx = self._format_table_as_context(_table)
+            finally:
+                self._last_result = saved_last_result
+                self.last_text_result = saved_last_text_result
+
+        return _gen_response(
+            query=self._last_text_query,
+            papers_context=papers_ctx,
+            wiki_context=wiki_ctx,
+            cogatlas_context=cogatlas_ctx,
+            user_prompt=user_prompt,
+            backend=backend,
+            model_name=model_name,
+            max_new_tokens=max_new_tokens,
+            verbose=verbose,
+            think=think
+        )
+
+    def _format_table_as_context(
+        self,
+        table: pd.DataFrame,
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """Split a top-k result table into three LLM context strings.
+
+        Parameters
+        ----------
+        table : pd.DataFrame
+            Output of ``TextSearchResult.top_k()`` or ``BrainSearchResult.top_k()``.
+
+        Returns
+        -------
+        papers_context : str or None
+            Formatted PubMed / other publication entries.
+        wiki_context : str or None
+            Formatted NeuroWiki / brain-atlas entries.
+        cogatlas_context : str or None
+            Formatted CogAtlas concept / task / disorder entries.
+        """
+        papers_lines: List[str] = []
+        wiki_lines: List[str] = []
+        cogatlas_lines: List[str] = []
+
+        for _, row in table.iterrows():
+            dataset = str(row.get("dataset", "")).lower()
+            title = str(row.get("title", "")).strip()
+            description = str(row.get("description", "")).strip()
+
+            if not title and not description:
+                continue
+
+            entry = f"- {title}: {description}" if description else f"- {title}"
+
+            if dataset == "pubmed":
+                papers_lines.append(entry)
+            elif dataset in ("wiki", "networks"):
+                # NeuroWiki concepts and brain-atlas networks are both
+                # neuroscience reference material.
+                wiki_lines.append(entry)
+            elif dataset in ("cogatlas", "cogatlas_task", "cogatlas_disorder"):
+                cogatlas_lines.append(entry)
+            else:
+                papers_lines.append(entry)
+
+        papers_context = "\n".join(papers_lines) if papers_lines else None
+        wiki_context = "\n".join(wiki_lines) if wiki_lines else None
+        cogatlas_context = "\n".join(cogatlas_lines) if cogatlas_lines else None
+
+        return papers_context, wiki_context, cogatlas_context
 
     @staticmethod
     def _validate_head(head: str) -> None:

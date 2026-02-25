@@ -51,11 +51,13 @@ viz = [
   "seaborn",
 ]
 notebook = [
+  "jupyter",
   "ipython",
   "tqdm",
 ]
 llm = [
   "ollama",
+  "accelerate"
 ]
 docs = [
   "sphinx>=7.2,<9",
@@ -77,6 +79,7 @@ full = [
   "seaborn",
   "ipython",
   "ollama",
+  "accelerate"
 ]
 
 [tool.hatch.build.targets.wheel]

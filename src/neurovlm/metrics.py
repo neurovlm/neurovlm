@@ -49,6 +49,9 @@ def compute_metrics(
         if percentile:
             t_recon = np.percentile(reconstructed, t)
             t_orig = np.percentile(original, t)
+        else:
+            t_recon = t
+            t_orig = t
 
         orig_bin = (original > t_orig).astype(np.uint8)
         recon_bin = (reconstructed > t_recon).astype(np.uint8)

@@ -185,6 +185,12 @@ class Specter:
         adapter : {"adhoc_query", "classification", "regression", "proximity"}
             Adapter to attach to the model, for specific use cases.
         """
+        import os
+        # Prevent transformers from importing TensorFlow/Flax - on macOS this loads a
+        # 662MB TF dylib that takes ~10 minutes to initialize. Must be set before import.
+        os.environ.setdefault("USE_TF", "0")
+        os.environ.setdefault("USE_FLAX", "0")
+
         from adapters import AutoAdapterModel
         from transformers import AutoTokenizer, AutoModel
         from transformers.utils.logging import disable_progress_bar
@@ -219,8 +225,14 @@ class Specter:
             else:
                 adapter_id = f"{model}_{adapter}"
 
-            self.specter = AutoAdapterModel.from_pretrained(f'{model}_base')
-            self.specter.load_adapter(adapter_id, source="hf", load_as="specter2", set_active=True)
+            # Try local cache first to avoid network hangs (e.g. slow HuggingFace connection).
+            # Falls back to downloading only if the model is not cached.
+            try:
+                self.specter = AutoAdapterModel.from_pretrained(f'{model}_base', local_files_only=True)
+                self.specter.load_adapter(adapter_id, source="hf", load_as="specter2", set_active=True, local_files_only=True)
+            except Exception:
+                self.specter = AutoAdapterModel.from_pretrained(f'{model}_base')
+                self.specter.load_adapter(adapter_id, source="hf", load_as="specter2", set_active=True)
 
         self.specter = self.specter.to(self.device).eval()
 
