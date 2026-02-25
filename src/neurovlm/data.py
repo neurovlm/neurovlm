@@ -339,10 +339,9 @@ def load_dataset(name: str):
         case "neurovault_images":
             return _load_neurovault_images()
         case _:
-            valid_names = ["publications", "pubmed", "coordinates", "pubmed_coordinates", "wiki", "neurowiki",
+            valid_names = ["pubmed_text", "pubmed_coordinates","pubmed_images", "wiki", "neurowiki",
                            "neurowiki_graph", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks",
-                           "networks_canonical", "publications_neurovault", "images_neurovault",
-                           "neurovault_images", "pubmed_images"]
+                           "networks_canonical", "neurovault_text", "neurovault_images", "neurovault_meta"]
             raise ValueError(f"{name} not in {valid_names}")
 
 
@@ -393,10 +392,9 @@ def load_latent(name: str):
         case "neurovault_text":
             payload = _load_latent_neurovault_text()
         case _:
-            valid_names = ["publications", "pubmed", "neurowiki", "cogatlas",
+            valid_names = ["pubmed_text", "pubmed_images", "wiki", "neurowiki", "cogatlas",
                            "cogatlas_task", "cogatlas_disorder", "networks_text",
-                           "networks_neuro", "latent_neurovault_images",
-                           "latent_neurovault_text"]
+                           "networks_neuro", "neurovault_images", "neurovault_text"]
             raise ValueError(f"{name} not in {valid_names}")
     return _without_grad(payload)
 

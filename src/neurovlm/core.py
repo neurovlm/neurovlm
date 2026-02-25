@@ -916,7 +916,7 @@ class NeuroVLM:
 
     @staticmethod
     def plot(
-        image: nib.Nifti1Image,
+        image: Union[nib.Nifti1Image, torch.Tensor],
         threshold: Union[str, float] = "auto",
         display_mode: str = "ortho",
         cut_coords: Optional[Sequence[float]] = None,
@@ -924,8 +924,15 @@ class NeuroVLM:
         title: Optional[str] = None,
     ) -> Any:
         """Plot a provided NIfTI image."""
-        if not isinstance(image, nib.Nifti1Image):
+
+        if isinstance(image, torch.Tensor):
+            image = image.detach().squeeze()
+            assert len(image) == BRAIN_FLAT_DIM, f"tensor input must be length {BRAIN_FLAT_DIM}"
+            masker = load_masker()
+            image = masker.inverse_transform(image.numpy())
+        elif not isinstance(image, nib.Nifti1Image):
             raise TypeError("plot expects a nib.Nifti1Image.")
+
         from nilearn.plotting import plot_stat_map
 
         return plot_stat_map(
@@ -1781,10 +1788,11 @@ class NeuroVLM:
         backend: Literal["ollama", "huggingface"],
         model_name: str,
         table: Optional[pd.DataFrame] = None,
-        k: int = 5,
-        user_prompt: str = "",
-        max_new_tokens: int = 512,
-        verbose: bool = True,
+        k: Optional[int] = 5,
+        user_prompt: Optional[str] = "",
+        max_new_tokens: Optional[int] = 512,
+        verbose: Optional[bool] = False,
+        think: Optional[bool] = False
     ) -> str:
         """Generate an LLM summary using the last retrieval result as context.
 
@@ -1828,6 +1836,8 @@ class NeuroVLM:
             Maximum tokens to generate (HuggingFace backend only). Default 512.
         verbose : bool, optional
             Print progress messages. Default True.
+        think : bool, optional, default: False
+            Passing think mode to LLM for text generation.
 
         Returns
         -------
@@ -1883,6 +1893,7 @@ class NeuroVLM:
                 user_prompt=user_prompt,
                 max_new_tokens=max_new_tokens,
                 verbose=verbose,
+                think=think
             )
         else:
             return self._generate_text_to_brain_response(
@@ -1904,6 +1915,7 @@ class NeuroVLM:
         user_prompt: str,
         max_new_tokens: int,
         verbose: bool,
+        think: bool=False
     ) -> str:
         """LLM generation for brain-to-text mode.
 
@@ -1932,17 +1944,19 @@ class NeuroVLM:
             model_name=model_name,
             max_new_tokens=max_new_tokens,
             verbose=verbose,
+            think=think,
         )
 
     def _generate_text_to_brain_response(
         self,
         backend: str,
         model_name: str,
-        table: Optional[pd.DataFrame],
+        table: pd.DataFrame,
         k: int,
         user_prompt: str,
         max_new_tokens: int,
         verbose: bool,
+        think: Optional[bool]=False
     ) -> str:
         """LLM generation for text-to-brain mode.
 
@@ -1994,6 +2008,7 @@ class NeuroVLM:
             model_name=model_name,
             max_new_tokens=max_new_tokens,
             verbose=verbose,
+            think=think
         )
 
     def _format_table_as_context(

@@ -430,7 +430,7 @@ def generate_llm_response(
     model_name: str,
     user_prompt: str = "",
     max_new_tokens: int = 512,
-    verbose: bool = True,
+    verbose: bool = False,
 ) -> str:
     """Generate an LLM summary from ranked user-corpus results.
 

@@ -19,6 +19,7 @@ import torch
 # Global variables to cache the model and tokenizer (for HuggingFace backend)
 _MODEL = None
 _TOKENIZER = None
+_MODEL_NAME: str | None = None
 
 
 def load_huggingface_model(
@@ -27,7 +28,8 @@ def load_huggingface_model(
 ):
     """Load the Hugging Face model and tokenizer.
 
-    Uses global caching to avoid reloading the model multiple times.
+    Uses global caching to avoid reloading the same model multiple times.
+    If a different model name is requested, the cache is refreshed automatically.
 
     Parameters
     ----------
@@ -52,9 +54,20 @@ def load_huggingface_model(
     """
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    global _MODEL, _TOKENIZER
+    global _MODEL, _TOKENIZER, _MODEL_NAME
 
-    if _MODEL is None or _TOKENIZER is None or force_reload:
+    model_changed = _MODEL_NAME is not None and _MODEL_NAME != model_name
+    should_reload = _MODEL is None or _TOKENIZER is None or force_reload or model_changed
+
+    if should_reload:
+        # If switching models, clear references first to reduce memory pressure.
+        if model_changed:
+            print(f"Switching HuggingFace model: {_MODEL_NAME} -> {model_name}")
+            _MODEL = None
+            _TOKENIZER = None
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
         print(f"\n{'='*60}")
         print(f"Loading HuggingFace model: {model_name}")
         print(f"{'='*60}")
@@ -86,6 +99,7 @@ def load_huggingface_model(
         print(f"  Device: {device}")
         print(f"  Model size: {model_name.split('/')[-1]}")
         print(f"{'='*60}\n")
+        _MODEL_NAME = model_name
 
     return _MODEL, _TOKENIZER
 
@@ -167,8 +181,9 @@ def generate_response(
     user_prompt: str = "",
     backend: Literal["ollama", "huggingface"] = "ollama",
     model_name: str | None = None,
-    max_new_tokens: int = 512,
-    verbose: bool = True,
+    max_new_tokens: Optional[int] = 512,
+    verbose: Optional[bool] = False,
+    think: Optional[bool] = False
 ) -> str:
     """Summarize publications relevant to a query or brain-derived input.
 
@@ -252,7 +267,7 @@ def generate_response(
     if backend == "ollama":
         output_text = _generate_with_ollama(messages, model_name, verbose)
     elif backend == "huggingface":
-        output_text = _generate_with_huggingface(messages, model_name, max_new_tokens, verbose)
+        output_text = _generate_with_huggingface(messages, model_name, max_new_tokens, think, verbose)
     else:
         raise ValueError(f"Unknown backend: {backend}. Must be 'ollama' or 'huggingface'")
 
@@ -266,7 +281,7 @@ def generate_response(
 def _generate_with_ollama(
     messages: List[dict],
     model_name: Optional[str] = None,
-    verbose: bool = True,
+    verbose: bool = False,
 ) -> str:
     """Generate response using Ollama backend.
 
@@ -317,8 +332,9 @@ def _generate_with_ollama(
 def _generate_with_huggingface(
     messages: List[dict],
     model_name: Optional[str] = None,
-    max_new_tokens: int = 512,
-    verbose: bool = True,
+    max_new_tokens: Optional[int] = 512,
+    think: Optional[bool] = False,
+    verbose: Optional[bool] = False,
 ) -> str:
     """Generate response using HuggingFace backend.
 
@@ -348,7 +364,8 @@ def _generate_with_huggingface(
     text = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
-        add_generation_prompt=True
+        add_generation_prompt=True,
+        enable_thinking=think
     )
 
     # Tokenize and move to device
