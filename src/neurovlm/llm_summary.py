@@ -90,26 +90,6 @@ def load_huggingface_model(
     return _MODEL, _TOKENIZER
 
 
-def check_ollama_available() -> bool:
-    """Check if Ollama is available on the system.
-
-    Returns
-    -------
-    bool
-        True if Ollama is available, False otherwise.
-    """
-    try:
-        import ollama
-        # Try to list models to verify Ollama is running
-        ollama.list()
-        return True
-    except ImportError:
-        return False
-    except Exception:
-        # Ollama module exists but server might not be running
-        return False
-
-
 def system_prompt(for_brain_input: bool = False) -> str:
     """Return instructions for the LLM.
 

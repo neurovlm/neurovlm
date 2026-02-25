@@ -59,6 +59,10 @@ REPO_MODELS = {
     "encoder_and_proj_head": "neurovlm/encoder_and_proj_head",
 }
 
+# SPECTER2 model and adapter repos (downloaded separately from neurovlm repos)
+SPECTER_BASE_REPO = "allenai/specter2_aug2023refresh_base"
+SPECTER_ADAPTER_REPO = "allenai/specter2_aug2023refresh_adhoc_query"
+
 def fetch_data(
     datasets: Optional[List[str]] = None,
     models: Optional[List[str]] = None,
@@ -142,6 +146,19 @@ def fetch_data(
 
         repo_id = REPO_MODELS[model_key]
         _print_status(f"Downloading model: {repo_id}")
+        try:
+            snapshot_download(
+                repo_id=repo_id,
+                repo_type="model",
+                cache_dir=cache_dir,
+            )
+            _print_status(f"Successfully downloaded {repo_id}")
+        except Exception as e:
+            _print_status(f"Error downloading {repo_id}: {e}")
+
+    # Download SPECTER2 base model and adapter (required for .text() queries)
+    for repo_id in (SPECTER_BASE_REPO, SPECTER_ADAPTER_REPO):
+        _print_status(f"Downloading SPECTER: {repo_id}")
         try:
             snapshot_download(
                 repo_id=repo_id,
