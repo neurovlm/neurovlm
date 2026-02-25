@@ -29,7 +29,12 @@ include_patterns = [
     "installation.md",
     "api.rst",
     "tutorials/index.md",
-    "tutorials/01_intro.ipynb",
+    "tutorials/00_quickstart.ipynb",
+    "tutorials/01_introduction.ipynb",
+    "tutorials/02_contrastive.ipynb",
+    "tutorials/03_generative_text-to-brain.ipynb",
+    "tutorials/04_generative_brain-to-text.ipynb",
+    "tutorials/05_custom_corpus.ipynb",
     "generated/**",
 ]
 
