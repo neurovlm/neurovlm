@@ -107,12 +107,44 @@ class TestTextSearchResult:
         assert "cosine_similarity" in result_df.columns
 
     def test_text_search_result_top_k_single_query(self, sample_text_result):
-        """Test top_k with specific query index."""
+        """Test top_k with specific query index from multi-query result."""
         result_df = sample_text_result.top_k(k=5, query_index=0)
 
         assert isinstance(result_df, pd.DataFrame)
         assert len(result_df) > 0
-        # Should not have query_index column for single query
+        # When original result has multiple queries, query_index column is included
+        # even when filtering to a single query
+        assert "query_index" in result_df.columns
+        # All rows should be for query_index=0
+        assert (result_df["query_index"] == 0).all()
+
+    def test_text_search_result_top_k_truly_single_query(self):
+        """Test top_k when original result has only one query."""
+        # Create result with only 1 query
+        scores_by_dataset = {
+            "pubmed": torch.rand(10, 1),  # 10 documents, 1 query
+        }
+        metadata_by_dataset = {
+            "pubmed": pd.DataFrame(
+                {
+                    "title": [f"Paper {i}" for i in range(10)],
+                    "description": [f"Abstract {i}" for i in range(10)],
+                }
+            ),
+        }
+        query_embeddings = torch.randn(1, TEXT_EMBED_DIM)
+        single_query_result = TextSearchResult(
+            scores_by_dataset=scores_by_dataset,
+            metadata_by_dataset=metadata_by_dataset,
+            query_embeddings=query_embeddings,
+            retrieval_space="shared",
+        )
+
+        result_df = single_query_result.top_k(k=5)
+
+        assert isinstance(result_df, pd.DataFrame)
+        assert len(result_df) > 0
+        # With truly single query, no query_index column
         assert "query_index" not in result_df.columns
 
     def test_text_search_result_top_k_single_dataset(self, sample_text_result):

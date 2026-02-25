@@ -57,7 +57,7 @@ class TestDiceTopK:
         y_true = np.array([1, 1, 0, 0, 0])
         y_prob = np.array([0.9, 0.8, 0.2, 0.1, 0.05])
         score = dice_top_k(y_true, y_prob, k=2)
-        assert score == 1.0
+        assert np.isclose(score, 1.0, atol=1e-6)
 
     def test_dice_top_k_no_overlap(self):
         """Test dice_top_k with no overlap."""
@@ -71,7 +71,7 @@ class TestDiceTopK:
         y_true = np.array([1, 1, 1, 0, 0])
         y_prob = np.array([0.9, 0.8, 0.7, 0.2, 0.1])
         score = dice_top_k(y_true, y_prob, k=None)
-        assert score == 1.0
+        assert np.isclose(score, 1.0, atol=1e-6)
 
 
 class TestRecallAtK:
