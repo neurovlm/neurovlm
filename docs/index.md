@@ -33,3 +33,9 @@ installation
 tutorials/index
 api
 ```
+
+## Install
+
+```{include} ../README.md
+:start-after: "## Install"
+```
