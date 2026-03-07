@@ -5,14 +5,6 @@ NeuroVLM maps between neuroimaging activation maps and neuroscience text.
 ::::{grid} 1 1 2 3
 :gutter: 2
 
-## Preprint
-
-```
-R. P. Hammonds, J. Aguirre-Chavez, B. Omoma-Edosa, and B. Voytek, “NeuroVLM: A generative vision-language framework for human neuroimaging,” bioRxiv, preprint, Feb. 9, 2026, doi: 10.64898/2026.02.06.704508.
-```
-
-[biorxiv link](https://www.biorxiv.org/content/10.64898/2026.02.06.704508v2.full)
-
 :::{grid-item-card} Installation
 :link: installation
 :link-type: doc
@@ -30,6 +22,15 @@ Step-by-step notebooks to learn the workflow.
 :link-type: doc
 Function and class reference for the public package API.
 :::
+
+
+## Preprint
+
+```
+R. P. Hammonds, J. Aguirre-Chavez, B. Omoma-Edosa, and B. Voytek, “NeuroVLM: A generative vision-language framework for human neuroimaging,” bioRxiv, preprint, Feb. 9, 2026, doi: 10.64898/2026.02.06.704508.
+```
+
+[biorxiv link](https://www.biorxiv.org/content/10.64898/2026.02.06.704508v2.full)
 
 ::::
 
