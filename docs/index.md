@@ -5,6 +5,10 @@ NeuroVLM maps between neuroimaging activation maps and neuroscience text.
 ::::{grid} 1 1 2 3
 :gutter: 2
 
+## Preprint
+
+[biorxiv](https://www.biorxiv.org/content/10.64898/2026.02.06.704508v2.full)
+
 :::{grid-item-card} Installation
 :link: installation
 :link-type: doc
