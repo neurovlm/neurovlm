@@ -120,6 +120,13 @@ def fetch_data(
 
     _print_status(f"Downloading NeuroVLM data to: {cache_dir}")
 
+    # Files to exclude from download (not needed for users, only for analysis)
+    IGNORE_PATTERNS = [
+        "**/threshold_analysis_similarities_cache.pkl",
+        "**/threshold_analysis_text_similarities_cache.pkl",
+        "**/cogatlas_term_category_info.json",
+    ]
+
     # Download datasets
     for dataset_key in datasets:
         if dataset_key not in REPO_DATASETS:
@@ -133,6 +140,7 @@ def fetch_data(
                 repo_id=repo_id,
                 repo_type="dataset",
                 cache_dir=cache_dir,
+                ignore_patterns=IGNORE_PATTERNS,
             )
             _print_status(f"Successfully downloaded {repo_id}")
         except Exception as e:

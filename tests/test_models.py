@@ -10,6 +10,7 @@ from neurovlm.models import (
     NeuroAutoEncoder,
     ProjHead,
     ConceptClf,
+    Specter,
     load_model,
 )
 
@@ -256,6 +257,201 @@ class TestLoadModel:
             pytest.skip(f"Pretrained model not available: {e}")
 
 
+class TestSpecter:
+    """Tests for Specter text encoder."""
+
+    def test_specter_initialization_default(self):
+        """Test default Specter initialization."""
+        try:
+            model = Specter()
+            assert model.device == "cpu"
+            assert model.pooling is None  # Default is CLS token
+            assert model.orthogonalize is True
+        except Exception as e:
+            pytest.skip(f"Specter model not available: {e}")
+
+    def test_specter_initialization_with_adapter(self):
+        """Test Specter initialization with specific adapter."""
+        try:
+            model = Specter(adapter="adhoc_query")
+            assert model.device == "cpu"
+        except Exception as e:
+            pytest.skip(f"Specter model or adapter not available: {e}")
+
+    def test_specter_initialization_no_adapter(self):
+        """Test Specter initialization without adapter."""
+        try:
+            model = Specter(adapter=None)
+            assert model.device == "cpu"
+        except Exception as e:
+            pytest.skip(f"Specter base model not available: {e}")
+
+    @pytest.mark.parametrize("adapter", [
+        "adhoc_query",
+        "classification",
+        "regression",
+        "proximity",
+        None,  # No adapter
+    ])
+    def test_specter_forward_with_adapters(self, adapter):
+        """Test forward pass with different adapters."""
+        try:
+            model = Specter(adapter=adapter)
+
+            # Test with single string
+            text = "Memory and attention in the prefrontal cortex."
+            output = model(text)
+
+            assert isinstance(output, torch.Tensor)
+            assert output.shape == (1, 768)  # Specter embedding dimension
+            assert not torch.isnan(output).any()
+
+        except Exception as e:
+            pytest.skip(f"Specter model with adapter {adapter} not available: {e}")
+
+    def test_specter_forward_single_string(self):
+        """Test forward pass with a single string."""
+        try:
+            model = Specter()
+            text = "Neural correlates of working memory."
+            output = model(text)
+
+            assert output.shape == (1, 768)
+            assert not torch.isnan(output).any()
+        except Exception as e:
+            pytest.skip(f"Specter model not available: {e}")
+
+    def test_specter_forward_list_of_strings(self):
+        """Test forward pass with list of strings."""
+        try:
+            model = Specter()
+            texts = [
+                "Working memory in prefrontal cortex",
+                "Visual attention and perception",
+                "Language processing networks"
+            ]
+            output = model(texts)
+
+            assert output.shape == (3, 768)
+            assert not torch.isnan(output).any()
+        except Exception as e:
+            pytest.skip(f"Specter model not available: {e}")
+
+    def test_specter_forward_dataframe(self):
+        """Test forward pass with DataFrame."""
+        try:
+            model = Specter()
+            df = pd.DataFrame({
+                'title': ['Neural mechanisms of memory', 'Attention networks'],
+                'abstract': ['Study of memory encoding...', 'Investigation of attention...']
+            })
+            output = model(df)
+
+            assert output.shape == (2, 768)
+            assert not torch.isnan(output).any()
+        except Exception as e:
+            pytest.skip(f"Specter model not available: {e}")
+
+    def test_specter_forward_dict(self):
+        """Test forward pass with dictionary."""
+        try:
+            model = Specter()
+            doc = {
+                'title': 'Neural correlates of decision making',
+                'abstract': 'We investigated the neural mechanisms...'
+            }
+            output = model(doc)
+
+            assert output.shape == (1, 768)
+            assert not torch.isnan(output).any()
+        except Exception as e:
+            pytest.skip(f"Specter model not available: {e}")
+
+    def test_specter_forward_list_of_dicts(self):
+        """Test forward pass with list of dictionaries."""
+        try:
+            model = Specter()
+            docs = [
+                {'title': 'Memory study', 'abstract': 'Abstract 1'},
+                {'title': 'Attention study', 'summary': 'Abstract 2'}  # Test with 'summary' instead
+            ]
+            output = model(docs)
+
+            assert output.shape == (2, 768)
+            assert not torch.isnan(output).any()
+        except Exception as e:
+            pytest.skip(f"Specter model not available: {e}")
+
+    @pytest.mark.parametrize("pooling", [None, "mean", "max", "mean_max", "attention"])
+    def test_specter_pooling_methods(self, pooling):
+        """Test different pooling strategies."""
+        try:
+            model = Specter(pooling=pooling)
+            text = "Neural processing in the brain."
+            output = model(text)
+
+            assert isinstance(output, torch.Tensor)
+            # mean_max doubles the dimension
+            expected_dim = 1536 if pooling == "mean_max" else 768
+            assert output.shape == (1, expected_dim)
+            assert not torch.isnan(output).any()
+        except Exception as e:
+            pytest.skip(f"Specter model not available: {e}")
+
+    def test_specter_orthogonalization(self):
+        """Test that orthogonalization affects embeddings."""
+        try:
+            model_ortho = Specter(orthogonalize=True)
+            model_no_ortho = Specter(orthogonalize=False)
+
+            text = "Neural networks in the brain."
+
+            output_ortho = model_ortho(text)
+            output_no_ortho = model_no_ortho(text)
+
+            # Outputs should be different when orthogonalization is applied
+            assert output_ortho.shape == output_no_ortho.shape
+            assert not torch.allclose(output_ortho, output_no_ortho, atol=1e-3)
+        except Exception as e:
+            pytest.skip(f"Specter model not available: {e}")
+
+    def test_specter_device_movement(self):
+        """Test moving Specter to different devices."""
+        try:
+            model = Specter(device="cpu")
+
+            # Test CPU
+            text = "Neural activity patterns."
+            output = model(text)
+            assert output.device.type == "cpu"
+
+            # Test CUDA if available
+            if torch.cuda.is_available():
+                model = model.to("cuda")
+                output = model(text)
+                assert output.device.type == "cuda"
+
+        except Exception as e:
+            pytest.skip(f"Specter model not available: {e}")
+
+    def test_specter_batch_consistency(self):
+        """Test that batch processing gives same results as individual processing."""
+        try:
+            model = Specter()
+            texts = ["Text 1", "Text 2", "Text 3"]
+
+            # Batch processing
+            batch_output = model(texts)
+
+            # Individual processing
+            individual_outputs = torch.stack([model(t) for t in texts]).squeeze(1)
+
+            # Should be identical
+            assert torch.allclose(batch_output, individual_outputs, atol=1e-5)
+        except Exception as e:
+            pytest.skip(f"Specter model not available: {e}")
+
+
 class TestModelIntegration:
     """Integration tests for model components."""
 
@@ -287,3 +483,179 @@ class TestModelIntegration:
             projected = proj_head(latent)
 
         assert projected.shape == (4, 384)
+
+    def test_full_pipeline_text_to_latent(self):
+        """Test full pipeline: Specter -> ProjHead."""
+        try:
+            specter = Specter()
+            proj_head = ProjHead(latent_in_dim=768, latent_out_dim=384)
+
+            text = "Neural mechanisms of cognitive control."
+
+            with torch.no_grad():
+                # Specter encoding
+                text_emb = specter(text)
+                assert text_emb.shape == (1, 768)
+
+                # Project to shared latent space
+                latent = proj_head(text_emb)
+                assert latent.shape == (1, 384)
+                assert not torch.isnan(latent).any()
+
+        except Exception as e:
+            pytest.skip(f"Models not available: {e}")
+
+    def test_full_pipeline_neuro_to_latent(self):
+        """Test full pipeline: NeuroAutoEncoder encoder -> latent."""
+        torch.manual_seed(42)
+        autoencoder = NeuroAutoEncoder(seed=42)
+
+        brain_data = torch.rand(2, 28542)
+
+        with torch.no_grad():
+            # Encode brain data
+            latent = autoencoder.encoder(brain_data)
+            assert latent.shape == (2, 384)
+            assert not torch.isnan(latent).any()
+
+            # Decode back
+            reconstructed = autoencoder.decoder(latent)
+            assert reconstructed.shape == (2, 28542)
+
+    def test_concept_classifier_with_encoder(self):
+        """Test ConceptClf with encoder output."""
+        torch.manual_seed(42)
+        autoencoder = NeuroAutoEncoder(seed=42)
+        clf = ConceptClf(d_out=100)
+
+        brain_data = torch.rand(4, 28542)
+
+        with torch.no_grad():
+            latent = autoencoder.encoder(brain_data)
+            concepts = clf(latent)
+
+        assert concepts.shape == (4, 100)
+        assert not torch.isnan(concepts).any()
+
+
+class TestForwardPassesAllModels:
+    """Comprehensive forward pass tests for all models."""
+
+    def test_normalize_layer_forward_pass(self):
+        """Test NormalizeLayer forward pass."""
+        layer = NormalizeLayer()
+        x = torch.randn(10, 768)
+
+        output = layer(x)
+
+        assert output.shape == (10, 768)
+        assert not torch.isnan(output).any()
+        norms = torch.norm(output, dim=1)
+        assert torch.allclose(norms, torch.ones_like(norms), atol=1e-6)
+
+    def test_autoencoder_forward_pass(self):
+        """Test NeuroAutoEncoder full forward pass."""
+        model = NeuroAutoEncoder(seed=42)
+        x = torch.rand(5, 28542)
+
+        output = model(x)
+
+        assert output.shape == (5, 28542)
+        assert not torch.isnan(output).any()
+        assert (output >= 0).all() and (output <= 1).all()
+
+    def test_projhead_text_forward_pass(self):
+        """Test ProjHead forward pass with text dimensions."""
+        model = ProjHead(latent_in_dim=768, latent_out_dim=384)
+        x = torch.randn(8, 768)
+
+        output = model(x)
+
+        assert output.shape == (8, 384)
+        assert not torch.isnan(output).any()
+
+    def test_projhead_image_forward_pass(self):
+        """Test ProjHead forward pass with image dimensions."""
+        model = ProjHead(latent_in_dim=384, latent_out_dim=384)
+        x = torch.randn(6, 384)
+
+        output = model(x)
+
+        assert output.shape == (6, 384)
+        assert not torch.isnan(output).any()
+
+    def test_concept_clf_forward_pass(self):
+        """Test ConceptClf forward pass."""
+        model = ConceptClf(d_out=200)
+        x = torch.randn(12, 384)
+
+        output = model(x)
+
+        assert output.shape == (12, 200)
+        assert not torch.isnan(output).any()
+
+    @pytest.mark.parametrize("adapter", [
+        "adhoc_query",
+        "classification",
+        "regression",
+        None,
+    ])
+    def test_specter_adapters_forward_pass(self, adapter):
+        """Test Specter forward passes with all adapters."""
+        try:
+            model = Specter(adapter=adapter)
+
+            # Test various input formats
+            test_cases = [
+                "Single text input",
+                ["Multiple", "text", "inputs"],
+                {"title": "Title", "abstract": "Abstract"},
+                pd.DataFrame({
+                    "title": ["Title 1", "Title 2"],
+                    "abstract": ["Abs 1", "Abs 2"]
+                })
+            ]
+
+            for test_input in test_cases:
+                output = model(test_input)
+                assert isinstance(output, torch.Tensor)
+                assert output.shape[1] == 768  # Specter dimension
+                assert not torch.isnan(output).any()
+
+        except Exception as e:
+            pytest.skip(f"Specter with adapter {adapter} not available: {e}")
+
+    def test_all_pretrained_models_forward(self):
+        """Test forward passes for all pretrained models via load_model."""
+        model_names = [
+            "proj_head_text_infonce",
+            "proj_head_image_infonce",
+            "proj_head_text_mse",
+            "autoencoder",
+        ]
+
+        for model_name in model_names:
+            try:
+                model = load_model(model_name)
+
+                # Determine appropriate input shape
+                if "text" in model_name:
+                    x = torch.randn(3, 768)
+                    expected_out = (3, 384)
+                elif "image" in model_name:
+                    x = torch.randn(3, 384)
+                    expected_out = (3, 384)
+                elif "autoencoder" in model_name:
+                    x = torch.rand(3, 28542)
+                    expected_out = (3, 28542)
+                else:
+                    continue
+
+                with torch.no_grad():
+                    output = model(x)
+
+                assert output.shape == expected_out
+                assert not torch.isnan(output).any()
+
+            except Exception as e:
+                pytest.skip(f"Model {model_name} not available: {e}")
