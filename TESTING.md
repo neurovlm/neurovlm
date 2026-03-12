@@ -75,9 +75,14 @@ Skip tests requiring data downloads:
 pytest -m "not requires_data"
 ```
 
-Skip tests requiring pretrained models:
+Skip tests requiring pretrained models (using markers):
 ```bash
-pytest -m "not requires_pretrained"
+pytest -m "not requires_pretrained and not requires_specter"
+```
+
+Skip tests requiring pretrained models (using environment variable):
+```bash
+SKIP_PRETRAINED_TESTS=true pytest
 ```
 
 ### Code Coverage
@@ -223,8 +228,12 @@ class Test<ClassName>:
 4. **Markers**
    - `@pytest.mark.slow` - For tests taking >1 second
    - `@pytest.mark.requires_data` - Requires downloaded datasets
-   - `@pytest.mark.requires_pretrained` - Requires pretrained models
+   - `@pytest.mark.requires_pretrained` - Requires pretrained models (autoencoder, projection heads)
+   - `@pytest.mark.requires_specter` - Requires Specter model from HuggingFace
    - `@pytest.mark.skipif` - Conditional skipping
+
+5. **Environment Variables**
+   - `SKIP_PRETRAINED_TESTS=true` - Skip all tests requiring model downloads (useful in CI)
 
 5. **Parametrization**
    ```python
@@ -268,7 +277,23 @@ class TestNewMetric:
 
 ## Continuous Integration
 
-### GitHub Actions Example
+### GitHub Actions Workflows
+
+NeuroVLM has two test workflows:
+
+1. **Standard Tests** (`.github/workflows/tests.yml`)
+   - Runs on all PRs and pushes to main
+   - Tests on Ubuntu, macOS, Windows with Python 3.10-3.13
+   - Skips pretrained model tests (`SKIP_PRETRAINED_TESTS=true`)
+   - Fast feedback without large model downloads
+
+2. **Full Tests with Models** (`.github/workflows/tests-with-models.yml`)
+   - Manual trigger or on releases
+   - Runs complete test suite including pretrained models
+   - Uses HuggingFace cache to speed up downloads
+   - Ubuntu + Python 3.12 only
+
+### Example: Running in CI
 
 ```yaml
 name: Tests
@@ -278,24 +303,33 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      SKIP_PRETRAINED_TESTS: "true"  # Skip model downloads
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v5
       with:
-        python-version: 3.9
+        python-version: "3.12"
+        cache: 'pip'
+
+    - name: Cache HuggingFace models
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/huggingface
+        key: ${{ runner.os }}-hf-models-${{ hashFiles('pyproject.toml') }}
 
     - name: Install dependencies
       run: |
-        pip install -e .
-        pip install -r tests/requirements.txt
+        pip install -e ".[metrics]"
+        pip install pytest pytest-cov
 
     - name: Run tests
       run: pytest --cov=neurovlm --cov-report=xml
 
     - name: Upload coverage
-      uses: codecov/codecov-action@v2
+      uses: codecov/codecov-action@v4
 ```
 
 ## Troubleshooting

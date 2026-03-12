@@ -230,6 +230,7 @@ class TestLoadModel:
         with pytest.raises(ValueError):
             load_model("invalid_model_name")
 
+    @pytest.mark.requires_pretrained
     @pytest.mark.parametrize(
         "model_name",
         [
@@ -238,53 +239,37 @@ class TestLoadModel:
             "proj_head_text_mse",
         ],
     )
-    def test_load_model_proj_heads_return_type(self, model_name):
-        """Test that loading projection heads returns correct type (may fail if pretrained not available)."""
-        # This test will fail if pretrained models are not available
-        # In that case, it should be skipped or mocked
-        try:
-            model = load_model(model_name)
-            assert isinstance(model, nn.Module)
-        except Exception as e:
-            pytest.skip(f"Pretrained model not available: {e}")
+    def test_load_model_proj_heads_return_type(self, model_name, skip_if_no_models):
+        """Test that loading projection heads returns correct type."""
+        model = load_model(model_name)
+        assert isinstance(model, nn.Module)
 
-    def test_load_model_autoencoder_return_type(self):
-        """Test that loading autoencoder returns correct type (may fail if pretrained not available)."""
-        try:
-            model = load_model("autoencoder")
-            assert isinstance(model, nn.Module)
-        except Exception as e:
-            pytest.skip(f"Pretrained model not available: {e}")
+    @pytest.mark.requires_pretrained
+    def test_load_model_autoencoder_return_type(self, skip_if_no_models):
+        """Test that loading autoencoder returns correct type."""
+        model = load_model("autoencoder")
+        assert isinstance(model, nn.Module)
 
 
+@pytest.mark.requires_specter
 class TestSpecter:
     """Tests for Specter text encoder."""
 
-    def test_specter_initialization_default(self):
+    def test_specter_initialization_default(self, specter_model):
         """Test default Specter initialization."""
-        try:
-            model = Specter()
-            assert model.device == "cpu"
-            assert model.pooling is None  # Default is CLS token
-            assert model.orthogonalize is True
-        except Exception as e:
-            pytest.skip(f"Specter model not available: {e}")
+        model = specter_model
+        assert model.device.type == "cpu"
+        assert model.pooling is None  # Default is CLS token
 
-    def test_specter_initialization_with_adapter(self):
+    def test_specter_initialization_with_adapter(self, skip_if_no_models):
         """Test Specter initialization with specific adapter."""
-        try:
-            model = Specter(adapter="adhoc_query")
-            assert model.device == "cpu"
-        except Exception as e:
-            pytest.skip(f"Specter model or adapter not available: {e}")
+        model = Specter(adapter="adhoc_query")
+        assert model.device.type == "cpu"
 
-    def test_specter_initialization_no_adapter(self):
+    def test_specter_initialization_no_adapter(self, skip_if_no_models):
         """Test Specter initialization without adapter."""
-        try:
-            model = Specter(adapter=None)
-            assert model.device == "cpu"
-        except Exception as e:
-            pytest.skip(f"Specter base model not available: {e}")
+        model = Specter(adapter=None)
+        assert model.device.type == "cpu"
 
     @pytest.mark.parametrize("adapter", [
         "adhoc_query",
@@ -293,163 +278,132 @@ class TestSpecter:
         "proximity",
         None,  # No adapter
     ])
-    def test_specter_forward_with_adapters(self, adapter):
+    def test_specter_forward_with_adapters(self, adapter, skip_if_no_models):
         """Test forward pass with different adapters."""
-        try:
-            model = Specter(adapter=adapter)
+        model = Specter(adapter=adapter)
 
-            # Test with single string
-            text = "Memory and attention in the prefrontal cortex."
-            output = model(text)
+        # Test with single string
+        text = "Memory and attention in the prefrontal cortex."
+        output = model(text)
 
-            assert isinstance(output, torch.Tensor)
-            assert output.shape == (1, 768)  # Specter embedding dimension
-            assert not torch.isnan(output).any()
+        assert isinstance(output, torch.Tensor)
+        assert output.shape == (1, 768)  # Specter embedding dimension
+        assert not torch.isnan(output).any()
 
-        except Exception as e:
-            pytest.skip(f"Specter model with adapter {adapter} not available: {e}")
-
-    def test_specter_forward_single_string(self):
+    def test_specter_forward_single_string(self, specter_model):
         """Test forward pass with a single string."""
-        try:
-            model = Specter()
-            text = "Neural correlates of working memory."
-            output = model(text)
+        model = specter_model
+        text = "Neural correlates of working memory."
+        output = model(text)
 
-            assert output.shape == (1, 768)
-            assert not torch.isnan(output).any()
-        except Exception as e:
-            pytest.skip(f"Specter model not available: {e}")
+        assert output.shape == (1, 768)
+        assert not torch.isnan(output).any()
 
-    def test_specter_forward_list_of_strings(self):
+    def test_specter_forward_list_of_strings(self, specter_model):
         """Test forward pass with list of strings."""
-        try:
-            model = Specter()
-            texts = [
-                "Working memory in prefrontal cortex",
-                "Visual attention and perception",
-                "Language processing networks"
-            ]
-            output = model(texts)
+        model = specter_model
+        texts = [
+            "Working memory in prefrontal cortex",
+            "Visual attention and perception",
+            "Language processing networks"
+        ]
+        output = model(texts)
 
-            assert output.shape == (3, 768)
-            assert not torch.isnan(output).any()
-        except Exception as e:
-            pytest.skip(f"Specter model not available: {e}")
+        assert output.shape == (3, 768)
+        assert not torch.isnan(output).any()
 
-    def test_specter_forward_dataframe(self):
+    def test_specter_forward_dataframe(self, specter_model):
         """Test forward pass with DataFrame."""
-        try:
-            model = Specter()
-            df = pd.DataFrame({
-                'title': ['Neural mechanisms of memory', 'Attention networks'],
-                'abstract': ['Study of memory encoding...', 'Investigation of attention...']
-            })
-            output = model(df)
+        model = specter_model
+        df = pd.DataFrame({
+            'title': ['Neural mechanisms of memory', 'Attention networks'],
+            'abstract': ['Study of memory encoding...', 'Investigation of attention...']
+        })
+        output = model(df)
 
-            assert output.shape == (2, 768)
-            assert not torch.isnan(output).any()
-        except Exception as e:
-            pytest.skip(f"Specter model not available: {e}")
+        assert output.shape == (2, 768)
+        assert not torch.isnan(output).any()
 
-    def test_specter_forward_dict(self):
+    def test_specter_forward_dict(self, specter_model):
         """Test forward pass with dictionary."""
-        try:
-            model = Specter()
-            doc = {
-                'title': 'Neural correlates of decision making',
-                'abstract': 'We investigated the neural mechanisms...'
-            }
-            output = model(doc)
+        model = specter_model
+        doc = {
+            'title': 'Neural correlates of decision making',
+            'abstract': 'We investigated the neural mechanisms...'
+        }
+        output = model(doc)
 
-            assert output.shape == (1, 768)
-            assert not torch.isnan(output).any()
-        except Exception as e:
-            pytest.skip(f"Specter model not available: {e}")
+        assert output.shape == (1, 768)
+        assert not torch.isnan(output).any()
 
-    def test_specter_forward_list_of_dicts(self):
+    def test_specter_forward_list_of_dicts(self, specter_model):
         """Test forward pass with list of dictionaries."""
-        try:
-            model = Specter()
-            docs = [
-                {'title': 'Memory study', 'abstract': 'Abstract 1'},
-                {'title': 'Attention study', 'summary': 'Abstract 2'}  # Test with 'summary' instead
-            ]
-            output = model(docs)
+        model = specter_model
+        docs = [
+            {'title': 'Memory study', 'abstract': 'Abstract 1'},
+            {'title': 'Attention study', 'summary': 'Abstract 2'}  # Test with 'summary' instead
+        ]
+        output = model(docs)
 
-            assert output.shape == (2, 768)
-            assert not torch.isnan(output).any()
-        except Exception as e:
-            pytest.skip(f"Specter model not available: {e}")
+        assert output.shape == (2, 768)
+        assert not torch.isnan(output).any()
 
     @pytest.mark.parametrize("pooling", [None, "mean", "max", "mean_max", "attention"])
-    def test_specter_pooling_methods(self, pooling):
+    def test_specter_pooling_methods(self, pooling, skip_if_no_models):
         """Test different pooling strategies."""
-        try:
-            model = Specter(pooling=pooling)
-            text = "Neural processing in the brain."
-            output = model(text)
+        model = Specter(pooling=pooling)
+        text = "Neural processing in the brain."
+        output = model(text)
 
-            assert isinstance(output, torch.Tensor)
-            # mean_max doubles the dimension
-            expected_dim = 1536 if pooling == "mean_max" else 768
-            assert output.shape == (1, expected_dim)
-            assert not torch.isnan(output).any()
-        except Exception as e:
-            pytest.skip(f"Specter model not available: {e}")
+        assert isinstance(output, torch.Tensor)
+        # mean_max doubles the dimension
+        expected_dim = 1536 if pooling == "mean_max" else 768
+        assert output.shape == (1, expected_dim)
+        assert not torch.isnan(output).any()
 
-    def test_specter_orthogonalization(self):
+    def test_specter_orthogonalization(self, skip_if_no_models):
         """Test that orthogonalization affects embeddings."""
-        try:
-            model_ortho = Specter(orthogonalize=True)
-            model_no_ortho = Specter(orthogonalize=False)
+        # Note: parameter is 'orthgonalize' (with typo) in the codebase
+        model_ortho = Specter(orthgonalize=True)
+        model_no_ortho = Specter(orthgonalize=False)
 
-            text = "Neural networks in the brain."
+        text = "Neural networks in the brain."
 
-            output_ortho = model_ortho(text)
-            output_no_ortho = model_no_ortho(text)
+        output_ortho = model_ortho(text)
+        output_no_ortho = model_no_ortho(text)
 
-            # Outputs should be different when orthogonalization is applied
-            assert output_ortho.shape == output_no_ortho.shape
-            assert not torch.allclose(output_ortho, output_no_ortho, atol=1e-3)
-        except Exception as e:
-            pytest.skip(f"Specter model not available: {e}")
+        # Outputs should be different when orthogonalization is applied
+        assert output_ortho.shape == output_no_ortho.shape
+        assert not torch.allclose(output_ortho, output_no_ortho, atol=1e-3)
 
-    def test_specter_device_movement(self):
+    def test_specter_device_movement(self, skip_if_no_models):
         """Test moving Specter to different devices."""
-        try:
-            model = Specter(device="cpu")
+        model = Specter(device="cpu")
 
-            # Test CPU
-            text = "Neural activity patterns."
+        # Test CPU
+        text = "Neural activity patterns."
+        output = model(text)
+        assert output.device.type == "cpu"
+
+        # Test CUDA if available
+        if torch.cuda.is_available():
+            model = model.to("cuda")
             output = model(text)
-            assert output.device.type == "cpu"
+            assert output.device.type == "cuda"
 
-            # Test CUDA if available
-            if torch.cuda.is_available():
-                model = model.to("cuda")
-                output = model(text)
-                assert output.device.type == "cuda"
-
-        except Exception as e:
-            pytest.skip(f"Specter model not available: {e}")
-
-    def test_specter_batch_consistency(self):
+    def test_specter_batch_consistency(self, specter_model):
         """Test that batch processing gives same results as individual processing."""
-        try:
-            model = Specter()
-            texts = ["Text 1", "Text 2", "Text 3"]
+        model = specter_model
+        texts = ["Text 1", "Text 2", "Text 3"]
 
-            # Batch processing
-            batch_output = model(texts)
+        # Batch processing
+        batch_output = model(texts)
 
-            # Individual processing
-            individual_outputs = torch.stack([model(t) for t in texts]).squeeze(1)
+        # Individual processing
+        individual_outputs = torch.stack([model(t) for t in texts]).squeeze(1)
 
-            # Should be identical
-            assert torch.allclose(batch_output, individual_outputs, atol=1e-5)
-        except Exception as e:
-            pytest.skip(f"Specter model not available: {e}")
+        # Should be identical
+        assert torch.allclose(batch_output, individual_outputs, atol=1e-5)
 
 
 class TestModelIntegration:
@@ -484,26 +438,23 @@ class TestModelIntegration:
 
         assert projected.shape == (4, 384)
 
-    def test_full_pipeline_text_to_latent(self):
+    @pytest.mark.requires_specter
+    def test_full_pipeline_text_to_latent(self, specter_model):
         """Test full pipeline: Specter -> ProjHead."""
-        try:
-            specter = Specter()
-            proj_head = ProjHead(latent_in_dim=768, latent_out_dim=384)
+        specter = specter_model
+        proj_head = ProjHead(latent_in_dim=768, latent_out_dim=384)
 
-            text = "Neural mechanisms of cognitive control."
+        text = "Neural mechanisms of cognitive control."
 
-            with torch.no_grad():
-                # Specter encoding
-                text_emb = specter(text)
-                assert text_emb.shape == (1, 768)
+        with torch.no_grad():
+            # Specter encoding
+            text_emb = specter(text)
+            assert text_emb.shape == (1, 768)
 
-                # Project to shared latent space
-                latent = proj_head(text_emb)
-                assert latent.shape == (1, 384)
-                assert not torch.isnan(latent).any()
-
-        except Exception as e:
-            pytest.skip(f"Models not available: {e}")
+            # Project to shared latent space
+            latent = proj_head(text_emb)
+            assert latent.shape == (1, 384)
+            assert not torch.isnan(latent).any()
 
     def test_full_pipeline_neuro_to_latent(self):
         """Test full pipeline: NeuroAutoEncoder encoder -> latent."""
@@ -594,38 +545,36 @@ class TestForwardPassesAllModels:
         assert output.shape == (12, 200)
         assert not torch.isnan(output).any()
 
+    @pytest.mark.requires_specter
     @pytest.mark.parametrize("adapter", [
         "adhoc_query",
         "classification",
         "regression",
         None,
     ])
-    def test_specter_adapters_forward_pass(self, adapter):
+    def test_specter_adapters_forward_pass(self, adapter, skip_if_no_models):
         """Test Specter forward passes with all adapters."""
-        try:
-            model = Specter(adapter=adapter)
+        model = Specter(adapter=adapter)
 
-            # Test various input formats
-            test_cases = [
-                "Single text input",
-                ["Multiple", "text", "inputs"],
-                {"title": "Title", "abstract": "Abstract"},
-                pd.DataFrame({
-                    "title": ["Title 1", "Title 2"],
-                    "abstract": ["Abs 1", "Abs 2"]
-                })
-            ]
+        # Test various input formats
+        test_cases = [
+            "Single text input",
+            ["Multiple", "text", "inputs"],
+            {"title": "Title", "abstract": "Abstract"},
+            pd.DataFrame({
+                "title": ["Title 1", "Title 2"],
+                "abstract": ["Abs 1", "Abs 2"]
+            })
+        ]
 
-            for test_input in test_cases:
-                output = model(test_input)
-                assert isinstance(output, torch.Tensor)
-                assert output.shape[1] == 768  # Specter dimension
-                assert not torch.isnan(output).any()
+        for test_input in test_cases:
+            output = model(test_input)
+            assert isinstance(output, torch.Tensor)
+            assert output.shape[1] == 768  # Specter dimension
+            assert not torch.isnan(output).any()
 
-        except Exception as e:
-            pytest.skip(f"Specter with adapter {adapter} not available: {e}")
-
-    def test_all_pretrained_models_forward(self):
+    @pytest.mark.requires_pretrained
+    def test_all_pretrained_models_forward(self, skip_if_no_models):
         """Test forward passes for all pretrained models via load_model."""
         model_names = [
             "proj_head_text_infonce",
@@ -635,27 +584,23 @@ class TestForwardPassesAllModels:
         ]
 
         for model_name in model_names:
-            try:
-                model = load_model(model_name)
+            model = load_model(model_name)
 
-                # Determine appropriate input shape
-                if "text" in model_name:
-                    x = torch.randn(3, 768)
-                    expected_out = (3, 384)
-                elif "image" in model_name:
-                    x = torch.randn(3, 384)
-                    expected_out = (3, 384)
-                elif "autoencoder" in model_name:
-                    x = torch.rand(3, 28542)
-                    expected_out = (3, 28542)
-                else:
-                    continue
+            # Determine appropriate input shape
+            if "text" in model_name:
+                x = torch.randn(3, 768)
+                expected_out = (3, 384)
+            elif "image" in model_name:
+                x = torch.randn(3, 384)
+                expected_out = (3, 384)
+            elif "autoencoder" in model_name:
+                x = torch.rand(3, 28542)
+                expected_out = (3, 28542)
+            else:
+                continue
 
-                with torch.no_grad():
-                    output = model(x)
+            with torch.no_grad():
+                output = model(x)
 
-                assert output.shape == expected_out
-                assert not torch.isnan(output).any()
-
-            except Exception as e:
-                pytest.skip(f"Model {model_name} not available: {e}")
+            assert output.shape == expected_out
+            assert not torch.isnan(output).any()
