@@ -22,23 +22,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v7
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
 
-      - name: Setup Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Create virtual environment
-        run: uv venv .venv
-
-      - name: Install package and dependencies
+      - name: Install dependencies
         run: |
-          uv pip install -p .venv/bin/python -e "."
-          uv pip install -p .venv/bin/python pytest pytest-cov
+          python -m pip install --upgrade pip
+          pip install -e ".[metrics]"
+          pip install pytest pytest-cov
+
+      - name: Verify installation
+        run: |
+          python -c "import neurovlm; print('neurovlm version:', neurovlm.__version__ if hasattr(neurovlm, '__version__') else 'unknown')"
+          python -c "import torch; print('torch version:', torch.__version__)"
+          python -c "import transformers; print('transformers version:', transformers.__version__)"
 
       - name: Run tests
-        run: |
-          .venv/bin/pytest tests/ --cov=neurovlm --cov-report=xml --cov-report=term
+        run: pytest tests/ -v --cov=neurovlm --cov-report=xml --cov-report=term --tb=short
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
