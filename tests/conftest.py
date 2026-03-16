@@ -23,62 +23,33 @@ def device():
 
 
 @pytest.fixture
-def skip_if_no_models():
-    """Skip test if SKIP_PRETRAINED_TESTS environment variable is set."""
-    if os.getenv("SKIP_PRETRAINED_TESTS", "false").lower() == "true":
-        pytest.skip("Skipping pretrained model tests (SKIP_PRETRAINED_TESTS=true)")
-
-
-@pytest.fixture
 def specter_model():
     """Fixture to provide Specter model, skip if not available or disabled."""
     from neurovlm.models import Specter
-
-    if os.getenv("SKIP_PRETRAINED_TESTS", "false").lower() == "true":
-        pytest.skip("Skipping Specter tests (SKIP_PRETRAINED_TESTS=true)")
-
-    try:
-        model = Specter()
-        return model
-    except Exception as e:
-        pytest.skip(f"Specter model not available: {e}")
+    model = Specter()
+    return model
 
 
 @pytest.fixture
 def pretrained_autoencoder():
     """Fixture to provide pretrained autoencoder, skip if not available or disabled."""
     from neurovlm.models import load_model
-
-    if os.getenv("SKIP_PRETRAINED_TESTS", "false").lower() == "true":
-        pytest.skip("Skipping pretrained autoencoder tests (SKIP_PRETRAINED_TESTS=true)")
-
-    try:
-        model = load_model("autoencoder")
-        return model
-    except Exception as e:
-        pytest.skip(f"Pretrained autoencoder not available: {e}")
+    model = load_model("autoencoder")
+    return model
 
 
 @pytest.fixture
 def pretrained_proj_heads():
     """Fixture to provide pretrained projection heads, skip if not available or disabled."""
     from neurovlm.models import load_model
-
-    if os.getenv("SKIP_PRETRAINED_TESTS", "false").lower() == "true":
-        pytest.skip("Skipping pretrained projection head tests (SKIP_PRETRAINED_TESTS=true)")
-
-    try:
-        text_infonce = load_model("proj_head_text_infonce")
-        image_infonce = load_model("proj_head_image_infonce")
-        text_mse = load_model("proj_head_text_mse")
-        return {
-            "text_infonce": text_infonce,
-            "image_infonce": image_infonce,
-            "text_mse": text_mse,
-        }
-    except Exception as e:
-        pytest.skip(f"Pretrained projection heads not available: {e}")
-
+    text_infonce = load_model("proj_head_text_infonce")
+    image_infonce = load_model("proj_head_image_infonce")
+    text_mse = load_model("proj_head_text_mse")
+    return {
+        "text_infonce": text_infonce,
+        "image_infonce": image_infonce,
+        "text_mse": text_mse,
+    }
 
 def pytest_configure(config):
     """Configure pytest with custom markers."""

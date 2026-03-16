@@ -239,13 +239,13 @@ class TestLoadModel:
             "proj_head_text_mse",
         ],
     )
-    def test_load_model_proj_heads_return_type(self, model_name, skip_if_no_models):
+    def test_load_model_proj_heads_return_type(self, model_name):
         """Test that loading projection heads returns correct type."""
         model = load_model(model_name)
         assert isinstance(model, nn.Module)
 
     @pytest.mark.requires_pretrained
-    def test_load_model_autoencoder_return_type(self, skip_if_no_models):
+    def test_load_model_autoencoder_return_type(self):
         """Test that loading autoencoder returns correct type."""
         model = load_model("autoencoder")
         assert isinstance(model, nn.Module)
@@ -261,12 +261,12 @@ class TestSpecter:
         assert model.device.type == "cpu"
         assert model.pooling is None  # Default is CLS token
 
-    def test_specter_initialization_with_adapter(self, skip_if_no_models):
+    def test_specter_initialization_with_adapter(self):
         """Test Specter initialization with specific adapter."""
         model = Specter(adapter="adhoc_query")
         assert model.device.type == "cpu"
 
-    def test_specter_initialization_no_adapter(self, skip_if_no_models):
+    def test_specter_initialization_no_adapter(self):
         """Test Specter initialization without adapter."""
         model = Specter(adapter=None)
         assert model.device.type == "cpu"
@@ -278,7 +278,7 @@ class TestSpecter:
         "proximity",
         None,  # No adapter
     ])
-    def test_specter_forward_with_adapters(self, adapter, skip_if_no_models):
+    def test_specter_forward_with_adapters(self, adapter):
         """Test forward pass with different adapters."""
         model = Specter(adapter=adapter)
 
@@ -349,7 +349,7 @@ class TestSpecter:
         assert not torch.isnan(output).any()
 
     @pytest.mark.parametrize("pooling", [None, "mean", "max", "mean_max", "attention"])
-    def test_specter_pooling_methods(self, pooling, skip_if_no_models):
+    def test_specter_pooling_methods(self, pooling):
         """Test different pooling strategies."""
         model = Specter(pooling=pooling)
         text = "Neural processing in the brain."
@@ -361,7 +361,7 @@ class TestSpecter:
         assert output.shape == (1, expected_dim)
         assert not torch.isnan(output).any()
 
-    def test_specter_orthogonalization(self, skip_if_no_models):
+    def test_specter_orthogonalization(self):
         """Test that orthogonalization affects embeddings."""
         # Note: parameter is 'orthgonalize' (with typo) in the codebase
         model_ortho = Specter(orthgonalize=True)
@@ -376,7 +376,7 @@ class TestSpecter:
         assert output_ortho.shape == output_no_ortho.shape
         assert not torch.allclose(output_ortho, output_no_ortho, atol=1e-3)
 
-    def test_specter_device_movement(self, skip_if_no_models):
+    def test_specter_device_movement(self):
         """Test moving Specter to different devices."""
         model = Specter(device="cpu")
 
@@ -552,7 +552,7 @@ class TestForwardPassesAllModels:
         "regression",
         None,
     ])
-    def test_specter_adapters_forward_pass(self, adapter, skip_if_no_models):
+    def test_specter_adapters_forward_pass(self, adapter):
         """Test Specter forward passes with all adapters."""
         model = Specter(adapter=adapter)
 
@@ -574,7 +574,7 @@ class TestForwardPassesAllModels:
             assert not torch.isnan(output).any()
 
     @pytest.mark.requires_pretrained
-    def test_all_pretrained_models_forward(self, skip_if_no_models):
+    def test_all_pretrained_models_forward(self):
         """Test forward passes for all pretrained models via load_model."""
         model_names = [
             "proj_head_text_infonce",

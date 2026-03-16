@@ -80,11 +80,6 @@ Skip tests requiring pretrained models (using markers):
 pytest -m "not requires_pretrained and not requires_specter"
 ```
 
-Skip tests requiring pretrained models (using environment variable):
-```bash
-SKIP_PRETRAINED_TESTS=true pytest
-```
-
 ### Code Coverage
 
 Generate coverage report:
@@ -232,9 +227,6 @@ class Test<ClassName>:
    - `@pytest.mark.requires_specter` - Requires Specter model from HuggingFace
    - `@pytest.mark.skipif` - Conditional skipping
 
-5. **Environment Variables**
-   - `SKIP_PRETRAINED_TESTS=true` - Skip all tests requiring model downloads (useful in CI)
-
 5. **Parametrization**
    ```python
    @pytest.mark.parametrize("input_val,expected", [
@@ -284,7 +276,6 @@ NeuroVLM has two test workflows:
 1. **Standard Tests** (`.github/workflows/tests.yml`)
    - Runs on all PRs and pushes to main
    - Tests on Ubuntu, macOS, Windows with Python 3.10-3.13
-   - Skips pretrained model tests (`SKIP_PRETRAINED_TESTS=true`)
    - Fast feedback without large model downloads
 
 2. **Full Tests with Models** (`.github/workflows/tests-with-models.yml`)
@@ -303,8 +294,6 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      SKIP_PRETRAINED_TESTS: "true"  # Skip model downloads
 
     steps:
     - uses: actions/checkout@v4

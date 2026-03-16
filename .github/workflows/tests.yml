@@ -18,10 +18,6 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
-    env:
-      # Skip pretrained model tests in CI to avoid downloading large models
-      SKIP_PRETRAINED_TESTS: "true"
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
