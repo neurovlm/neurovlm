@@ -1,0 +1,62 @@
+name: Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/neurovlm
+          key: ${{ runner.os }}-hf-models-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-hf-models-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[metrics]"
+          pip install pytest pytest-cov
+
+      - name: Verify installation
+        run: |
+          python -c "import neurovlm; print('neurovlm version:', neurovlm.__version__ if hasattr(neurovlm, '__version__') else 'unknown')"
+          python -c "import torch; print('torch version:', torch.__version__)"
+          python -c "import transformers; print('transformers version:', transformers.__version__)"
+
+      - name: Run tests
+        run: pytest tests/ -v --cov=neurovlm --cov-report=xml --cov-report=term --tb=short
+
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+          verbose: true

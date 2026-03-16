@@ -1,5 +1,4 @@
 """Tests for data module."""
-
 import pytest
 import torch
 import numpy as np
@@ -138,11 +137,8 @@ class TestLoadDataset:
     )
     def test_load_dataset_valid_names_dataframe(self, dataset_name):
         """Test loading datasets that should return DataFrames."""
-        try:
-            result = load_dataset(dataset_name)
-            assert isinstance(result, pd.DataFrame)
-        except (ValueError, FileNotFoundError, Exception) as e:
-            pytest.skip(f"Dataset {dataset_name} not available: {e}")
+        result = load_dataset(dataset_name)
+        assert isinstance(result, pd.DataFrame)
 
     @pytest.mark.parametrize(
         "dataset_name",
@@ -150,35 +146,27 @@ class TestLoadDataset:
     )
     def test_load_dataset_valid_names_tensor(self, dataset_name):
         """Test loading datasets that should return tensors/arrays."""
-        try:
-            result = load_dataset(dataset_name)
-            # Should be tensor or tuple containing tensor
-            if isinstance(result, tuple):
-                assert len(result) >= 1
-                assert isinstance(result[0], (torch.Tensor, np.ndarray))
-            else:
-                assert isinstance(result, (torch.Tensor, np.ndarray))
-        except (ValueError, FileNotFoundError, Exception) as e:
-            pytest.skip(f"Dataset {dataset_name} not available: {e}")
+        result = load_dataset(dataset_name)
+        # Should be tensor or tuple containing tensor
+        if isinstance(result, tuple):
+            assert len(result) >= 1
+            assert isinstance(result[0], (torch.Tensor, np.ndarray))
+        else:
+            assert isinstance(result, (torch.Tensor, np.ndarray))
 
     def test_load_dataset_networks(self):
         """Test loading networks dataset."""
-        try:
-            result = load_dataset("networks")
-            # Should return a dict with network data
-            assert isinstance(result, dict)
-        except (ValueError, FileNotFoundError, Exception) as e:
-            pytest.skip(f"Networks dataset not available: {e}")
+        result = load_dataset("networks")
+        # Should return a dict with network data
+        assert isinstance(result, dict)
+
 
     def test_load_dataset_alias_wiki(self):
         """Test that 'wiki' and 'neurowiki' are aliases."""
-        try:
-            result1 = load_dataset("wiki")
-            result2 = load_dataset("neurowiki")
-            # Should return same type
-            assert type(result1) == type(result2)
-        except (ValueError, FileNotFoundError, Exception) as e:
-            pytest.skip(f"Wiki dataset not available: {e}")
+        result1 = load_dataset("wiki")
+        result2 = load_dataset("neurowiki")
+        # Should return same type
+        assert type(result1) == type(result2)
 
 
 class TestLoadLatent:
@@ -206,84 +194,65 @@ class TestLoadLatent:
     )
     def test_load_latent_valid_names(self, latent_name):
         """Test loading valid latent embeddings."""
-        try:
-            result = load_latent(latent_name)
-            # Result could be tensor, tuple, or dict
-            assert result is not None
+        result = load_latent(latent_name)
+        # Result could be tensor, tuple, or dict
+        assert result is not None
 
-            # Check that if it's a tensor, it has no gradients
-            if isinstance(result, torch.Tensor):
-                assert not result.requires_grad
-            elif isinstance(result, tuple) and len(result) > 0:
-                if isinstance(result[0], torch.Tensor):
-                    assert not result[0].requires_grad
-        except (ValueError, FileNotFoundError, Exception) as e:
-            pytest.skip(f"Latent {latent_name} not available: {e}")
+        # Check that if it's a tensor, it has no gradients
+        if isinstance(result, torch.Tensor):
+            assert not result.requires_grad
+        elif isinstance(result, tuple) and len(result) > 0:
+            if isinstance(result[0], torch.Tensor):
+                assert not result[0].requires_grad
 
     def test_load_latent_returns_no_grad(self):
         """Test that loaded latents have no gradients."""
-        try:
-            result = load_latent("pubmed_text")
+        result = load_latent("pubmed_text")
 
-            # Recursively check that no tensors have gradients
-            def check_no_grad(obj):
-                if isinstance(obj, torch.Tensor):
-                    assert not obj.requires_grad
-                elif isinstance(obj, (list, tuple)):
-                    for item in obj:
-                        check_no_grad(item)
-                elif isinstance(obj, dict):
-                    for value in obj.values():
-                        check_no_grad(value)
+        # Recursively check that no tensors have gradients
+        def check_no_grad(obj):
+            if isinstance(obj, torch.Tensor):
+                assert not obj.requires_grad
+            elif isinstance(obj, (list, tuple)):
+                for item in obj:
+                    check_no_grad(item)
+            elif isinstance(obj, dict):
+                for value in obj.values():
+                    check_no_grad(value)
 
-            check_no_grad(result)
-        except (ValueError, FileNotFoundError, Exception) as e:
-            pytest.skip(f"Latent data not available: {e}")
+        check_no_grad(result)
+
 
     def test_load_latent_networks_neuro(self):
         """Test loading network neuro latents (dict structure)."""
-        try:
-            result = load_latent("networks_neuro")
-            # Should be a nested dict
-            assert isinstance(result, dict)
-        except (ValueError, FileNotFoundError, Exception) as e:
-            pytest.skip(f"Networks neuro latent not available: {e}")
+        result = load_latent("networks_neuro")
+        # Should be a nested dict
+        assert isinstance(result, dict)
 
     def test_load_latent_alias_wiki(self):
         """Test that 'wiki' and 'neurowiki' are aliases for latents."""
-        try:
-            result1 = load_latent("wiki")
-            result2 = load_latent("neurowiki")
-            # Should return same type
-            assert type(result1) == type(result2)
-        except (ValueError, FileNotFoundError, Exception) as e:
-            pytest.skip(f"Wiki latent not available: {e}")
-
+        result1 = load_latent("wiki")
+        result2 = load_latent("neurowiki")
+        # Should return same type
+        assert type(result1) == type(result2)
 
 class TestLoadMasker:
     """Tests for load_masker function."""
 
     def test_load_masker_returns_masker(self):
         """Test that load_masker returns a masker object."""
-        try:
-            masker = load_masker()
-            # Should have transform and inverse_transform methods
-            assert hasattr(masker, "transform")
-            assert hasattr(masker, "inverse_transform")
-            assert hasattr(masker, "mask_img_")
-        except (ValueError, FileNotFoundError, Exception) as e:
-            pytest.skip(f"Masker not available: {e}")
+        masker = load_masker()
+        # Should have transform and inverse_transform methods
+        assert hasattr(masker, "transform")
+        assert hasattr(masker, "inverse_transform")
+        assert hasattr(masker, "mask_img_")
 
     def test_load_masker_consistent(self):
         """Test that loading masker multiple times returns consistent object."""
-        try:
-            masker1 = load_masker()
-            masker2 = load_masker()
-
-            # Should be same type
-            assert type(masker1) == type(masker2)
-        except (ValueError, FileNotFoundError, Exception) as e:
-            pytest.skip(f"Masker not available: {e}")
+        masker1 = load_masker()
+        masker2 = load_masker()
+        # Should be same type
+        assert type(masker1) == type(masker2)
 
 
 class TestDataIntegration:
@@ -294,29 +263,22 @@ class TestDataIntegration:
         dataset_names = ["pubmed_text", "wiki", "cogatlas"]
 
         for name in dataset_names:
-            try:
-                result = load_dataset(name)
-                assert result is not None
-            except (ValueError, FileNotFoundError, Exception):
-                # Skip if data not available
-                pass
+            result = load_dataset(name)
+            assert result is not None
 
     def test_load_dataset_and_latent_consistency(self):
         """Test that dataset and corresponding latent have consistent sizes."""
-        try:
-            dataset = load_dataset("pubmed_text")
-            latent = load_latent("pubmed_text")
+        dataset = load_dataset("pubmed_text")
+        latent = load_latent("pubmed_text")
 
-            # Extract tensor from latent (could be tuple or dict)
-            latent_tensor = None
-            if isinstance(latent, torch.Tensor):
-                latent_tensor = latent
-            elif isinstance(latent, tuple) and len(latent) > 0:
-                latent_tensor = latent[0]
+        # Extract tensor from latent (could be tuple or dict)
+        latent_tensor = None
+        if isinstance(latent, torch.Tensor):
+            latent_tensor = latent
+        elif isinstance(latent, tuple) and len(latent) > 0:
+            latent_tensor = latent[0]
 
-            if latent_tensor is not None and isinstance(dataset, pd.DataFrame):
-                # Sizes should be consistent (may not be exact match due to filtering)
-                assert latent_tensor.shape[0] > 0
-                assert len(dataset) > 0
-        except (ValueError, FileNotFoundError, Exception) as e:
-            pytest.skip(f"Data not available for consistency test: {e}")
+        if latent_tensor is not None and isinstance(dataset, pd.DataFrame):
+            # Sizes should be consistent (may not be exact match due to filtering)
+            assert latent_tensor.shape[0] > 0
+            assert len(dataset) > 0
