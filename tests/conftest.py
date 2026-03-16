@@ -24,7 +24,7 @@ def device():
 
 @pytest.fixture
 def specter_model():
-    """Fixture to provide Specter model, skip if not available or disabled."""
+    """Fixture to provide Specter model"""
     from neurovlm.models import Specter
     model = Specter()
     return model
@@ -32,7 +32,7 @@ def specter_model():
 
 @pytest.fixture
 def pretrained_autoencoder():
-    """Fixture to provide pretrained autoencoder, skip if not available or disabled."""
+    """Fixture to provide pretrained autoencoder"""
     from neurovlm.models import load_model
     model = load_model("autoencoder")
     return model
@@ -40,7 +40,7 @@ def pretrained_autoencoder():
 
 @pytest.fixture
 def pretrained_proj_heads():
-    """Fixture to provide pretrained projection heads, skip if not available or disabled."""
+    """Fixture to provide pretrained projection heads"""
     from neurovlm.models import load_model
     text_infonce = load_model("proj_head_text_infonce")
     image_infonce = load_model("proj_head_image_infonce")

@@ -360,11 +360,8 @@ class TestBrainSearchResult:
         )
 
         # Should not raise error
-        try:
-            images = result.images
-            assert images is not None
-        except Exception:
-            pass  # Mocking may not work perfectly
+        images = result.images
+        assert images is not None
 
 
 class TestConstants:
