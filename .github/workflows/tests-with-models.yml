@@ -9,17 +9,22 @@ on:
     types: [published]
 
 jobs:
-  test-with-models:
-    runs-on: ubuntu-latest
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
       - name: Cache HuggingFace models
@@ -30,7 +35,6 @@ jobs:
             ~/.cache/neurovlm
           key: ${{ runner.os }}-hf-models-full-${{ hashFiles('pyproject.toml') }}
           restore-keys: |
-            ${{ runner.os }}-hf-models-full-
             ${{ runner.os }}-hf-models-
 
       - name: Install dependencies
