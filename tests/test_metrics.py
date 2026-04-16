@@ -5,15 +5,199 @@ import pytest
 import torch
 
 from neurovlm.metrics import (
+    bleu,
     compute_metrics,
     dice,
     dice_top_k,
+    pearson_correlation,
+    psnr,
     recall_at_k,
     recall_curve,
+    rouge,
     bernoulli_bce,
     bits_per_pixel,
     compute_ae_performance,
 )
+
+
+class TestBleu:
+    """Tests for BLEU score computation."""
+
+    def test_bleu_identical(self):
+        """Identical hypothesis and reference should score near 1."""
+        ref = ["the quick brown fox jumps over the lazy dog"]
+        hyp = "the quick brown fox jumps over the lazy dog"
+        score = bleu(ref, hyp)
+        assert score > 0.99
+
+    def test_bleu_no_overlap(self):
+        """Completely different hypothesis should score near 0."""
+        ref = ["the quick brown fox"]
+        hyp = "lorem ipsum dolor sit"
+        score = bleu(ref, hyp)
+        assert score < 0.05
+
+    def test_bleu_partial_overlap(self):
+        """Partial overlap should give an intermediate score."""
+        ref = ["working memory activates the prefrontal cortex"]
+        hyp = "working memory involves the prefrontal cortex region"
+        score = bleu(ref, hyp)
+        assert 0.0 < score < 1.0
+
+    def test_bleu_multiple_references(self):
+        """Multiple references should not raise and return a valid score."""
+        refs = [
+            "the prefrontal cortex supports working memory",
+            "working memory relies on prefrontal cortex activity",
+        ]
+        hyp = "the prefrontal cortex is involved in working memory"
+        score = bleu(refs, hyp)
+        assert 0.0 <= score <= 1.0
+
+    def test_bleu_unigram(self):
+        """BLEU-1 (n=1) should return a valid float."""
+        score = bleu(["memory and attention"], "memory and learning", n=1)
+        assert isinstance(score, float)
+        assert 0.0 <= score <= 1.0
+
+    def test_bleu_returns_float(self):
+        """Return type should always be float."""
+        score = bleu(["some reference text"], "some hypothesis text")
+        assert isinstance(score, float)
+
+
+class TestRouge:
+    """Tests for ROUGE score computation."""
+
+    def test_rouge_identical(self):
+        """Identical texts should give perfect F-measures."""
+        text = "working memory activates the prefrontal cortex"
+        scores = rouge(text, text)
+        assert scores["rouge1"]["fmeasure"] > 0.99
+        assert scores["rouge2"]["fmeasure"] > 0.99
+        assert scores["rougeL"]["fmeasure"] > 0.99
+
+    def test_rouge_no_overlap(self):
+        """Completely different texts should give near-zero scores."""
+        scores = rouge("the quick brown fox", "lorem ipsum dolor sit")
+        assert scores["rouge1"]["fmeasure"] < 0.05
+
+    def test_rouge_keys(self):
+        """Output must contain rouge1, rouge2, rougeL with the right sub-keys."""
+        scores = rouge("reference text here", "hypothesis text here")
+        for key in ("rouge1", "rouge2", "rougeL"):
+            assert key in scores
+            assert set(scores[key].keys()) == {"precision", "recall", "fmeasure"}
+
+    def test_rouge_values_in_range(self):
+        """All precision/recall/fmeasure values must be in [0, 1]."""
+        scores = rouge(
+            "the prefrontal cortex supports working memory",
+            "working memory involves prefrontal regions",
+        )
+        for key in ("rouge1", "rouge2", "rougeL"):
+            for metric in ("precision", "recall", "fmeasure"):
+                val = scores[key][metric]
+                assert 0.0 <= val <= 1.0, f"{key}.{metric} = {val} out of range"
+
+    def test_rouge_partial_overlap(self):
+        """Partial overlap should give intermediate scores for rouge1."""
+        scores = rouge(
+            "memory and attention are cognitive functions",
+            "attention and perception involve brain networks",
+        )
+        assert 0.0 < scores["rouge1"]["fmeasure"] < 1.0
+
+
+class TestPearsonCorrelation:
+    """Tests for pearson_correlation."""
+
+    def test_perfect_positive(self):
+        """Identical arrays should give r = 1.0."""
+        arr = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        assert np.isclose(pearson_correlation(arr, arr), 1.0)
+
+    def test_perfect_negative(self):
+        """Perfectly anti-correlated arrays should give r = -1.0."""
+        a = np.array([1.0, 2.0, 3.0])
+        b = np.array([3.0, 2.0, 1.0])
+        assert np.isclose(pearson_correlation(a, b), -1.0)
+
+    def test_zero_correlation(self):
+        """Orthogonal arrays should give r near 0."""
+        a = np.array([1.0, -1.0, 1.0, -1.0])
+        b = np.array([1.0, 1.0, -1.0, -1.0])
+        r = pearson_correlation(a, b)
+        assert np.isclose(r, 0.0, atol=1e-10)
+
+    def test_constant_array_returns_zero(self):
+        """Constant array (zero variance) should return 0.0 without error."""
+        a = np.ones(10)
+        b = np.random.rand(10)
+        assert pearson_correlation(a, b) == 0.0
+
+    def test_2d_input_flattened(self):
+        """2D arrays should be flattened before computing r."""
+        rng = np.random.default_rng(0)
+        a = rng.random((5, 10))
+        r = pearson_correlation(a, a)
+        assert np.isclose(r, 1.0)
+
+    def test_output_in_range(self):
+        """Correlation should always be in [-1, 1]."""
+        rng = np.random.default_rng(42)
+        a = rng.random(100)
+        b = rng.random(100)
+        r = pearson_correlation(a, b)
+        assert -1.0 <= r <= 1.0
+
+    def test_torch_tensor_input(self):
+        """torch.Tensor inputs should be accepted via numpy conversion."""
+        a = torch.rand(50)
+        b = torch.rand(50)
+        r = pearson_correlation(a.numpy(), b.numpy())
+        assert isinstance(r, float)
+
+
+class TestPsnr:
+    """Tests for psnr (Peak Signal-to-Noise Ratio)."""
+
+    def test_identical_images_infinite(self):
+        """Identical arrays should give infinite (or very large) PSNR."""
+        arr = np.random.rand(100)
+        result = psnr(arr, arr)
+        assert result == float("inf") or result > 100.0
+
+    def test_perfect_reconstruction_high_psnr(self):
+        """Near-perfect reconstruction should give high PSNR."""
+        rng = np.random.default_rng(0)
+        y_true = rng.random(1000)
+        noise = rng.random(1000) * 1e-6
+        result = psnr(y_true, y_true + noise)
+        assert result > 100.0
+
+    def test_poor_reconstruction_low_psnr(self):
+        """Very noisy prediction should give lower PSNR."""
+        rng = np.random.default_rng(1)
+        y_true = rng.random(1000)
+        y_pred = rng.random(1000)
+        result = psnr(y_true, y_pred)
+        assert result < 20.0
+
+    def test_returns_float(self):
+        """Return type should be float."""
+        a = np.random.rand(50)
+        b = np.random.rand(50)
+        assert isinstance(psnr(a, b), float)
+
+    def test_data_range_parameter(self):
+        """Different data_range values should produce different PSNR."""
+        rng = np.random.default_rng(2)
+        y_true = rng.random(100)
+        y_pred = y_true + rng.random(100) * 0.1
+        p1 = psnr(y_true, y_pred, data_range=1.0)
+        p2 = psnr(y_true, y_pred, data_range=2.0)
+        assert not np.isclose(p1, p2)
 
 
 class TestDice:

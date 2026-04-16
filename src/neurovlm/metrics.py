@@ -4,6 +4,155 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
+
+# ---------------------------------------------------------------------------
+# Text generation metrics (BLEU, ROUGE)
+# ---------------------------------------------------------------------------
+
+def bleu(references: list[str], hypothesis: str, n: int = 4) -> float:
+    """Compute BLEU score for text generation evaluation.
+
+    Useful for evaluating text produced from brain activations against a set
+    of reference descriptions.
+
+    Parameters
+    ----------
+    references : list of str
+        One or more reference texts to compare against.
+    hypothesis : str
+        The generated/predicted text.
+    n : int, optional
+        Maximum n-gram order (1–4). Default is 4.
+
+    Returns
+    -------
+    score : float
+        Sentence-level BLEU score in [0, 1].
+
+    Notes
+    -----
+    Requires ``nltk`` (included in the ``metrics`` optional dependency group).
+    Uses ``SmoothingFunction.method1`` to avoid zero scores on short texts.
+    """
+    from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+
+    ref_tokens = [ref.lower().split() for ref in references]
+    hyp_tokens = hypothesis.lower().split()
+    weights = tuple(1.0 / n for _ in range(n))
+    smoother = SmoothingFunction().method1
+    return float(sentence_bleu(ref_tokens, hyp_tokens, weights=weights,
+                               smoothing_function=smoother))
+
+
+def rouge(reference: str, hypothesis: str) -> dict[str, dict[str, float]]:
+    """Compute ROUGE-1, ROUGE-2, and ROUGE-L scores for text generation.
+
+    Useful for evaluating text produced from brain activations against a
+    reference description.
+
+    Parameters
+    ----------
+    reference : str
+        The ground-truth reference text.
+    hypothesis : str
+        The generated/predicted text.
+
+    Returns
+    -------
+    scores : dict
+        Keys are ``'rouge1'``, ``'rouge2'``, ``'rougeL'``.  Each value is a
+        dict with ``'precision'``, ``'recall'``, and ``'fmeasure'`` floats.
+
+    Notes
+    -----
+    Requires ``rouge-score`` (included in the ``metrics`` optional dependency
+    group).  Stemming is enabled for robustness to inflectional variation.
+    """
+    from rouge_score import rouge_scorer
+
+    scorer = rouge_scorer.RougeScorer(
+        ['rouge1', 'rouge2', 'rougeL'], use_stemmer=True
+    )
+    raw = scorer.score(reference, hypothesis)
+    return {
+        key: {
+            'precision': val.precision,
+            'recall': val.recall,
+            'fmeasure': val.fmeasure,
+        }
+        for key, val in raw.items()
+    }
+
+
+# ---------------------------------------------------------------------------
+# Brain image similarity / quality metrics
+# ---------------------------------------------------------------------------
+
+def pearson_correlation(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+) -> float:
+    """Pearson correlation between a true and predicted brain map.
+
+    Captures linear correspondence independently of scale, making it a
+    natural companion to MSE and Dice for evaluating text-to-brain predictions.
+
+    Parameters
+    ----------
+    y_true : array-like
+        True brain activation map (any shape; flattened internally).
+    y_pred : array-like
+        Predicted brain activation map (same shape).
+
+    Returns
+    -------
+    r : float
+        Pearson *r* in [−1, 1].  Returns 0.0 when either array has zero
+        variance.
+    """
+    y_true = np.asarray(y_true, dtype=np.float64).ravel()
+    y_pred = np.asarray(y_pred, dtype=np.float64).ravel()
+    if y_true.std() < 1e-8 or y_pred.std() < 1e-8:
+        return 0.0
+    return float(np.corrcoef(y_true, y_pred)[0, 1])
+
+
+def psnr(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    data_range: float = 1.0,
+) -> float:
+    """Peak Signal-to-Noise Ratio between a true and predicted brain map.
+
+    Provides a decibel-scale quality measure that is intuitive for reporting
+    reconstruction fidelity.  Higher values indicate better reconstruction.
+
+    Parameters
+    ----------
+    y_true : array-like
+        True brain activation map.
+    y_pred : array-like
+        Predicted brain activation map (same shape).
+    data_range : float, optional
+        Value range of the data (``max − min``).  Default is ``1.0``,
+        appropriate for maps normalised to [0, 1].
+
+    Returns
+    -------
+    psnr_db : float
+        PSNR in decibels.
+
+    Notes
+    -----
+    Requires ``scikit-image`` (included in the ``metrics`` optional dependency
+    group).
+    """
+    from skimage.metrics import peak_signal_noise_ratio
+
+    y_true = np.asarray(y_true, dtype=np.float64)
+    y_pred = np.asarray(y_pred, dtype=np.float64)
+    return float(peak_signal_noise_ratio(y_true, y_pred, data_range=data_range))
+
 def compute_metrics(
     original: torch.Tensor,
     reconstructed: torch.Tensor,
