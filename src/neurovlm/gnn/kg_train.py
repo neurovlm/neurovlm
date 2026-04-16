@@ -61,13 +61,43 @@ def _which_device() -> str:
     return "cpu"
 
 
-def _bce_loss(pos_scores: Tensor, neg_scores: Tensor) -> Tensor:
-    """Binary cross-entropy: positives → 1, negatives → 0."""
+def _bce_loss(
+    pos_scores: Tensor,
+    neg_scores: Tensor,
+    pos_rel_idx: Optional[Tensor] = None,
+    neg_rel_idx: Optional[Tensor] = None,
+    relation_weights: Optional[Tensor] = None,
+) -> Tensor:
+    """Binary cross-entropy: positives → 1, negatives → 0.
+
+    When *relation_weights* is provided, each sample is scaled by the weight
+    of its relation type so that rare relation types contribute proportionally
+    to the gradient.  Negatives inherit the weight of their positive's relation.
+
+    Parameters
+    ----------
+    pos_scores, neg_scores:
+        Raw logit scores for positive and negative triples.
+    pos_rel_idx, neg_rel_idx:
+        Relation-type integer indices for positives / negatives (LongTensor).
+        Required when *relation_weights* is not None.
+    relation_weights:
+        Per-relation weight tensor of shape ``(num_relations,)``.  Typically
+        computed as inverse-frequency weights, normalised to mean 1 and capped
+        at some maximum to avoid extreme gradients for very sparse types.
+    """
     pos_labels = torch.ones_like(pos_scores)
     neg_labels = torch.zeros_like(neg_scores)
     scores = torch.cat([pos_scores, neg_scores])
     labels = torch.cat([pos_labels, neg_labels])
-    return F.binary_cross_entropy_with_logits(scores, labels)
+
+    sample_weights: Optional[Tensor] = None
+    if relation_weights is not None and pos_rel_idx is not None and neg_rel_idx is not None:
+        pos_w = relation_weights[pos_rel_idx]
+        neg_w = relation_weights[neg_rel_idx]
+        sample_weights = torch.cat([pos_w, neg_w])
+
+    return F.binary_cross_entropy_with_logits(scores, labels, weight=sample_weights)
 
 
 # ---------------------------------------------------------------------------
@@ -198,10 +228,22 @@ class RGCNTrainer:
         Multiplicative LR reduction factor on plateau.  Default 0.5.
     device:
         ``"auto"`` selects GPU → MPS → CPU.
+    graph_sample_size:
+        Maximum number of edges passed to the R-GCN each training batch.
+        Full-graph message passing over millions of edges stores activations
+        proportional to ``n_edges × hidden_dim`` per layer, which OOMs on
+        MPS/GPU with large KGs.  A random edge subgraph of this size is used
+        instead; the model sees the full graph over many batches/epochs.
+        Default 200_000.  Set to ``sys.maxsize`` to disable subsampling.
     checkpoint_dir:
         If provided, best model state is saved to ``<dir>/best_rgcn.pt``.
     verbose:
         Print training progress.  Default True.
+    relation_weights:
+        Optional 1-D FloatTensor of shape ``(num_relations,)`` used to
+        upweight rare relation types in the BCE loss.  Typically computed
+        as inverse-frequency weights normalised to mean 1.  When *None*,
+        all relation types are treated equally (original behaviour).
     """
 
     def __init__(
@@ -219,8 +261,10 @@ class RGCNTrainer:
         lr_patience: int = 10,
         lr_factor: float = 0.5,
         device: str = "auto",
+        graph_sample_size: int = 200_000,
         checkpoint_dir: Optional[str | Path] = None,
         verbose: bool = True,
+        relation_weights: Optional[Tensor] = None,
     ):
         if device == "auto":
             device = _which_device()
@@ -229,6 +273,7 @@ class RGCNTrainer:
         self.model = model.to(self.device)
         self.splits = splits
         self.n_epochs = n_epochs
+        self.graph_sample_size = graph_sample_size
         self.batch_size = batch_size
         self.neg_ratio = neg_ratio
         self.eval_batch_size = eval_batch_size
@@ -250,6 +295,12 @@ class RGCNTrainer:
             factor=lr_factor,
             patience=lr_patience,
         )
+
+        # Pre-move relation weights to device if provided
+        if relation_weights is not None:
+            self.relation_weights: Optional[Tensor] = relation_weights.to(self.device)
+        else:
+            self.relation_weights = None
 
         self._best_mrr: float = -1.0
         self._best_state: Optional[dict] = None
@@ -279,6 +330,9 @@ class RGCNTrainer:
         self.model.train()
         epoch_losses: list[float] = []
 
+        n_edges = self.edge_index.size(1)
+        sample_size = min(n_edges, self.graph_sample_size)
+
         for batch in loader:
             pos = batch["positives"].to(self.device)  # (B, 3)
             neg = batch["negatives"].to(self.device)  # (B*neg_ratio, 3)
@@ -286,13 +340,27 @@ class RGCNTrainer:
             if len(neg) == 0:
                 continue
 
+            # Subsample edges each batch to bound backward-pass memory.
+            # Full-graph message passing over 12M+ edges stores activations
+            # proportional to n_edges * hidden_dim for every layer — too large
+            # for MPS unified memory. A random subgraph gives equivalent
+            # gradient signal and acts as mild regularisation.
+            perm = torch.randperm(n_edges, device=self.device)[:sample_size]
+            edge_idx = self.edge_index[:, perm]
+            edge_typ = self.edge_type[perm]
+
             pos_scores, neg_scores = self.model(
-                self.edge_index, self.edge_type,
+                edge_idx, edge_typ,
                 pos[:, 0], pos[:, 1], pos[:, 2],
                 neg[:, 0], neg[:, 1], neg[:, 2],
             )
 
-            loss = _bce_loss(pos_scores, neg_scores)
+            loss = _bce_loss(
+                pos_scores, neg_scores,
+                pos_rel_idx=pos[:, 1],
+                neg_rel_idx=neg[:, 1],
+                relation_weights=self.relation_weights,
+            )
             self.optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -444,38 +512,57 @@ class RGCNTrainer:
         }
 
     def save_embeddings(self, out_path: str | Path) -> None:
-        """Save entity/relation embeddings alongside the entity ID map.
+        """Save entity/relation embeddings and ID maps.
 
-        The saved dict contains:
-        - ``entity_embeddings``: ``(num_entities, emb_dim)``
-        - ``relation_embeddings``: ``(num_relations, emb_dim)``
-        - ``entity_to_idx``: ``{canonical_id: int}``
-        - ``idx_to_entity``: ``{int: canonical_id}``
-        - ``relation_to_idx``: ``{relation_type: int}``
-        - ``idx_to_relation``: ``{int: relation_type}``
+        Writes two files:
+
+        ``<out_path>`` (e.g. ``entity_embeddings.pt``)
+            Tensors only — safe to load with ``weights_only=True``:
+
+            - ``entity_embeddings``: ``(num_entities, emb_dim)``
+            - ``relation_embeddings``: ``(num_relations, emb_dim)``
+
+        ``<out_path>.meta.json``
+            ID maps (not serialisable as tensors):
+
+            - ``entity_to_idx``: ``{canonical_id: int}``
+            - ``idx_to_entity``: ``{str(int): canonical_id}``
+            - ``relation_to_idx``: ``{relation_type: int}``
+            - ``idx_to_relation``: ``{str(int): relation_type}``
 
         Parameters
         ----------
         out_path:
-            Output path for the ``.pt`` checkpoint file.
+            Output path for the ``.pt`` file.  The ``.meta.json`` sidecar
+            is written to the same directory with the same stem.
         """
+        import json as _json
+
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         emb_dict = self.extract_embeddings()
         kg = self.splits.kg
-        payload = {
-            **emb_dict,
+
+        # Tensors only → weights_only=True compatible
+        torch.save(emb_dict, out_path)
+
+        # ID maps → JSON sidecar (keys must be strings in JSON)
+        meta_path = out_path.with_suffix("").with_suffix(".pt.meta.json")
+        meta = {
             "entity_to_idx":   kg.entity_to_idx,
-            "idx_to_entity":   kg.idx_to_entity,
+            "idx_to_entity":   {str(k): v for k, v in kg.idx_to_entity.items()},
             "relation_to_idx": kg.relation_to_idx,
-            "idx_to_relation": kg.idx_to_relation,
+            "idx_to_relation": {str(k): v for k, v in kg.idx_to_relation.items()},
         }
-        torch.save(payload, out_path)
+        with open(meta_path, "w") as fh:
+            _json.dump(meta, fh)
+
         if self.verbose:
             print(f"Embeddings saved to {out_path}")
+            print(f"ID maps saved to    {meta_path}")
             print(
-                f"  entity_embeddings : {emb_dict['entity_embeddings'].shape}\n"
+                f"  entity_embeddings  : {emb_dict['entity_embeddings'].shape}\n"
                 f"  relation_embeddings: {emb_dict['relation_embeddings'].shape}"
             )
 

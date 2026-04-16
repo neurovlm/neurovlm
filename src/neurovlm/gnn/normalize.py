@@ -136,6 +136,13 @@ def build_mesh_synonym_lookup(
 # CogAtlas fetcher — HTML scraping (JSON endpoint unreliable as of 2026)
 # ---------------------------------------------------------------------------
 
+# Mapping from CogAtlas relationship labels to unified KG relation types.
+# Only relationships with a clear mapping are kept; others are dropped.
+_COGAT_REL_MAP: dict[str, str] = {
+    "kind_of": "narrower_term_of",
+}
+
+
 def fetch_cogatlas_concepts(
     out_path: Optional[str | Path] = None,
     delay: float = 0.3,
@@ -195,6 +202,95 @@ def fetch_cogatlas_concepts(
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         df.to_parquet(out_path, index=False)
         logger.info("Saved CogAtlas concepts to %s", out_path)
+
+    return df
+
+
+def fetch_cogatlas_relations(
+    cogatlas_df: pd.DataFrame,
+    out_path: Optional[str | Path] = None,
+    delay: float = 0.5,
+) -> pd.DataFrame:
+    """Scrape 'is a kind of' relationships from individual CogAtlas concept pages.
+
+    For each concept in *cogatlas_df*, fetches
+    ``https://www.cognitiveatlas.org/concept/id/{trm_id}`` and parses the
+    "Asserted relationships" section.  Only ``kind_of`` relationships are
+    extracted (the others are almost universally blank on the site).
+
+    Parameters
+    ----------
+    cogatlas_df:
+        DataFrame with columns ``trm_id`` and ``name``, as returned by
+        :func:`fetch_cogatlas_concepts`.
+    out_path:
+        If provided, save/load from this parquet path to avoid re-fetching.
+    delay:
+        Inter-request delay in seconds (default 0.5 s).
+
+    Returns
+    -------
+    pd.DataFrame with columns ``child``, ``parent``, ``relationship``.
+        ``child`` is a kind of ``parent``.
+        ``relationship`` is always ``"kind_of"`` (the only populated relation).
+    """
+    if out_path is not None and Path(out_path).exists():
+        logger.info("Loading CogAtlas relations from %s", out_path)
+        return pd.read_parquet(out_path)
+
+    base = "https://www.cognitiveatlas.org"
+    # Build trm_id → name lookup for matching scraped concept names to known entries
+    id_to_name = dict(zip(cogatlas_df["trm_id"], cogatlas_df["name"]))
+    name_to_id = {v: k for k, v in id_to_name.items()}
+
+    rows: list[dict] = []
+
+    for _, row in tqdm(cogatlas_df.iterrows(), total=len(cogatlas_df), desc="CogAtlas relations"):
+        trm_id = str(row["trm_id"])
+        child_name = str(row["name"])
+        url = f"{base}/concept/id/{trm_id}"
+
+        try:
+            r = requests.get(url, timeout=20)
+            r.raise_for_status()
+        except requests.RequestException as exc:
+            logger.warning("Failed to fetch %s: %s — skipping", url, exc)
+            time.sleep(delay * 5)
+            continue
+
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # The page contains a section like:
+        # "<concept> is a kind of <link to parent concept>"
+        # We look for anchor tags whose href matches the /concept/id/ pattern
+        # inside a block that contains the text "is a kind of".
+        for tag in soup.find_all(string=lambda t: t and "is a kind of" in t):
+            parent_elem = tag.parent if tag.parent else None
+            if parent_elem is None:
+                continue
+            # Look for concept links in the same container or siblings
+            container = parent_elem.find_parent() or parent_elem
+            for link in container.find_all("a", href=lambda h: h and "/concept/id/" in h):
+                parent_name = link.get_text(strip=True)
+                if parent_name and parent_name != child_name and parent_name in name_to_id:
+                    rows.append({
+                        "child": child_name,
+                        "parent": parent_name,
+                        "relationship": "kind_of",
+                    })
+
+        time.sleep(delay)
+
+    df = pd.DataFrame(rows).drop_duplicates().reset_index(drop=True)
+    logger.info(
+        "CogAtlas relations: %d kind_of triples across %d concepts",
+        len(df), df["child"].nunique() if len(df) else 0,
+    )
+
+    if out_path is not None:
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(out_path, index=False)
+        logger.info("Saved CogAtlas relations to %s", out_path)
 
     return df
 
@@ -288,7 +384,14 @@ def build_cogatlas_kg(
 
     edge_rows: list[dict] = []
     skipped = 0
+    skipped_unmapped_rel = 0
     for _, erow in cogatlas_edges_df.iterrows():
+        # Map CogAtlas relationship label to unified KG relation type; skip if unknown
+        rel_type = _COGAT_REL_MAP.get(str(erow.get("relationship", "")))
+        if rel_type is None:
+            skipped_unmapped_rel += 1
+            continue
+
         child_trm = name_to_trm.get(str(erow["child"]))
         parent_trm = name_to_trm.get(str(erow["parent"]))
         if child_trm is None or parent_trm is None:
@@ -303,7 +406,7 @@ def build_cogatlas_kg(
             continue  # self-loop after merging
         edge_rows.append({
             "subject_id": child_canon,
-            "relation_type": "is_a",
+            "relation_type": rel_type,
             "object_id": parent_canon,
             "source": "cogatlas",
             "weight": 1.0,
@@ -313,8 +416,9 @@ def build_cogatlas_kg(
         subset=["subject_id", "relation_type", "object_id"]
     )
     logger.info(
-        "CogAtlas edges: %d is_a triples (%d skipped — name not in concept list)",
-        len(cogat_edges), skipped,
+        "CogAtlas edges: %d triples kept (%d skipped — name not in concept list, "
+        "%d skipped — unmapped relation type)",
+        len(cogat_edges), skipped, skipped_unmapped_rel,
     )
     return cogat_nodes, cogat_edges, cogat_to_canonical
 

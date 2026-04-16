@@ -4,10 +4,11 @@ Phase 3, Step 7: loads the unified KG (nodes + edges parquets), assigns
 contiguous entity and relation-type integers, and provides a PyTorch Dataset
 that yields positive/negative triple batches for link prediction training.
 
-Relation types (6 total)
+Relation types (8 total)
 -------------------------
 co_occurs_with, narrower_term_of, associated_with_disorder,
-implicated_in, co_activates_with, expressed_in
+implicated_in, co_activates_with, expressed_in,
+treated_by, used_in
 
 Typical usage
 -------------
