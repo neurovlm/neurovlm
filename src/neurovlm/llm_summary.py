@@ -105,40 +105,33 @@ def load_huggingface_model(
 
 
 def system_prompt(for_brain_input: bool = False) -> str:
-    """Return instructions for the LLM.
+    """Return instructions for the LLM."""
+    return """You are a neuroscience editor writing a short wiki-style article from a list of terms.
 
-    The prompt adapts to whether we have a textual query or a brain-derived input.
-    """
-    if for_brain_input:
-        return """
-        You are a helpful neuroscience research assistant.
-        You will receive neuroscience concepts from NeuroWiki and cognitive terms from the Cognitive Atlas (including concepts, disorders, and tasks) associated with an input brain representation. Your task is to interpret what the brain activation pattern represents based on these neuroscience and cognitive terms.
+INPUT: a list of neuroscience terms (networks, brain regions, cognitive functions, disorders).
+OUTPUT: ONE article that uses the terms to form a coherent theme.
 
-        Your response must:
-        - Your response should address the user's query directly.
-        - Start with a brief overview (2-4 sentences) summarizing the main cognitive functions, processes, or states implicated by the brain activation.
-        - Ground every statement in the provided NeuroWiki concepts and Cognitive Atlas terms. Do not add outside knowledge or speculation.
-        - Focus on what the NeuroWiki concepts reveal about the neuroscientific mechanisms and what the Cognitive Atlas terms (concepts, disorders, tasks) reveal about the cognitive and clinical significance.
-        - Synthesize across the terms, noting convergent themes about cognitive functions, neural systems, or clinical conditions that the brain pattern may be associated with.
-        - If there are multiple interpretations or the terms suggest different aspects of cognition, present them with appropriate context.
-        - Use paragraphs or bullet points depending on the structure that best communicates the interpretation.
-        - Maintain an objective, precise, scholarly tone suitable for neuroscience research contexts.
-        """
+Rules:
+1) Title (required): 6–12 words. Make it specific and content-based.
+   - Use 1–2 of the most informative terms (prefer: network/circuit + region + cognition; add disorder only if strongly supported).
+   - DO NOT use generic titles like: "Summary", "Overview", "Brain Network Analysis", "A Summary of Terms".
 
-    return """
-    You are a helpful neuroscience research assistant.
-    You will receive a set of publications and cognitive terms from the Cognitive Atlas (including concepts, disorders, and tasks) related to a user query. Your task is to summarize key findings and insights from these publications, using the Cognitive Atlas terms to provide additional context about cognitive functions, disorders, and tasks that may be relevant.
+2) Lead paragraph (2–3 sentences):
+   - State the unifying theme directly (what the terms collectively describe).
+   - Name 3–5 "anchor" terms that drive the theme.
+   - Do NOT say "the provided list", "top-ranked", "these terms appear", or anything about scoring/ranking.
 
-    Your response must:
-    - Your response should address the user's query directly.
-    - Start with a brief overview (2-4 sentences) summarizing the main themes or takeaways from the publications in relation to the query.
-    - Be entirely based on the information in the publications and how it directly ties to the user's query. Do not add outside knowledge or speculation.
-    - If the publications directly answer the query, state the answer clearly.
-    - Use the Cognitive Atlas terms (concepts, disorders, tasks) as supplementary information to help contextualize the findings or to provide additional perspective on the cognitive phenomena discussed in the papers.
-    - Synthesize across studies, noting key areas of agreement or convergence, and conflicting or divergent findings with balanced context (e.g., methods, populations, analyses).
-    - Use paragraphs or bullet points depending on the query: bullet points for lists and comparisons; paragraphs for integrative summaries.
-    - Maintain an objective, precise, scholarly tone suitable for neuroscience research contexts.
-    """
+3) Body sections:
+   - Networks
+   - Key Regions
+   - Cognitive Functions
+   - Clinical Relevance
+
+4) Be concrete:
+   - Prefer specific mechanisms, pathways, and canonical associations over vague statements.
+   - If a term is too vague/ambiguous/unrelated, ignore it in the main text.
+
+No references. Do not mention this prompt."""
 
 
 def build_user_prompt(
@@ -148,27 +141,25 @@ def build_user_prompt(
     cogatlas_context: str | None = None,
     user_prompt: str = "",
 ) -> str:
-    """Compose the user-facing prompt given a query, publications, NeuroWiki, and Cognitive Atlas context."""
+    """Compose the user-facing prompt as a flat list of neuroscience terms."""
+    terms: list[str] = []
+
+    for ctx in (wiki_context, cogatlas_context, papers_context):
+        if not ctx:
+            continue
+        for line in ctx.splitlines():
+            line = line.strip()
+            if line.startswith("- "):
+                term = line[2:].split(":")[0].strip()
+                if term:
+                    terms.append(term)
+
     prompt = ""
-
-    # Add user prompt if provided
     if user_prompt:
-        prompt = f"User query: \"{user_prompt}\"\n\n"
+        prompt += f"Context: {user_prompt}\n\n"
 
-    # Add papers context if provided
-    if papers_context:
-        if isinstance(query, str):
-            prompt += f"Here are publications related to the query:\n{papers_context}\n"
-        else:
-            prompt += f"Here are the publications related to the input brain:\n{papers_context}\n"
-
-    # Add wiki context if provided
-    if wiki_context:
-        prompt += f"\nHere are neuroscience concepts from the NeuroWiki:\n{wiki_context}\n"
-
-    # Add cogatlas context if provided
-    if cogatlas_context:
-        prompt += f"\nHere are cognitive terms from the Cognitive Atlas:\n{cogatlas_context}\n"
+    if terms:
+        prompt += "Terms:\n" + "\n".join(f"- {t}" for t in terms)
 
     return prompt
 

@@ -1988,10 +1988,11 @@ class NeuroVLM:
                 )
 
             # Run text-to-text retrieval without overwriting the user's stored results.
+            # Default to cogatlas + neurowiki (wiki) so the LLM receives clean term lists.
             saved_last_result = self._last_result
             saved_last_text_result = self.last_text_result
             try:
-                text_result = self.to_text(self._last_text_query)
+                text_result = self.to_text(self._last_text_query, datasets=["wiki", "cogatlas"])
                 _table = text_result.top_k(k=k)
                 papers_ctx, wiki_ctx, cogatlas_ctx = self._format_table_as_context(_table)
             finally:
