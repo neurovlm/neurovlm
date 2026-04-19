@@ -20,7 +20,7 @@ TEXT_EMBED_DIM = 768
 LATENT_DIM = 384
 BRAIN_FLAT_DIM = 28542
 
-DEFAULT_TEXT_DATASETS = ("pubmed", "wiki", "cogatlas", "networks")
+DEFAULT_TEXT_DATASETS = ("wiki", "cogatlas", "ngrams")
 DATASET_ALIASES = {
     "publications": "pubmed",
     "neurowiki": "wiki",
@@ -31,6 +31,9 @@ DATASET_ALIASES = {
     "networks": "networks",
     "networks_canonical": "networks",
     "canonical_networks": "networks",
+    "ngram": "ngrams",
+    "n_grams": "ngrams",
+    "n-grams": "ngrams",
 }
 DATASET_ID_COLUMNS = {
     "pubmed": "pmid",
@@ -39,6 +42,7 @@ DATASET_ID_COLUMNS = {
     "cogatlas_task": "term",
     "cogatlas_disorder": "term",
     "networks": "title",
+    "ngrams": "term",
 }
 
 TEXT_DATASET_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
@@ -47,6 +51,7 @@ TEXT_DATASET_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
     "cogatlas": ("cogatlas",),
     "cogatlas_task": ("cogatlas_task",),
     "cogatlas_disorder": ("cogatlas_disorder",),
+    "ngrams": ("ngrams",),
 }
 TEXT_LATENT_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
     "pubmed": ("pubmed_text", "publications", "pubmed"),
@@ -54,6 +59,7 @@ TEXT_LATENT_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
     "cogatlas": ("cogatlas",),
     "cogatlas_task": ("cogatlas_task",),
     "cogatlas_disorder": ("cogatlas_disorder",),
+    "ngrams": ("ngrams",),
 }
 
 
@@ -1112,6 +1118,18 @@ class NeuroVLM:
                     latent = self._as_2d_tensor(latent).to(self.device)
                     table = self._load_dataset_compat("networks_canonical").copy()
                     metadata = self._build_networks_canonical_metadata(table, n_rows=int(latent.shape[0]))
+                elif dataset == "ngrams":
+                    # ngram_embeddings.pt contains already-projected 384-dim embeddings
+                    # (not raw 768-dim SPECTER output), so we must bypass proj_head_text_infonce
+                    from neurovlm.retrieval_resources import _load_latent_ngram, _load_ngram
+                    latent = self._as_2d_tensor(_load_latent_ngram()).to(self.device)
+                    labels = _load_ngram()
+                    metadata = pd.DataFrame({"title": labels, "description": [""] * len(labels)})
+                    normalized = _l2_normalize(latent)
+                    self._text_raw_embeddings[dataset] = normalized
+                    self._text_shared_embeddings[dataset] = normalized
+                    self._text_metadata[dataset] = metadata
+                    continue
                 else:
                     latent, ids = self._load_text_latent_with_ids(dataset)
                     latent = self._as_2d_tensor(latent).to(self.device)
@@ -1992,7 +2010,7 @@ class NeuroVLM:
             saved_last_result = self._last_result
             saved_last_text_result = self.last_text_result
             try:
-                text_result = self.to_text(self._last_text_query, datasets=["wiki", "cogatlas"])
+                text_result = self.to_text(self._last_text_query, datasets=["wiki", "cogatlas", "ngrams"])
                 _table = text_result.top_k(k=k)
                 papers_ctx, wiki_ctx, cogatlas_ctx = self._format_table_as_context(_table)
             finally:
@@ -2052,7 +2070,7 @@ class NeuroVLM:
                 # NeuroWiki concepts and brain-atlas networks are both
                 # neuroscience reference material.
                 wiki_lines.append(entry)
-            elif dataset in ("cogatlas", "cogatlas_task", "cogatlas_disorder"):
+            elif dataset in ("cogatlas", "cogatlas_task", "cogatlas_disorder", "ngrams"):
                 cogatlas_lines.append(entry)
             else:
                 papers_lines.append(entry)

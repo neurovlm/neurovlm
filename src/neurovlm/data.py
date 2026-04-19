@@ -43,7 +43,9 @@ from neurovlm.retrieval_resources import (
     _proj_head_image_infonce,
     _proj_head_text_mse,
     _proj_head_text_infonce,
-    _load_specter
+    _load_specter,
+    _load_latent_ngram,
+    _load_ngram,
 )
 
 
@@ -346,10 +348,14 @@ def load_dataset(name: str):
             return _load_images_neurovault_dataframe()
         case "neurovault_images":
             return _load_neurovault_images()
+        case "ngrams" | "ngram" | "n_grams":
+            labels = _load_ngram()
+            return pd.DataFrame({"term": labels})
         case _:
-            valid_names = ["pubmed_text", "pubmed_coordinates","pubmed_images", "wiki", "neurowiki",
+            valid_names = ["pubmed_text", "pubmed_coordinates", "pubmed_images", "wiki", "neurowiki",
                            "neurowiki_graph", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks",
-                           "networks_canonical", "neurovault_text", "neurovault_images", "neurovault_meta"]
+                           "networks_canonical", "neurovault_text", "neurovault_images", "neurovault_meta",
+                           "ngrams"]
             raise ValueError(f"{name} not in {valid_names}")
 
 
@@ -399,10 +405,12 @@ def load_latent(name: str):
             payload = _load_latent_neurovault_images()
         case "neurovault_text":
             payload = _load_latent_neurovault_text()
+        case "ngrams" | "ngram" | "n_grams":
+            payload = _load_latent_ngram()
         case _:
             valid_names = ["pubmed_text", "pubmed_images", "wiki", "neurowiki", "cogatlas",
                            "cogatlas_task", "cogatlas_disorder", "networks_text",
-                           "networks_neuro", "neurovault_images", "neurovault_text"]
+                           "networks_neuro", "neurovault_images", "neurovault_text", "ngrams"]
             raise ValueError(f"{name} not in {valid_names}")
     return _without_grad(payload)
 

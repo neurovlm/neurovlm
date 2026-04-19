@@ -56,6 +56,8 @@ __all__ = [
     "_load_latent_neurovault_text",
     "_load_neurovault_images",
     "_load_pubmed_images",
+    "_load_latent_ngram",
+    "_load_ngram",
 ]
 
 
