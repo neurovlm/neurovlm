@@ -265,6 +265,9 @@ class RGCNTrainer:
         checkpoint_dir: Optional[str | Path] = None,
         verbose: bool = True,
         relation_weights: Optional[Tensor] = None,
+        print_interval: int = 1,
+        resume_checkpoint_interval: int = 0,
+        resume_from: Optional[str | Path] = None,
     ):
         if device == "auto":
             device = _which_device()
@@ -301,6 +304,10 @@ class RGCNTrainer:
             self.relation_weights: Optional[Tensor] = relation_weights.to(self.device)
         else:
             self.relation_weights = None
+
+        self.print_interval = print_interval
+        self.resume_checkpoint_interval = resume_checkpoint_interval
+        self._resume_from = Path(resume_from) if resume_from else None
 
         self._best_mrr: float = -1.0
         self._best_state: Optional[dict] = None
@@ -380,27 +387,67 @@ class RGCNTrainer:
 
     def fit(self) -> None:
         """Run the training loop with early stopping on validation MRR."""
+        import sys
+
         loader = self._make_train_loader()
         no_improve = 0
+        start_epoch = 1
+
+        # ── Resume from a previous session ────────────────────────────────────
+        if self._resume_from is not None and self._resume_from.exists():
+            ckpt = torch.load(self._resume_from, map_location=self.device, weights_only=False)
+            self.model.load_state_dict(ckpt["model_state"])
+            self.optimizer.load_state_dict(ckpt["optimizer_state"])
+            self.scheduler.load_state_dict(ckpt["scheduler_state"])
+            self.history    = ckpt["history"]
+            self._best_mrr  = ckpt["best_mrr"]
+            self._best_state = ckpt.get("best_state")
+            no_improve      = ckpt["no_improve"]
+            start_epoch     = ckpt["epoch"] + 1
+            if self.verbose:
+                print(
+                    f"Resumed from {self._resume_from} at epoch {ckpt['epoch']} "
+                    f"(best MRR={self._best_mrr:.4f})",
+                    flush=True,
+                )
+        elif self._resume_from is not None:
+            if self.verbose:
+                print(f"Resume checkpoint not found at {self._resume_from} — starting fresh.", flush=True)
 
         if self.verbose:
             print(
-                f"R-GCN training: {self.n_epochs} epochs, "
+                f"R-GCN training: epochs {start_epoch}–{self.n_epochs}, "
                 f"batch={self.batch_size}, neg_ratio={self.neg_ratio}, "
-                f"device={self.device}"
+                f"device={self.device}",
+                flush=True,
             )
             print(
                 f"  entities={self.splits.kg.num_entities:,}  "
                 f"relations={self.splits.kg.num_relations}  "
-                f"train_triples={len(self.splits.train_triples):,}"
+                f"train_triples={len(self.splits.train_triples):,}",
+                flush=True,
             )
 
-        for epoch in range(1, self.n_epochs + 1):
+        for epoch in range(start_epoch, self.n_epochs + 1):
             t0 = time.time()
             mean_loss = self._train_epoch(loader)
             self.history["train_loss"].append(mean_loss)
+            elapsed = time.time() - t0
 
-            # Validation
+            # ── Per-epoch loss print (no val eval) ────────────────────────────
+            if self.verbose and self.print_interval > 0 and epoch % self.print_interval == 0:
+                if epoch % self.val_interval != 0:
+                    lr_now = self.optimizer.param_groups[0]["lr"]
+                    print(
+                        f"Epoch {epoch:4d}/{self.n_epochs} | "
+                        f"loss={mean_loss:.4f} | "
+                        f"lr={lr_now:.2e} | "
+                        f"{elapsed:.1f}s",
+                        flush=True,
+                    )
+                    sys.stdout.flush()
+
+            # ── Validation ────────────────────────────────────────────────────
             if epoch % self.val_interval == 0:
                 entity_emb = self._get_entity_emb()
                 metrics = evaluate_link_prediction(
@@ -421,7 +468,6 @@ class RGCNTrainer:
                 lr_now = self.optimizer.param_groups[0]["lr"]
 
                 if self.verbose:
-                    elapsed = time.time() - t0
                     print(
                         f"Epoch {epoch:4d}/{self.n_epochs} | "
                         f"loss={mean_loss:.4f} | "
@@ -430,8 +476,10 @@ class RGCNTrainer:
                         f"H@3={metrics['hits@3']:.4f} | "
                         f"H@10={metrics['hits@10']:.4f} | "
                         f"lr={lr_now:.2e} | "
-                        f"{elapsed:.1f}s"
+                        f"{elapsed:.1f}s",
+                        flush=True,
                     )
+                    sys.stdout.flush()
 
                 if val_mrr > self._best_mrr:
                     self._best_mrr = val_mrr
@@ -443,15 +491,23 @@ class RGCNTrainer:
                     no_improve += self.val_interval
                     if no_improve >= self.patience:
                         if self.verbose:
-                            print(f"Early stopping at epoch {epoch} (no improvement for {self.patience} epochs).")
+                            print(
+                                f"Early stopping at epoch {epoch} "
+                                f"(no improvement for {self.patience} epochs).",
+                                flush=True,
+                            )
                         break
 
-            elif self.verbose and epoch % max(1, self.n_epochs // 20) == 0:
-                lr_now = self.optimizer.param_groups[0]["lr"]
-                print(f"Epoch {epoch:4d}/{self.n_epochs} | loss={mean_loss:.4f} | lr={lr_now:.2e}")
+            # ── Periodic resume checkpoint ────────────────────────────────────
+            if (
+                self.resume_checkpoint_interval > 0
+                and self.checkpoint_dir is not None
+                and epoch % self.resume_checkpoint_interval == 0
+            ):
+                self._save_resume_checkpoint(epoch, no_improve)
 
         if self.verbose:
-            print(f"Training complete. Best val MRR={self._best_mrr:.4f}")
+            print(f"Training complete. Best val MRR={self._best_mrr:.4f}", flush=True)
 
     # ------------------------------------------------------------------
     # Evaluation on test set
@@ -642,7 +698,30 @@ class RGCNTrainer:
             path,
         )
         if self.verbose:
-            print(f"  → checkpoint saved to {path}")
+            print(f"  → best checkpoint saved to {path}", flush=True)
+
+    def _save_resume_checkpoint(self, epoch: int, no_improve: int) -> None:
+        """Save full trainer state so training can be resumed after a crash."""
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        path = self.checkpoint_dir / "resume_rgcn.pt"
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state": self.model.state_dict(),
+                "best_state": self._best_state,
+                "best_mrr": self._best_mrr,
+                "optimizer_state": self.optimizer.state_dict(),
+                "scheduler_state": self.scheduler.state_dict(),
+                "history": self.history,
+                "no_improve": no_improve,
+                "num_entities": self.model.num_entities,
+                "num_relations": self.model.num_relations,
+                "emb_dim": self.model.emb_dim,
+            },
+            path,
+        )
+        if self.verbose:
+            print(f"  → resume checkpoint saved to {path} (epoch {epoch})", flush=True)
 
     def restore_best(self) -> None:
         """Load the best-validation checkpoint into the model."""
