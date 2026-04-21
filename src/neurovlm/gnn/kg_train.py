@@ -110,83 +110,69 @@ def evaluate_link_prediction(
     all_triple_set: frozenset,
     batch_size: int = 512,
     device: torch.device | str = "cpu",
+    filtered: bool = True,
+    sr_to_objects: Optional[dict] = None,
 ) -> dict[str, float]:
-    """Compute MRR and Hits@k using the filtered evaluation protocol.
-
-    For each test triple ``(s, r, o)``, all entities are scored as candidate
-    objects.  Known true triples other than ``(s, r, o)`` itself are masked out
-    before computing the rank of the true object.
+    """Compute MRR and Hits@k. Fully vectorised — no per-triple Python loops.
 
     Parameters
     ----------
-    model:
-        Trained :class:`RGCNLinkPredictor`.
-    entity_emb:
-        Contextual embeddings from ``model.encode()``, shape ``(N_e, d)``.
-    eval_triples:
-        Triples to evaluate, shape ``(N, 3)``.
-    all_triple_set:
-        Full set of KG triples used for filtering.
-    batch_size:
-        Number of triples evaluated per GPU batch.
-    device:
-        Evaluation device.
-
-    Returns
-    -------
-    dict with keys ``mrr``, ``hits@1``, ``hits@3``, ``hits@10``.
+    filtered:
+        When True (default for test), mask known true objects before ranking.
+        Set False for fast validation during training (negligible accuracy loss).
+    sr_to_objects:
+        Pre-built ``(s, r) → set[o]`` lookup.  Pass the cached copy from
+        ``RGCNTrainer`` to avoid rebuilding it on every validation call.
     """
     model.eval()
-    entity_emb = entity_emb.to(device)
+    entity_emb   = entity_emb.to(device)
     eval_triples = eval_triples.to(device)
 
-    reciprocal_ranks: list[float] = []
-    hits: dict[int, list[float]] = {1: [], 3: [], 10: []}
+    # Build sr_to_objects only when needed and not already provided
+    if filtered and sr_to_objects is None:
+        sr_to_objects = {}
+        for triple in all_triple_set:
+            s, r, o = triple
+            key = (s, r)
+            if key not in sr_to_objects:
+                sr_to_objects[key] = set()
+            sr_to_objects[key].add(o)
 
-    # Build a lookup: (s, r) → set of known true objects (for filtering)
-    # Only build over the eval set's (s, r) pairs for efficiency
-    sr_to_objects: dict[tuple[int, int], set[int]] = {}
-    for triple in all_triple_set:
-        s, r, o = triple
-        key = (s, r)
-        if key not in sr_to_objects:
-            sr_to_objects[key] = set()
-        sr_to_objects[key].add(o)
+    all_rr:   list[Tensor] = []
+    all_hits: dict[int, list[Tensor]] = {1: [], 3: [], 10: []}
 
     for start in range(0, len(eval_triples), batch_size):
-        batch = eval_triples[start : start + batch_size]
+        batch   = eval_triples[start : start + batch_size]   # (B, 3)
         s_batch = batch[:, 0]
         r_batch = batch[:, 1]
         o_batch = batch[:, 2]
+        B       = len(batch)
 
-        # Score all entities as objects: (B, N_e)
-        all_scores = model.score_all_objects(entity_emb, s_batch, r_batch)
+        # Score all entities as objects: (B, N_e) — stays on GPU
+        scores = model.score_all_objects(entity_emb, s_batch, r_batch)
 
-        for i in range(len(batch)):
-            s = int(s_batch[i])
-            r = int(r_batch[i])
-            o_true = int(o_batch[i])
+        if filtered:
+            # Mask known true objects per row (Python loop over batch, not triples)
+            for i in range(B):
+                s_i, r_i, o_i = int(s_batch[i]), int(r_batch[i]), int(o_batch[i])
+                for o_k in sr_to_objects.get((s_i, r_i), ()):
+                    if o_k != o_i:
+                        scores[i, o_k] = float("-inf")
 
-            scores = all_scores[i].clone()  # (N_e,)
+        # Vectorised rank: (B,) — single GPU op, no .item() per triple
+        true_scores = scores[torch.arange(B, device=device), o_batch]  # (B,)
+        ranks = (scores > true_scores.unsqueeze(1)).sum(dim=1) + 1      # (B,)
 
-            # Filtered: mask known true objects (except the query triple itself)
-            true_objects = sr_to_objects.get((s, r), set())
-            for o_known in true_objects:
-                if o_known != o_true:
-                    scores[o_known] = float("-inf")
+        all_rr.append(1.0 / ranks.float())
+        for k in (1, 3, 10):
+            all_hits[k].append((ranks <= k).float())
 
-            # Rank of the true object (1-indexed, lower is better)
-            rank = int((scores > scores[o_true]).sum().item()) + 1
-
-            reciprocal_ranks.append(1.0 / rank)
-            for k in hits:
-                hits[k].append(1.0 if rank <= k else 0.0)
-
+    rr = torch.cat(all_rr)
     return {
-        "mrr":     float(np.mean(reciprocal_ranks)),
-        "hits@1":  float(np.mean(hits[1])),
-        "hits@3":  float(np.mean(hits[3])),
-        "hits@10": float(np.mean(hits[10])),
+        "mrr":     float(rr.mean()),
+        "hits@1":  float(torch.cat(all_hits[1]).mean()),
+        "hits@3":  float(torch.cat(all_hits[3]).mean()),
+        "hits@10": float(torch.cat(all_hits[10]).mean()),
     }
 
 
@@ -310,6 +296,9 @@ class RGCNTrainer:
         self.resume_checkpoint_interval = resume_checkpoint_interval
         self._resume_from = Path(resume_from) if resume_from else None
 
+        # Cache sr_to_objects once so validation never rebuilds it from 15M tuples
+        self._sr_to_objects: Optional[dict] = None
+
         self._best_mrr: float = -1.0
         self._best_state: Optional[dict] = None
         self.history: dict[str, list] = {
@@ -375,9 +364,15 @@ class RGCNTrainer:
         return float(np.mean(epoch_losses)) if epoch_losses else float("nan")
 
     @torch.no_grad()
-    def _get_entity_emb(self) -> Tensor:
+    def _get_entity_emb(self, sample_size: Optional[int] = None) -> Tensor:
+        """Encode entities. Uses a 1M-edge sample by default — full graph for final eval."""
         self.model.eval()
-        return self.model.encode(self.edge_index, self.edge_type)
+        n_edges = self.edge_index.size(1)
+        cap = sample_size if sample_size is not None else min(n_edges, 1_000_000)
+        if cap >= n_edges:
+            return self.model.encode(self.edge_index, self.edge_type)
+        perm = torch.randint(n_edges, (cap,), device=self.device)
+        return self.model.encode(self.edge_index[:, perm], self.edge_type[perm])
 
     # ------------------------------------------------------------------
     # Training loop
@@ -449,7 +444,7 @@ class RGCNTrainer:
 
             # ── Validation ────────────────────────────────────────────────────
             if epoch % self.val_interval == 0:
-                entity_emb = self._get_entity_emb()
+                entity_emb = self._get_entity_emb()   # 1M-edge sample, fast
                 metrics = evaluate_link_prediction(
                     self.model,
                     entity_emb,
@@ -457,6 +452,8 @@ class RGCNTrainer:
                     self.splits.kg.triple_set,
                     batch_size=self.eval_batch_size,
                     device=self.device,
+                    filtered=False,        # unfiltered during training — fast
+                    sr_to_objects=None,    # not needed when filtered=False
                 )
                 val_mrr = metrics["mrr"]
                 self.history["val_mrr"].append(val_mrr)
@@ -523,7 +520,16 @@ class RGCNTrainer:
         if self._best_state is not None:
             self.model.load_state_dict(self._best_state)
 
-        entity_emb = self._get_entity_emb()
+        # Full graph encode + filtered eval for final test numbers
+        entity_emb = self._get_entity_emb(sample_size=int(1e9))
+        if self._sr_to_objects is None:
+            self._sr_to_objects = {}
+            for triple in self.splits.kg.triple_set:
+                s, r, o = triple
+                key = (s, r)
+                if key not in self._sr_to_objects:
+                    self._sr_to_objects[key] = set()
+                self._sr_to_objects[key].add(o)
         metrics = evaluate_link_prediction(
             self.model,
             entity_emb,
@@ -531,6 +537,8 @@ class RGCNTrainer:
             self.splits.kg.triple_set,
             batch_size=self.eval_batch_size,
             device=self.device,
+            filtered=True,
+            sr_to_objects=self._sr_to_objects,
         )
         if self.verbose:
             print(
