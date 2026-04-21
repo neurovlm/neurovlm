@@ -43,9 +43,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
-from torch.utils.data import DataLoader
-
-from .kg_data import KGSplits, kg_collate_fn
+from .kg_data import KGSplits
 from .rgcn import RGCNLinkPredictor
 
 
@@ -287,9 +285,10 @@ class RGCNTrainer:
         self.max_steps_per_epoch = max_steps_per_epoch
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
 
-        # Pre-move static graph tensors to device
-        self.edge_index = splits.train_edge_index.to(self.device)
-        self.edge_type  = splits.train_edge_type.to(self.device)
+        # Pre-move static tensors to device once
+        self.edge_index          = splits.train_edge_index.to(self.device)
+        self.edge_type           = splits.train_edge_type.to(self.device)
+        self.train_triples_dev   = splits.train_triples.to(self.device)
 
         self.optimizer = torch.optim.AdamW(
             model.parameters(), lr=lr, weight_decay=weight_decay
@@ -325,40 +324,35 @@ class RGCNTrainer:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _make_train_loader(self) -> DataLoader:
-        ds = self.splits.train_dataset(neg_ratio=self.neg_ratio)
-        return DataLoader(
-            ds,
-            batch_size=self.batch_size,
-            shuffle=True,
-            collate_fn=kg_collate_fn,
-            num_workers=0,
-        )
-
-    def _train_epoch(self, loader: DataLoader) -> float:
+    def _train_epoch(self) -> float:
+        """GPU-native training epoch: all sampling done on-device, no DataLoader."""
         self.model.train()
         epoch_losses: list[float] = []
 
-        n_edges = self.edge_index.size(1)
+        n_train   = self.train_triples_dev.size(0)
+        n_edges   = self.edge_index.size(1)
+        n_ent     = self.model.num_entities
+        n_neg     = self.batch_size * self.neg_ratio
         sample_size = min(n_edges, self.graph_sample_size)
+        steps = self.max_steps_per_epoch if self.max_steps_per_epoch > 0 else (n_train // self.batch_size)
 
-        for step, batch in enumerate(loader):
-            if self.max_steps_per_epoch > 0 and step >= self.max_steps_per_epoch:
-                break
-            pos = batch["positives"].to(self.device)  # (B, 3)
-            neg = batch["negatives"].to(self.device)  # (B*neg_ratio, 3)
+        for _ in range(steps):
+            # ── Sample positive triples on GPU ─────────────────────────────
+            pos_idx = torch.randint(n_train, (self.batch_size,), device=self.device)
+            pos = self.train_triples_dev[pos_idx]                     # (B, 3)
 
-            if len(neg) == 0:
-                continue
+            # ── Generate negatives on GPU (unfiltered) ─────────────────────
+            # False-negative rate ≈ 15M / (33k² × 8) < 0.2% — negligible.
+            neg_ent      = torch.randint(n_ent, (n_neg,), device=self.device)
+            corrupt_subj = torch.rand(n_neg, device=self.device) < 0.5
+            neg = pos.repeat_interleave(self.neg_ratio, dim=0).clone()  # (B*K, 3)
+            neg[:, 0] = torch.where(corrupt_subj,  neg_ent, neg[:, 0])
+            neg[:, 2] = torch.where(~corrupt_subj, neg_ent, neg[:, 2])
 
-            # Subsample edges each batch to bound backward-pass memory.
-            # Full-graph message passing over 12M+ edges stores activations
-            # proportional to n_edges * hidden_dim for every layer — too large
-            # for MPS unified memory. A random subgraph gives equivalent
-            # gradient signal and acts as mild regularisation.
-            perm = torch.randperm(n_edges, device=self.device)[:sample_size]
-            edge_idx = self.edge_index[:, perm]
-            edge_typ = self.edge_type[perm]
+            # ── Sample graph edges with randint (much faster than randperm) ─
+            edge_perm = torch.randint(n_edges, (sample_size,), device=self.device)
+            edge_idx  = self.edge_index[:, edge_perm]
+            edge_typ  = self.edge_type[edge_perm]
 
             pos_scores, neg_scores = self.model(
                 edge_idx, edge_typ,
@@ -393,7 +387,6 @@ class RGCNTrainer:
         """Run the training loop with early stopping on validation MRR."""
         import sys
 
-        loader = self._make_train_loader()
         no_improve = 0
         start_epoch = 1
 
@@ -437,7 +430,7 @@ class RGCNTrainer:
 
         for epoch in range(start_epoch, self.n_epochs + 1):
             t0 = time.time()
-            mean_loss = self._train_epoch(loader)
+            mean_loss = self._train_epoch()
             self.history["train_loss"].append(mean_loss)
             elapsed = time.time() - t0
 
