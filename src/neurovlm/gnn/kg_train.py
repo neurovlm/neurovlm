@@ -268,6 +268,7 @@ class RGCNTrainer:
         print_interval: int = 1,
         resume_checkpoint_interval: int = 0,
         resume_from: Optional[str | Path] = None,
+        max_steps_per_epoch: int = 0,
     ):
         if device == "auto":
             device = _which_device()
@@ -283,6 +284,7 @@ class RGCNTrainer:
         self.val_interval = val_interval
         self.patience = patience
         self.verbose = verbose
+        self.max_steps_per_epoch = max_steps_per_epoch
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
 
         # Pre-move static graph tensors to device
@@ -340,7 +342,9 @@ class RGCNTrainer:
         n_edges = self.edge_index.size(1)
         sample_size = min(n_edges, self.graph_sample_size)
 
-        for batch in loader:
+        for step, batch in enumerate(loader):
+            if self.max_steps_per_epoch > 0 and step >= self.max_steps_per_epoch:
+                break
             pos = batch["positives"].to(self.device)  # (B, 3)
             neg = batch["negatives"].to(self.device)  # (B*neg_ratio, 3)
 
@@ -415,9 +419,12 @@ class RGCNTrainer:
                 print(f"Resume checkpoint not found at {self._resume_from} — starting fresh.", flush=True)
 
         if self.verbose:
+            total_batches = len(self.splits.train_triples) // self.batch_size
+            steps = self.max_steps_per_epoch if self.max_steps_per_epoch > 0 else total_batches
             print(
                 f"R-GCN training: epochs {start_epoch}–{self.n_epochs}, "
                 f"batch={self.batch_size}, neg_ratio={self.neg_ratio}, "
+                f"steps/epoch={steps:,} (of {total_batches:,} possible), "
                 f"device={self.device}",
                 flush=True,
             )
