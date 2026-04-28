@@ -325,6 +325,11 @@ class RGCNTrainer:
         sample_size = min(n_edges, self.graph_sample_size)
         steps = self.max_steps_per_epoch if self.max_steps_per_epoch > 0 else (n_train // self.batch_size)
 
+        # BF16 autocast: A100 tensor cores run ~2× faster in BF16 vs FP32.
+        # BF16 has the same dynamic range as FP32 so no loss scaling is needed.
+        use_amp = self.device.type == "cuda"
+        amp_ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if use_amp else torch.autocast(device_type="cpu", enabled=False)
+
         for _ in range(steps):
             # ── Sample positive triples on GPU ─────────────────────────────
             pos_idx = torch.randint(n_train, (self.batch_size,), device=self.device)
@@ -343,18 +348,19 @@ class RGCNTrainer:
             edge_idx  = self.edge_index[:, edge_perm]
             edge_typ  = self.edge_type[edge_perm]
 
-            pos_scores, neg_scores = self.model(
-                edge_idx, edge_typ,
-                pos[:, 0], pos[:, 1], pos[:, 2],
-                neg[:, 0], neg[:, 1], neg[:, 2],
-            )
+            with amp_ctx:
+                pos_scores, neg_scores = self.model(
+                    edge_idx, edge_typ,
+                    pos[:, 0], pos[:, 1], pos[:, 2],
+                    neg[:, 0], neg[:, 1], neg[:, 2],
+                )
+                loss = _bce_loss(
+                    pos_scores, neg_scores,
+                    pos_rel_idx=pos[:, 1],
+                    neg_rel_idx=neg[:, 1],
+                    relation_weights=self.relation_weights,
+                )
 
-            loss = _bce_loss(
-                pos_scores, neg_scores,
-                pos_rel_idx=pos[:, 1],
-                neg_rel_idx=neg[:, 1],
-                relation_weights=self.relation_weights,
-            )
             self.optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
