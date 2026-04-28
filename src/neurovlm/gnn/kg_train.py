@@ -388,20 +388,38 @@ class RGCNTrainer:
         # ── Resume from a previous session ────────────────────────────────────
         if self._resume_from is not None and self._resume_from.exists():
             ckpt = torch.load(self._resume_from, map_location=self.device, weights_only=False)
-            self.model.load_state_dict(ckpt["model_state"])
-            self.optimizer.load_state_dict(ckpt["optimizer_state"])
-            self.scheduler.load_state_dict(ckpt["scheduler_state"])
-            self.history    = ckpt["history"]
-            self._best_mrr  = ckpt["best_mrr"]
-            self._best_state = ckpt.get("best_state")
-            no_improve      = ckpt["no_improve"]
-            start_epoch     = ckpt["epoch"] + 1
-            if self.verbose:
-                print(
-                    f"Resumed from {self._resume_from} at epoch {ckpt['epoch']} "
-                    f"(best MRR={self._best_mrr:.4f})",
-                    flush=True,
-                )
+            ckpt_decoder = ckpt.get("decoder", "distmult")
+            model_decoder = getattr(self.model, "decoder", "distmult")
+            if ckpt_decoder != model_decoder:
+                if self.verbose:
+                    print(
+                        f"Resume checkpoint decoder={ckpt_decoder!r} does not match "
+                        f"current decoder={model_decoder!r} — starting fresh.",
+                        flush=True,
+                    )
+            else:
+                try:
+                    self.model.load_state_dict(ckpt["model_state"])
+                    self.optimizer.load_state_dict(ckpt["optimizer_state"])
+                    self.scheduler.load_state_dict(ckpt["scheduler_state"])
+                    self.history    = ckpt["history"]
+                    self._best_mrr  = ckpt["best_mrr"]
+                    self._best_state = ckpt.get("best_state")
+                    no_improve      = ckpt["no_improve"]
+                    start_epoch     = ckpt["epoch"] + 1
+                    if self.verbose:
+                        print(
+                            f"Resumed from {self._resume_from} at epoch {ckpt['epoch']} "
+                            f"(best MRR={self._best_mrr:.4f})",
+                            flush=True,
+                        )
+                except RuntimeError as exc:
+                    if self.verbose:
+                        print(
+                            f"Could not load checkpoint (shape mismatch?): {exc}\n"
+                            f"Starting fresh.",
+                            flush=True,
+                        )
         elif self._resume_from is not None:
             if self.verbose:
                 print(f"Resume checkpoint not found at {self._resume_from} — starting fresh.", flush=True)
@@ -513,6 +531,9 @@ class RGCNTrainer:
     def evaluate_test(self) -> dict[str, float]:
         """Evaluate on the test split using the best-checkpoint weights.
 
+        Uses filtered ranking (masks known true objects before computing rank)
+        for an unbiased MRR estimate.
+
         Returns
         -------
         dict with ``mrr``, ``hits@1``, ``hits@3``, ``hits@10``.
@@ -520,8 +541,18 @@ class RGCNTrainer:
         if self._best_state is not None:
             self.model.load_state_dict(self._best_state)
 
-        # 1M-edge sample encode (same as val) — quality difference is negligible
-        entity_emb = self._get_entity_emb()
+        # Build sr→objects lookup lazily (expensive once, but only called once)
+        if self._sr_to_objects is None:
+            self._sr_to_objects = {}
+            for triple in self.splits.kg.triple_set:
+                s, r, o = triple
+                key = (s, r)
+                if key not in self._sr_to_objects:
+                    self._sr_to_objects[key] = set()
+                self._sr_to_objects[key].add(o)
+
+        # Full-graph encode for final test evaluation
+        entity_emb = self._get_entity_emb(sample_size=self.edge_index.size(1))
         metrics = evaluate_link_prediction(
             self.model,
             entity_emb,
@@ -529,11 +560,12 @@ class RGCNTrainer:
             self.splits.kg.triple_set,
             batch_size=self.eval_batch_size,
             device=self.device,
-            filtered=False,
+            filtered=True,
+            sr_to_objects=self._sr_to_objects,
         )
         if self.verbose:
             print(
-                f"Test | MRR={metrics['mrr']:.4f} | "
+                f"Test (filtered) | MRR={metrics['mrr']:.4f} | "
                 f"H@1={metrics['hits@1']:.4f} | "
                 f"H@3={metrics['hits@3']:.4f} | "
                 f"H@10={metrics['hits@10']:.4f}"
@@ -693,6 +725,7 @@ class RGCNTrainer:
                 "num_entities": self.model.num_entities,
                 "num_relations": self.model.num_relations,
                 "emb_dim": self.model.emb_dim,
+                "decoder": getattr(self.model, "decoder", "distmult"),
             },
             path,
         )
@@ -716,6 +749,7 @@ class RGCNTrainer:
                 "num_entities": self.model.num_entities,
                 "num_relations": self.model.num_relations,
                 "emb_dim": self.model.emb_dim,
+                "decoder": getattr(self.model, "decoder", "distmult"),
             },
             path,
         )

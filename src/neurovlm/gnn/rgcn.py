@@ -1,7 +1,7 @@
 """R-GCN link prediction model for the unified neuroscience knowledge graph.
 
 Phase 3, Step 8: relational graph convolutional network (Schlichtkrull et al.,
-2018) with DistMult scoring for triple-level link prediction.
+2018) with a pluggable decoder — RotatE (default) or DistMult.
 
 Architecture
 ------------
@@ -18,9 +18,16 @@ Architecture
              num_bases=num_bases)
           ↓  (N_entities, emb_dim)          ← entity embeddings used for scoring
 
-    DistMult scoring:
+    RotatE scoring (default):
+        Entities treated as complex vectors: e ∈ ℂ^(d/2), stored as (re, im)
+        in the first and second halves of the d-dimensional embedding.
+        Relations are rotation phases: θ_r ∈ ℝ^(d/2).
+        score(s, r, o) = −‖s ∘ r − o‖²_F
+        where ∘ is element-wise complex multiplication (rotation).
+        score_all uses ‖a−b‖² = ‖a‖²+‖b‖²−2⟨a,b⟩ for O(BNd) efficiency.
+
+    DistMult scoring (legacy, symmetric):
         score(s, r, o) = Σ  e_s ⊙ W_r ⊙ e_o
-    where W_r = nn.Embedding(num_rels, emb_dim) diagonal relation matrix.
 
 Relation types are passed as contiguous integers 0 … num_rels-1, which is
 required by ``torch_geometric.nn.RGCNConv``.
@@ -43,7 +50,7 @@ from torch import nn, Tensor
 
 
 class RGCNLinkPredictor(nn.Module):
-    """R-GCN encoder + DistMult decoder for KG link prediction.
+    """R-GCN encoder + pluggable decoder for KG link prediction.
 
     Parameters
     ----------
@@ -52,7 +59,8 @@ class RGCNLinkPredictor(nn.Module):
     num_relations:
         Number of distinct relation types (must be contiguous 0-based).
     emb_dim:
-        Embedding dimension.  Default 256; use 512 for larger compute budgets.
+        Embedding dimension.  Must be even when ``decoder='rotate'``.
+        Default 256; use 512 for larger compute budgets.
     num_bases:
         Basis decomposition size for ``RGCNConv``.  Reduces parameter count
         when ``num_relations`` is small relative to ``emb_dim``.  Default 4.
@@ -60,6 +68,10 @@ class RGCNLinkPredictor(nn.Module):
         Number of R-GCN message-passing layers (2 or 3).  Default 2.
     dropout:
         Dropout applied between layers.  Default 0.1.
+    decoder:
+        Scoring function.  ``'rotate'`` (default) or ``'distmult'``.
+        RotatE is asymmetric and handles directed relations correctly;
+        DistMult is symmetric (treats A→B identical to B→A).
     """
 
     def __init__(
@@ -70,6 +82,7 @@ class RGCNLinkPredictor(nn.Module):
         num_bases: int = 4,
         num_layers: int = 2,
         dropout: float = 0.1,
+        decoder: str = "rotate",
     ):
         super().__init__()
 
@@ -80,10 +93,16 @@ class RGCNLinkPredictor(nn.Module):
                 "torch_geometric is required. Install with: pip install torch_geometric"
             ) from exc
 
+        if decoder not in ("rotate", "distmult"):
+            raise ValueError(f"decoder must be 'rotate' or 'distmult', got {decoder!r}")
+        if decoder == "rotate" and emb_dim % 2 != 0:
+            raise ValueError(f"emb_dim must be even for RotatE decoder, got {emb_dim}")
+
         self.num_entities = num_entities
         self.num_relations = num_relations
         self.emb_dim = emb_dim
         self.dropout = dropout
+        self.decoder = decoder
 
         # Learned entity embeddings (input to R-GCN)
         self.entity_emb = nn.Embedding(num_entities, emb_dim)
@@ -96,8 +115,14 @@ class RGCNLinkPredictor(nn.Module):
                 RGCNConv(emb_dim, emb_dim, num_relations=num_relations, num_bases=num_bases)
             )
 
-        # DistMult relation embeddings (diagonal W_r per relation)
-        self.relation_emb = nn.Embedding(num_relations, emb_dim)
+        # Decoder parameters
+        if decoder == "distmult":
+            # Diagonal W_r per relation
+            self.relation_emb = nn.Embedding(num_relations, emb_dim)
+        else:
+            # RotatE: one rotation phase per complex dimension (emb_dim // 2 complex dims)
+            self.relation_emb = nn.Embedding(num_relations, emb_dim // 2)
+
         nn.init.xavier_uniform_(self.relation_emb.weight)
 
     # ------------------------------------------------------------------
@@ -141,7 +166,102 @@ class RGCNLinkPredictor(nn.Module):
         return x  # (N_e, emb_dim)
 
     # ------------------------------------------------------------------
-    # Decoder — DistMult scoring
+    # Decoder — RotatE
+    # ------------------------------------------------------------------
+
+    def _rotate_score(
+        self,
+        entity_emb: Tensor,
+        subj_idx: Tensor,
+        rel_idx: Tensor,
+        obj_idx: Tensor,
+    ) -> Tensor:
+        """score = −‖s ∘ r − o‖²_F  (squared Frobenius in complex space)."""
+        d = self.emb_dim // 2
+        s = entity_emb[subj_idx]   # (B, emb_dim)
+        o = entity_emb[obj_idx]    # (B, emb_dim)
+
+        # First half = real part, second half = imaginary part
+        s_re, s_im = s[:, :d], s[:, d:]
+        o_re, o_im = o[:, :d], o[:, d:]
+
+        # Relation as unit complex from learned phase
+        phases = self.relation_emb(rel_idx)  # (B, d)
+        r_re = torch.cos(phases)
+        r_im = torch.sin(phases)
+
+        # Complex multiply: s ∘ r
+        sr_re = s_re * r_re - s_im * r_im   # (B, d)
+        sr_im = s_re * r_im + s_im * r_re
+
+        diff_re = sr_re - o_re
+        diff_im = sr_im - o_im
+        return -(diff_re ** 2 + diff_im ** 2).sum(dim=-1)  # (B,)
+
+    def _rotate_score_all(
+        self,
+        entity_emb: Tensor,
+        subj_idx: Tensor,
+        rel_idx: Tensor,
+    ) -> Tensor:
+        """Efficient RotatE: score (B, ?) against all N entities as object.
+
+        Uses ‖a − b‖² = ‖a‖² + ‖b‖² − 2⟨a, b⟩ to avoid the O(B·N·d) loop,
+        reducing to two (B, d) × (d, N) matrix products.
+        """
+        d = self.emb_dim // 2
+        s = entity_emb[subj_idx]   # (B, emb_dim)
+
+        s_re, s_im = s[:, :d], s[:, d:]
+
+        phases = self.relation_emb(rel_idx)  # (B, d)
+        r_re = torch.cos(phases)
+        r_im = torch.sin(phases)
+
+        # Rotated subject
+        sr_re = s_re * r_re - s_im * r_im   # (B, d)
+        sr_im = s_re * r_im + s_im * r_re
+
+        # All entities split
+        all_re = entity_emb[:, :d]  # (N, d)
+        all_im = entity_emb[:, d:]  # (N, d)
+
+        sr_sq = (sr_re ** 2 + sr_im ** 2).sum(dim=-1)       # (B,)
+        o_sq  = (all_re ** 2 + all_im ** 2).sum(dim=-1)     # (N,)
+        dot   = sr_re @ all_re.t() + sr_im @ all_im.t()     # (B, N)
+
+        dist_sq = sr_sq.unsqueeze(1) + o_sq.unsqueeze(0) - 2 * dot
+        return -dist_sq  # (B, N)
+
+    # ------------------------------------------------------------------
+    # Decoder — DistMult (legacy, symmetric)
+    # ------------------------------------------------------------------
+
+    def _distmult_score(
+        self,
+        entity_emb: Tensor,
+        subj_idx: Tensor,
+        rel_idx: Tensor,
+        obj_idx: Tensor,
+    ) -> Tensor:
+        s_emb = entity_emb[subj_idx]        # (B, d)
+        r_emb = self.relation_emb(rel_idx)  # (B, d)
+        o_emb = entity_emb[obj_idx]         # (B, d)
+        return (s_emb * r_emb * o_emb).sum(dim=-1)
+
+    def _distmult_score_all(
+        self,
+        entity_emb: Tensor,
+        subj_idx: Tensor,
+        rel_idx: Tensor,
+    ) -> Tensor:
+        s_emb = entity_emb[subj_idx]          # (B, d)
+        r_emb = self.relation_emb(rel_idx)    # (B, d)
+        sr    = s_emb * r_emb                 # (B, d)
+        return sr @ entity_emb.t()            # (B, N_e)
+
+    # ------------------------------------------------------------------
+    # Public scoring API (routes to active decoder)
     # ------------------------------------------------------------------
 
     def score(
@@ -151,15 +271,12 @@ class RGCNLinkPredictor(nn.Module):
         rel_idx: Tensor,
         obj_idx: Tensor,
     ) -> Tensor:
-        """DistMult triple scoring.
-
-        ``score(s, r, o) = Σ_d  e_s[d] * W_r[d] * e_o[d]``
+        """Score a batch of triples.
 
         Parameters
         ----------
         entity_emb:
-            Contextual entity embedding matrix, shape ``(N_e, emb_dim)``.
-            Obtained from :meth:`encode`.
+            Contextual entity embedding matrix ``(N_e, emb_dim)`` from :meth:`encode`.
         subj_idx, rel_idx, obj_idx:
             1-D LongTensors of equal length — triple component indices.
 
@@ -167,10 +284,9 @@ class RGCNLinkPredictor(nn.Module):
         -------
         1-D FloatTensor of scores, one per triple.
         """
-        s_emb = entity_emb[subj_idx]        # (B, d)
-        r_emb = self.relation_emb(rel_idx)  # (B, d)
-        o_emb = entity_emb[obj_idx]         # (B, d)
-        return (s_emb * r_emb * o_emb).sum(dim=-1)  # (B,)
+        if self.decoder == "rotate":
+            return self._rotate_score(entity_emb, subj_idx, rel_idx, obj_idx)
+        return self._distmult_score(entity_emb, subj_idx, rel_idx, obj_idx)
 
     def score_all_objects(
         self,
@@ -179,10 +295,6 @@ class RGCNLinkPredictor(nn.Module):
         rel_idx: Tensor,
     ) -> Tensor:
         """Score a batch of (s, r, ?) against every entity as object.
-
-        Efficient batch matrix form:
-
-        ``score_all[b, j] = Σ_d  e_s[b, d] * W_r[b, d] * E[j, d]``
 
         Parameters
         ----------
@@ -197,10 +309,9 @@ class RGCNLinkPredictor(nn.Module):
         -------
         Tensor of shape ``(B, N_e)`` — score of every entity as object.
         """
-        s_emb = entity_emb[subj_idx]          # (B, d)
-        r_emb = self.relation_emb(rel_idx)    # (B, d)
-        sr    = s_emb * r_emb                 # (B, d)  element-wise
-        return sr @ entity_emb.t()            # (B, N_e)
+        if self.decoder == "rotate":
+            return self._rotate_score_all(entity_emb, subj_idx, rel_idx)
+        return self._distmult_score_all(entity_emb, subj_idx, rel_idx)
 
     # ------------------------------------------------------------------
     # Forward (used during training)
