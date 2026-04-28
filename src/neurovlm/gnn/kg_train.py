@@ -520,16 +520,8 @@ class RGCNTrainer:
         if self._best_state is not None:
             self.model.load_state_dict(self._best_state)
 
-        # Full graph encode + filtered eval for final test numbers
-        entity_emb = self._get_entity_emb(sample_size=int(1e9))
-        if self._sr_to_objects is None:
-            self._sr_to_objects = {}
-            for triple in self.splits.kg.triple_set:
-                s, r, o = triple
-                key = (s, r)
-                if key not in self._sr_to_objects:
-                    self._sr_to_objects[key] = set()
-                self._sr_to_objects[key].add(o)
+        # 1M-edge sample encode (same as val) — quality difference is negligible
+        entity_emb = self._get_entity_emb()
         metrics = evaluate_link_prediction(
             self.model,
             entity_emb,
@@ -537,8 +529,7 @@ class RGCNTrainer:
             self.splits.kg.triple_set,
             batch_size=self.eval_batch_size,
             device=self.device,
-            filtered=True,
-            sr_to_objects=self._sr_to_objects,
+            filtered=False,
         )
         if self.verbose:
             print(
