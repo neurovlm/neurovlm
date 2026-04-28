@@ -216,6 +216,40 @@ def compute_metrics(
 
     return mse_scores_t, ssim_scores_t, dice_score_t
 
+def token_f1(reference: str, hypothesis: str) -> float:
+    """Compute token-level F1 between a reference and hypothesis string.
+
+    Standard SQuAD-style metric: multi-set token overlap over lowercased
+    whitespace-split tokens.
+
+    Parameters
+    ----------
+    reference : str
+        Ground-truth text.
+    hypothesis : str
+        Generated/predicted text.
+
+    Returns
+    -------
+    f1 : float
+        Token F1 in [0, 1].  Returns 0.0 when either string is empty.
+    """
+    from collections import Counter
+
+    ref_tokens = reference.lower().split()
+    hyp_tokens = hypothesis.lower().split()
+    if not ref_tokens or not hyp_tokens:
+        return 0.0
+    ref_counts = Counter(ref_tokens)
+    hyp_counts = Counter(hyp_tokens)
+    common = sum((ref_counts & hyp_counts).values())
+    if common == 0:
+        return 0.0
+    precision = common / len(hyp_tokens)
+    recall = common / len(ref_tokens)
+    return 2 * precision * recall / (precision + recall)
+
+
 def dice(img_a, img_b):
     """Compute dice score.
 
