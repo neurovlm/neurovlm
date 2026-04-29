@@ -65,37 +65,44 @@ def _bce_loss(
     pos_rel_idx: Optional[Tensor] = None,
     neg_rel_idx: Optional[Tensor] = None,
     relation_weights: Optional[Tensor] = None,
+    margin: float = 6.0,
 ) -> Tensor:
-    """Binary cross-entropy: positives → 1, negatives → 0.
+    """Margin-shifted BCE loss compatible with RotatE's non-positive score range.
 
-    When *relation_weights* is provided, each sample is scaled by the weight
-    of its relation type so that rare relation types contribute proportionally
-    to the gradient.  Negatives inherit the weight of their positive's relation.
+    RotatE scores are always ≤ 0 (negative squared distances), so plain BCE
+    with logits caps positive-triple confidence at 50%.  Shifting by *margin*
+    lets the model push well-aligned positives to high confidence and well-
+    separated negatives to near-zero loss.
 
     Parameters
     ----------
     pos_scores, neg_scores:
-        Raw logit scores for positive and negative triples.
+        Raw scores for positive and negative triples (RotatE: always ≤ 0).
     pos_rel_idx, neg_rel_idx:
-        Relation-type integer indices for positives / negatives (LongTensor).
-        Required when *relation_weights* is not None.
+        Relation-type integer indices (LongTensor).  Required when
+        *relation_weights* is not None.
     relation_weights:
-        Per-relation weight tensor of shape ``(num_relations,)``.  Typically
-        computed as inverse-frequency weights, normalised to mean 1 and capped
-        at some maximum to avoid extreme gradients for very sparse types.
+        Per-relation weight tensor of shape ``(num_relations,)``.
+    margin:
+        Additive shift so that a perfect positive (score → 0) maps to a
+        confident logit (+margin) and a well-separated negative maps to a
+        large negative logit (−margin).
     """
-    pos_labels = torch.ones_like(pos_scores)
-    neg_labels = torch.zeros_like(neg_scores)
-    scores = torch.cat([pos_scores, neg_scores])
-    labels = torch.cat([pos_labels, neg_labels])
+    # pos: score ∈ (−∞, 0] → logit = score + margin; perfect → +margin → σ → 1
+    # neg: logit = −neg_score − margin; well-separated → large +val → logsigmoid → 0
+    pos_loss = -F.logsigmoid(pos_scores + margin)
+    neg_loss = -F.logsigmoid(-neg_scores - margin)
 
-    sample_weights: Optional[Tensor] = None
     if relation_weights is not None and pos_rel_idx is not None and neg_rel_idx is not None:
         pos_w = relation_weights[pos_rel_idx]
         neg_w = relation_weights[neg_rel_idx]
-        sample_weights = torch.cat([pos_w, neg_w])
+        pos_loss = (pos_loss * pos_w).mean()
+        neg_loss = (neg_loss * neg_w).mean()
+    else:
+        pos_loss = pos_loss.mean()
+        neg_loss = neg_loss.mean()
 
-    return F.binary_cross_entropy_with_logits(scores, labels, weight=sample_weights)
+    return (pos_loss + neg_loss) / 2
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +260,7 @@ class RGCNTrainer:
         resume_checkpoint_interval: int = 0,
         resume_from: Optional[str | Path] = None,
         max_steps_per_epoch: int = 0,
+        margin: float = 6.0,
     ):
         if device == "auto":
             device = _which_device()
@@ -292,6 +300,7 @@ class RGCNTrainer:
         else:
             self.relation_weights = None
 
+        self.margin = margin
         self.print_interval = print_interval
         self.resume_checkpoint_interval = resume_checkpoint_interval
         self._resume_from = Path(resume_from) if resume_from else None
@@ -359,6 +368,7 @@ class RGCNTrainer:
                     pos_rel_idx=pos[:, 1],
                     neg_rel_idx=neg[:, 1],
                     relation_weights=self.relation_weights,
+                    margin=self.margin,
                 )
 
             self.optimizer.zero_grad()
