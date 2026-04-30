@@ -58,6 +58,8 @@ __all__ = [
     "_load_pubmed_images",
     "_load_latent_ngram",
     "_load_ngram",
+    "_load_kg_mesh_dataset",
+    "_load_latent_kg_mesh",
 ]
 
 
@@ -707,3 +709,34 @@ def _load_ngram() -> Tuple[torch.Tensor, np.ndarray]:
         labels_path
     )
     return labels
+
+
+@lru_cache(maxsize=1)
+def _load_kg_mesh_dataset() -> pd.DataFrame:
+    """Load the KG-MeSH term/definition DataFrame from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "kg_mesh.parquet"
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_latent_kg_mesh() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load KG-MeSH SPECTER2 embeddings from HuggingFace."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_kg_mesh.pt"
+    )
+    latent_payload = torch.load(
+        latent_path,
+        weights_only=False,
+        map_location=torch.device("cpu"),
+    )
+    latent = latent_payload["latent"]
+    terms  = np.asarray(latent_payload["term"])
+    return latent, terms

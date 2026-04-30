@@ -20,7 +20,7 @@ TEXT_EMBED_DIM = 768
 LATENT_DIM = 384
 BRAIN_FLAT_DIM = 28542
 
-DEFAULT_TEXT_DATASETS = ("wiki", "cogatlas", "ngrams")
+DEFAULT_TEXT_DATASETS = ("wiki", "cogatlas", "ngrams", "kg_mesh")
 DATASET_ALIASES = {
     "publications": "pubmed",
     "neurowiki": "wiki",
@@ -34,6 +34,8 @@ DATASET_ALIASES = {
     "ngram": "ngrams",
     "n_grams": "ngrams",
     "n-grams": "ngrams",
+    "mesh_kg": "kg_mesh",
+    "pubmed_mesh": "kg_mesh",
 }
 DATASET_ID_COLUMNS = {
     "pubmed": "pmid",
@@ -43,6 +45,7 @@ DATASET_ID_COLUMNS = {
     "cogatlas_disorder": "term",
     "networks": "title",
     "ngrams": "term",
+    "kg_mesh": "term",
 }
 
 TEXT_DATASET_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
@@ -52,6 +55,7 @@ TEXT_DATASET_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
     "cogatlas_task": ("cogatlas_task",),
     "cogatlas_disorder": ("cogatlas_disorder",),
     "ngrams": ("ngrams",),
+    "kg_mesh": ("kg_mesh",),
 }
 TEXT_LATENT_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
     "pubmed": ("pubmed_text", "publications", "pubmed"),
@@ -60,6 +64,7 @@ TEXT_LATENT_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
     "cogatlas_task": ("cogatlas_task",),
     "cogatlas_disorder": ("cogatlas_disorder",),
     "ngrams": ("ngrams",),
+    "kg_mesh": ("kg_mesh",),
 }
 
 
@@ -2070,7 +2075,7 @@ class NeuroVLM:
                 # NeuroWiki concepts and brain-atlas networks are both
                 # neuroscience reference material.
                 wiki_lines.append(entry)
-            elif dataset in ("cogatlas", "cogatlas_task", "cogatlas_disorder", "ngrams"):
+            elif dataset in ("cogatlas", "cogatlas_task", "cogatlas_disorder", "ngrams", "kg_mesh"):
                 cogatlas_lines.append(entry)
             else:
                 papers_lines.append(entry)
