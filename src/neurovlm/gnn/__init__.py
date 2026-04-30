@@ -35,13 +35,19 @@ from .dataset import BrainGraphDataset
 from .model import BrainGAT, TextProjHead
 from .train import GATTrainer
 
-# Track 2 — R-GCN
+# Track 2 — R-GCN (KG)
 from .kg_data import load_kg, KGData, KGSplits, KGTripleDataset, kg_collate_fn
 from .rgcn import RGCNLinkPredictor
 from .kg_train import RGCNTrainer, evaluate_link_prediction
 
+# Track 2 — Atlas-Free Coordinate GNN
+from .coord_graph import coords_to_graph, normalize_coords, denormalize_coords, MNI_HALF
+from .coord_dataset import CoordGraphDataset
+from .coord_model import CoordGNN
+from .coord_train import CoordTrainer
+
 __all__ = [
-    # Track 1
+    # Track 1 — DiFuMo GAT
     "load_difumo_components",
     "compute_difumo_coefficients",
     "build_brain_graph",
@@ -50,7 +56,7 @@ __all__ = [
     "BrainGAT",
     "TextProjHead",
     "GATTrainer",
-    # Track 2
+    # Track 2 — R-GCN (KG)
     "load_kg",
     "KGData",
     "KGSplits",
@@ -59,4 +65,12 @@ __all__ = [
     "RGCNLinkPredictor",
     "RGCNTrainer",
     "evaluate_link_prediction",
+    # Track 2 — Atlas-Free Coordinate GNN
+    "coords_to_graph",
+    "normalize_coords",
+    "denormalize_coords",
+    "MNI_HALF",
+    "CoordGraphDataset",
+    "CoordGNN",
+    "CoordTrainer",
 ]
