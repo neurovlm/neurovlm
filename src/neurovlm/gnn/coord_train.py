@@ -194,7 +194,7 @@ class CoordTrainer:
         brain_embs = []
         for batch in loader:
             b, _ = self._forward_batch(batch)
-            brain_embs.append(b)
+            brain_embs.append(b.clone())
             if sum(e.shape[0] for e in brain_embs) >= self.collapse_sample_n:
                 break
         embs = F.normalize(torch.cat(brain_embs, dim=0)[:self.collapse_sample_n], dim=1)
@@ -216,8 +216,8 @@ class CoordTrainer:
         all_brain, all_text = [], []
         for batch in loader:
             b, t = self._forward_batch(batch)
-            all_brain.append(b)
-            all_text.append(t)
+            all_brain.append(b.clone())
+            all_text.append(t.clone())
 
         brain_emb = torch.cat(all_brain, dim=0)
         text_emb = torch.cat(all_text, dim=0)
@@ -398,8 +398,8 @@ class CoordTrainer:
         all_b, all_t = [], []
         for batch in loader:
             b, t = self._forward_batch(batch)
-            all_b.append(b)
-            all_t.append(t)
+            all_b.append(b.clone())
+            all_t.append(t.clone())
         self.brain_encoder.train()
         self.text_proj.train()
         return torch.cat(all_b, dim=0), torch.cat(all_t, dim=0)
