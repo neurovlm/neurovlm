@@ -67,6 +67,16 @@ class CoordTrainer:
         Saves best_coord_gnn.pt and last_coord_gnn.pt here.
     collapse_sample_n : int
         Number of val embeddings to sample for the collapse monitor. Default 256.
+    num_workers : int
+        DataLoader worker processes. 0 = main process (safe for MPS/Windows).
+        Set to 4 on Colab A100 for parallel data loading.
+    pin_memory : bool
+        Pin DataLoader output to page-locked memory for faster GPU transfers.
+        Set True on CUDA, False on MPS/CPU.
+    use_amp : bool
+        Use BF16 automatic mixed precision on CUDA. A100 Tensor Cores run BF16
+        at ~2x the speed of FP32. No GradScaler needed (BF16 doesn't overflow).
+        Ignored silently on MPS/CPU.
     verbose : bool
     """
 
@@ -84,6 +94,9 @@ class CoordTrainer:
         val_interval: int = 5,
         checkpoint_dir: Optional[str] = None,
         collapse_sample_n: int = 256,
+        num_workers: int = 0,
+        pin_memory: bool = False,
+        use_amp: bool = False,
         verbose: bool = True,
     ):
         if device == "auto":
@@ -98,6 +111,10 @@ class CoordTrainer:
         self.warmup_epochs = warmup_epochs
         self.val_interval = val_interval
         self.collapse_sample_n = collapse_sample_n
+        self.num_workers = num_workers
+        self.pin_memory = pin_memory
+        # BF16 AMP only makes sense on CUDA; silently disable elsewhere
+        self.use_amp = use_amp and self.device.type == "cuda"
         self.verbose = verbose
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
 
@@ -139,14 +156,28 @@ class CoordTrainer:
 
     def _make_dataloader(self, dataset: _AnyDataset, shuffle: bool = True):
         from torch_geometric.loader import DataLoader
-        return DataLoader(dataset, batch_size=self.batch_size, shuffle=shuffle)
+        return DataLoader(
+            dataset,
+            batch_size=self.batch_size,
+            shuffle=shuffle,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            persistent_workers=(self.num_workers > 0),
+        )
 
     def _forward_batch(self, batch) -> tuple[Tensor, Tensor]:
-        batch = batch.to(self.device)
-        brain_emb = self.brain_encoder(
-            batch.x, batch.edge_index, batch.edge_attr, batch.batch
-        )
-        text_emb = self.text_proj(batch.y)
+        batch = batch.to(self.device, non_blocking=self.pin_memory)
+        if self.use_amp:
+            with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
+                brain_emb = self.brain_encoder(
+                    batch.x, batch.edge_index, batch.edge_attr, batch.batch
+                )
+                text_emb = self.text_proj(batch.y)
+        else:
+            brain_emb = self.brain_encoder(
+                batch.x, batch.edge_index, batch.edge_attr, batch.batch
+            )
+            text_emb = self.text_proj(batch.y)
         return brain_emb, text_emb
 
     # ------------------------------------------------------------------

@@ -51,6 +51,7 @@ class CoordGraphDataset:
         cache_dir: str = "data/coord_graphs",
         k: int = 7,
         max_dist_mm: float = 30.0,
+        preload_to_ram: bool = False,
     ):
         self.k = k
         self.max_dist_mm = max_dist_mm
@@ -76,6 +77,12 @@ class CoordGraphDataset:
 
         # Build disk cache before any __getitem__ call
         self._build_cache()
+
+        # Optional: load all graphs into RAM for fast __getitem__ (eliminates Drive I/O)
+        # Each graph is ~2KB; 30K graphs ≈ 60MB total — trivial on A100 (83GB system RAM).
+        self._ram_cache: Optional[List[Data]] = None
+        if preload_to_ram:
+            self._load_to_ram()
 
     # ------------------------------------------------------------------
     # Cache management
@@ -120,6 +127,27 @@ class CoordGraphDataset:
 
         print("Graph cache build complete.")
 
+    def _load_to_ram(self) -> None:
+        """Load all cached graphs into a RAM list for zero-latency __getitem__."""
+        try:
+            from tqdm import tqdm
+        except ImportError:
+            def tqdm(it, **kw):  # type: ignore[misc]
+                return it
+
+        print(f"Preloading {len(self._valid_indices)} graphs to RAM …")
+        ram: List[Optional[Data]] = [None] * len(self._valid_indices)
+        for pos, dataset_idx in enumerate(tqdm(self._valid_indices, desc="Loading to RAM")):
+            ram[pos] = torch.load(self._cache_path(dataset_idx), weights_only=False)
+        self._ram_cache = ram
+        # Estimate memory
+        try:
+            import sys
+            mb = sum(sys.getsizeof(g) for g in ram if g is not None) / 1e6
+            print(f"RAM cache loaded ({mb:.0f} MB estimated).")
+        except Exception:
+            print("RAM cache loaded.")
+
     # ------------------------------------------------------------------
     # Dataset interface
     # ------------------------------------------------------------------
@@ -129,10 +157,15 @@ class CoordGraphDataset:
 
     def __getitem__(self, idx: int) -> Data:
         dataset_idx = self._valid_indices[idx]
-        graph: Data = torch.load(self._cache_path(dataset_idx),
-                                 weights_only=False)
 
-        # Attach text embedding and paper identifier
+        if self._ram_cache is not None:
+            # Zero-latency path: graph is already in RAM
+            graph = self._ram_cache[idx]
+        else:
+            graph = torch.load(self._cache_path(dataset_idx), weights_only=False)
+
+        # Clone so DataLoader workers don't share tensors across batches
+        graph = graph.clone()
         graph.y = self.text_embeddings[dataset_idx].unsqueeze(0)  # (1, 768)
         graph.paper_idx = dataset_idx
         return graph
