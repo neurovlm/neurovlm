@@ -106,28 +106,29 @@ def load_huggingface_model(
 
 def system_prompt(for_brain_input: bool = False) -> str:
     """Return instructions for the LLM."""
-    return """You are a neuroscience editor writing a short wiki-style article from a list of terms.
+    return """You are a neuroscience editor writing a concise explanatory entry from ranked neuroimaging retrieval evidence.
 
-INPUT: a list of neuroscience terms (networks, brain regions, cognitive functions, disorders).
-OUTPUT: ONE article that uses the terms to form a coherent theme.
+INPUT: ranked neuroscience evidence from a brain-to-text retrieval model. Each row may include
+a rank number and cosine similarity score. Rank 1 is the strongest evidence.
+OUTPUT: ONE in-depth paragraph grounded in the ranked evidence. Do not use a title,
+section headings, bullets, or numbered lists.
+
+Ranking rules:
+- Treat rank 1 as the main topic to define and explain. If ranks 1-2 are near-duplicates or a network plus its canonical function, define them together.
+- Use ranks 2-5 to explain how the main topic relates to supporting functions, regions, or component concepts.
+- Do not flatten all terms into an equal bag of words.
+- If rank 1 is a named brain network, define that network as the subject. Do not drift into a generic article about the broad cognitive domain.
+- If lower-ranked terms are regions, explain them as likely nodes or supporting anatomy of the top-ranked network.
+- If lower-ranked terms are cognitive functions, explain them as functions associated with the top-ranked network.
+- Do not use uncertainty framing like "hypothesis", "suggests", "may indicate", or "appears to". Write as an explanatory definition.
 
 Rules:
-1) Title (required): 6–12 words. Make it specific and content-based.
-   - Use 1–2 of the most informative terms (prefer: network/circuit + region + cognition; add disorder only if strongly supported).
-   - DO NOT use generic titles like: "Summary", "Overview", "Brain Network Analysis", "A Summary of Terms".
-
-2) Lead paragraph (2–3 sentences):
-   - State the unifying theme directly (what the terms collectively describe).
-   - Name 3–5 "anchor" terms that drive the theme.
+1) Write one coherent paragraph:
+   - Define the rank-1 topic directly.
+   - Explain how 2–4 supporting terms relate to that topic as functions, regions, network nodes, or component concepts.
    - Do NOT say "the provided list", "top-ranked", "these terms appear", or anything about scoring/ranking.
 
-3) Body sections:
-   - Networks
-   - Key Regions
-   - Cognitive Functions
-   - Clinical Relevance
-
-4) Be concrete:
+2) Be concrete:
    - Prefer specific mechanisms, pathways, and canonical associations over vague statements.
    - If a term is too vague/ambiguous/unrelated, ignore it in the main text.
 
@@ -141,7 +142,7 @@ def build_user_prompt(
     cogatlas_context: str | None = None,
     user_prompt: str = "",
 ) -> str:
-    """Compose the user-facing prompt as a flat list of neuroscience terms."""
+    """Compose the user-facing prompt from ranked neuroscience context."""
     terms: list[str] = []
 
     for ctx in (wiki_context, cogatlas_context, papers_context):
@@ -159,7 +160,11 @@ def build_user_prompt(
         prompt += f"Context: {user_prompt}\n\n"
 
     if terms:
-        prompt += "Terms:\n" + "\n".join(f"- {t}" for t in terms)
+        prompt += (
+            "Ranked evidence rows, in descending model similarity. "
+            "Use row 1 as the main interpretation and later rows as support:\n"
+            + "\n".join(f"- {t}" for t in terms)
+        )
 
     return prompt
 

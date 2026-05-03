@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -1952,6 +1953,19 @@ class NeuroVLM:
         assert self.last_text_result is not None
         if table is None:
             table = self.last_text_result.top_k(k=k)
+        ranking_context = self._format_ranked_evidence(table)
+        if ranking_context:
+            rank_instruction = (
+                "Ranked retrieval evidence from the brain activation map:\n"
+                f"{ranking_context}\n\n"
+                "Writing rule: define and explain row 1 as the main topic. If rows 1-2 are closely related, "
+                "define them together. Use lower-ranked rows to explain related functions, regions, or "
+                "component concepts. Do not call the result a hypothesis."
+            )
+            user_prompt = (
+                f"{rank_instruction}\n\nAdditional user instruction: {user_prompt}"
+                if user_prompt else rank_instruction
+            )
         papers_ctx, wiki_ctx, cogatlas_ctx = self._format_table_as_context(table)
 
         # Passing the query_embeddings tensor (not a str) triggers
@@ -2059,15 +2073,22 @@ class NeuroVLM:
         wiki_lines: List[str] = []
         cogatlas_lines: List[str] = []
 
-        for _, row in table.iterrows():
+        for _, row in self._ranked_table(table).iterrows():
             dataset = str(row.get("dataset", "")).lower()
             title = str(row.get("title", "")).strip()
             description = str(row.get("description", "")).strip()
+            rank = int(row.get("_llm_rank", 0))
+            score = row.get("cosine_similarity", None)
 
             if not title and not description:
                 continue
 
-            entry = f"- {title}: {description}" if description else f"- {title}"
+            prefix = f"[rank={rank}"
+            if score is not None and pd.notna(score):
+                prefix += f", score={float(score):.3f}"
+            prefix += f", dataset={dataset}]"
+            entry_title = f"{prefix} {title}".strip()
+            entry = f"- {entry_title}: {description}" if description else f"- {entry_title}"
 
             if dataset == "pubmed":
                 papers_lines.append(entry)
@@ -2085,6 +2106,39 @@ class NeuroVLM:
         cogatlas_context = "\n".join(cogatlas_lines) if cogatlas_lines else None
 
         return papers_context, wiki_context, cogatlas_context
+
+    @staticmethod
+    def _ranked_table(table: pd.DataFrame) -> pd.DataFrame:
+        """Return table sorted by retrieval score with explicit LLM rank."""
+        if table is None or table.empty:
+            return pd.DataFrame()
+        ranked = table.copy()
+        if "cosine_similarity" in ranked.columns:
+            ranked = ranked.sort_values("cosine_similarity", ascending=False, kind="mergesort")
+        ranked = ranked.reset_index(drop=True)
+        ranked["_llm_rank"] = np.arange(1, len(ranked) + 1)
+        return ranked
+
+    @classmethod
+    def _format_ranked_evidence(cls, table: pd.DataFrame, max_description_chars: int = 180) -> str:
+        """Format top-k rows so the LLM sees global order and similarity scores."""
+        ranked = cls._ranked_table(table)
+        lines: List[str] = []
+        for _, row in ranked.iterrows():
+            rank = int(row["_llm_rank"])
+            dataset = str(row.get("dataset", "")).strip() or "unknown"
+            title = str(row.get("title", "")).strip()
+            description = str(row.get("description", "")).strip()
+            score = row.get("cosine_similarity", None)
+            score_text = f" score={float(score):.3f}" if score is not None and pd.notna(score) else ""
+            desc_text = ""
+            if description:
+                clean_desc = re.sub(r"\s+", " ", description)
+                desc_text = f" - {clean_desc[:max_description_chars]}"
+                if len(clean_desc) > max_description_chars:
+                    desc_text += "..."
+            lines.append(f"{rank}. [{dataset}{score_text}] {title}{desc_text}")
+        return "\n".join(lines)
 
     @staticmethod
     def _validate_head(head: str) -> None:

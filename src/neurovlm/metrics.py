@@ -1,4 +1,7 @@
 """Performance metrics"""
+from dataclasses import dataclass
+from os import PathLike
+import tempfile
 from typing import Optional
 import numpy as np
 import torch
@@ -271,6 +274,176 @@ def dice(img_a, img_b):
     if denom > 0:
         dice = 2.0 * intersection / denom
     return dice
+
+
+def dice_percentile(
+    y_pred: np.ndarray,
+    y_true: np.ndarray,
+    pct: float = 90,
+) -> float:
+    """Dice coefficient after percentile thresholding both maps.
+
+    This keeps the effect-size part of the Network Correspondence Toolbox
+    workflow while avoiding absolute intensity thresholds.
+    """
+    y_pred = np.asarray(y_pred).ravel()
+    y_true = np.asarray(y_true).ravel()
+    pred_bin = y_pred > np.percentile(y_pred, pct)
+    true_bin = y_true > np.percentile(y_true, pct)
+    return float(dice(pred_bin, true_bin))
+
+
+def permutation_pvalue(overlap_val: float, overlap_val_spin: np.ndarray) -> float:
+    """CBIG/NCT-style permutation p-value for overlap statistics.
+
+    Mirrors ``cbig_network_correspondence.compute_overlap_with_atlases``:
+    ``(count(null > observed) + 1) / (n_perm + 1)``.
+    """
+    null = np.asarray(overlap_val_spin, dtype=float).ravel()
+    return float((np.sum((overlap_val - null) < 0) + 1) / (null.size + 1))
+
+
+@dataclass
+class NCTDiceResult:
+    """Dice effect size and spin-test significance for two brain maps."""
+
+    dice_pct: float
+    spin_p_value: float
+    spin_method: str
+    spin_significant: bool
+
+
+def _gifti_to_array(gifti) -> np.ndarray:
+    """Return one flat vector from a neuromaps/niBabel GIFTI object or filename."""
+    import nibabel as nib
+
+    img = nib.load(str(gifti)) if isinstance(gifti, (str, PathLike)) else gifti
+    data = img.agg_data()
+    if isinstance(data, tuple):
+        data = data[0]
+    return np.asarray(data).ravel()
+
+
+def _load_fsaverage_spheres(density: str = "41k") -> tuple[np.ndarray, np.ndarray]:
+    """Load left/right fsaverage sphere coordinates for BrainSpace spins."""
+    import nibabel as nib
+    from neuromaps.datasets import fetch_fsaverage
+
+    fsavg = fetch_fsaverage(density=density)
+    sphere_files = getattr(fsavg, "sphere", None) or fsavg["sphere"]
+    if len(sphere_files) != 2:
+        raise RuntimeError(f"Expected left/right fsaverage sphere files, got: {sphere_files}")
+
+    points_lh = np.asarray(nib.load(str(sphere_files[0])).agg_data("pointset"), dtype=float)
+    points_rh = np.asarray(nib.load(str(sphere_files[1])).agg_data("pointset"), dtype=float)
+    return points_lh, points_rh
+
+
+def mni152_to_fsaverage_arrays(
+    nifti_img,
+    density: str = "41k",
+    method: str = "linear",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Project an MNI152 NIfTI map to fsaverage surface arrays.
+
+    ``neuromaps.transforms.mni152_to_fsaverage`` wraps the Wu et al. (2018)
+    nonlinear MNI-to-fsaverage registrations used by NCT-style correspondence
+    workflows.
+    """
+    import nibabel as nib
+    from neuromaps import transforms
+
+    if not hasattr(transforms, "mni152_to_fsaverage"):
+        raise RuntimeError("neuromaps.transforms.mni152_to_fsaverage is unavailable")
+
+    # Some neuromaps/nitransforms versions are stricter about input types and
+    # expect an on-disk NIfTI path instead of an in-memory Nifti1Image.
+    if isinstance(nifti_img, (str, PathLike)):
+        img_arg = str(nifti_img)
+        surf_lh, surf_rh = transforms.mni152_to_fsaverage(
+            img_arg,
+            fsavg_density=density,
+            method=method,
+        )
+    else:
+        with tempfile.NamedTemporaryFile(suffix=".nii.gz") as tmp:
+            nib.save(nifti_img, tmp.name)
+            surf_lh, surf_rh = transforms.mni152_to_fsaverage(
+                tmp.name,
+                fsavg_density=density,
+                method=method,
+            )
+    return _gifti_to_array(surf_lh), _gifti_to_array(surf_rh)
+
+
+def nct_dice_spin_test_surface(
+    pred_lh: np.ndarray,
+    pred_rh: np.ndarray,
+    true_lh: np.ndarray,
+    true_rh: np.ndarray,
+    pct: float = 90,
+    n_perm: int = 1000,
+    random_state: int = 0,
+    density: str = "41k",
+) -> NCTDiceResult:
+    """Compute NCT-style percentile Dice plus BrainSpace spin-test p-value.
+
+    The implementation follows the core CBIG network correspondence pattern:
+    compute observed Dice, rotate the reference map with
+    ``brainspace.null_models.SpinPermutations``, recompute Dice for each
+    rotation, then calculate the permutation p-value.
+    """
+    from brainspace.null_models import SpinPermutations
+
+    pred_lh = np.asarray(pred_lh).ravel()
+    pred_rh = np.asarray(pred_rh).ravel()
+    true_lh = np.asarray(true_lh).ravel()
+    true_rh = np.asarray(true_rh).ravel()
+
+    pred = np.concatenate([pred_lh, pred_rh])
+    true = np.concatenate([true_lh, true_rh])
+    observed = dice_percentile(pred, true, pct=pct)
+
+    points_lh, points_rh = _load_fsaverage_spheres(density=density)
+    spinner = SpinPermutations(n_rep=n_perm, random_state=random_state)
+    spinner.fit(points_lh, points_rh=points_rh)
+    rand_lh, rand_rh = spinner.randomize(pred_lh, pred_rh)
+
+    null = np.asarray([
+        dice_percentile(np.concatenate([rand_lh[i], rand_rh[i]]), true, pct=pct)
+        for i in range(n_perm)
+    ])
+    p_value = permutation_pvalue(observed, null)
+    return NCTDiceResult(
+        dice_pct=float(observed),
+        spin_p_value=p_value,
+        spin_method=f"neuromaps_mni152_to_fsaverage_{density}+brainspace_spin",
+        spin_significant=bool(p_value < 0.05),
+    )
+
+
+def nct_dice_spin_test_nifti(
+    pred_img,
+    true_img,
+    pct: float = 90,
+    n_perm: int = 1000,
+    random_state: int = 0,
+    density: str = "41k",
+    method: str = "linear",
+) -> NCTDiceResult:
+    """Project MNI152 NIfTI maps to fsaverage and run NCT-style Dice spins."""
+    pred_lh, pred_rh = mni152_to_fsaverage_arrays(pred_img, density=density, method=method)
+    true_lh, true_rh = mni152_to_fsaverage_arrays(true_img, density=density, method=method)
+    return nct_dice_spin_test_surface(
+        pred_lh,
+        pred_rh,
+        true_lh,
+        true_rh,
+        pct=pct,
+        n_perm=n_perm,
+        random_state=random_state,
+        density=density,
+    )
 
 def dice_top_k(y_true: np.ndarray, y_prob: np.ndarray, k=None):
     """Compute dice score of top k.
