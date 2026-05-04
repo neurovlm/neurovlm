@@ -1,39 +1,85 @@
 # Unified Knowledge Graph Pipeline
 
-Documents how the three source knowledge graphs — MeSH, NLP co-occurrence, and CogAtlas — are built and merged into a single canonical entity graph for the NeuroVLM R-GCN.
+Documents how the three source knowledge graphs — MeSH, NLP co-occurrence, and
+CogAtlas — are built, typed, and merged into the final unified KG used by the R-GCN.
+
+---
+
+## Notebook Index
+
+All pipeline notebooks live in `experiments/`. Run them in order to reproduce the
+unified KG from scratch.
+
+| # | notebook | what it does | key outputs |
+|---|---|---|---|
+| 1 | `mesh_kg.ipynb` | Parses `desc2026.xml` to build the MeSH descriptor table and hierarchy edges. Assigns semantic node types from tree-number prefixes. Produces the MeSH node table and hierarchy edge file. | `data/mesh_kg/mesh_descriptors.parquet`, `mesh_kg_nodes.parquet`, `mesh_kg_edges_hierarchy.parquet` |
+| 2 | `mesh_kg_cooccurrence.ipynb` | Builds co-occurrence and typed relation edges from PubMed MeSH annotations. Combines hierarchy + co-occurrence + typed edges into the full MeSH edge file. | `data/mesh_kg/mesh_kg_edges_all.parquet` (305,227 edges) |
+| 3 | `nlp_graph.ipynb` | Filters 133K raw NLP nodes down to 12,841 typed nodes using degree/strength/community/alias thresholds. Filters edges to both-endpoint survivors. Exports in unified KG schema. | `data/nlp_kg/nlp_kg_nodes.parquet`, `nlp_kg_edges.parquet` (155,352 edges) |
+| 4 | `kg_unification.ipynb` | Merges MeSH + CogAtlas + NLP into a single canonical entity table. Assigns canonical IDs (MeSH UI > cogat_ > nlp_). Remaps NLP edges to canonical IDs. Saves initial unified KG. | `data/unified_kg/unified_kg_nodes.parquet` (33,784 nodes), `unified_kg_edges.parquet` (329,566 edges — pre-qualifier snapshot) |
+| 5 | `mesh_qualifier_re.ipynb` | Extracts 14.79M semantically-typed edges from MeSH annotation qualifiers. Replaces generic `co_occurs_with` edges with `implicated_in`, `associated_with_disorder`, `treated_by`, `used_in` using qualifier suffix mappings. | `data/nlp_kg/nlp_kg_edges_qualified.parquet` (14,790,106 edges) |
+| 6 | `llm_relation_extraction.ipynb` | Uses an LLM to extract a small set of high-confidence typed edges from paper abstracts that were missed by the qualifier approach. | `data/nlp_kg/nlp_kg_edges_llm.parquet` (52 edges) |
+| 7 | `kg_edge_merge.ipynb` | Merges the original 329K edges + 14.79M qualifier edges + 52 LLM edges. Deduplicates by keeping the highest-weight edge per (subject, relation, object) triple. Overwrites `unified_kg_edges.parquet` with the final 15.1M-edge file. | `data/unified_kg/unified_kg_edges.parquet` (15,113,176 edges — final) |
+| 8 | `rgcn_kg_colab.ipynb` | Trains the R-GCN link prediction model on the unified KG on Google Colab (A100). See `rgcn_pipeline.md` for full training details. | `MyDrive/neurovlm/embeddings/entity_embeddings_v2.pt` |
+
+**Track 2 notebooks (coordinate GNN — independent of the KG pipeline):**
+
+| notebook | what it does |
+|---|---|
+| `coord_gnn_colab.ipynb` | Trains the atlas-free coordinate GNN (Track 2) on Colab. Uses fMRI coordinate data, not the unified KG. |
+
+**Also in `experiments/`:**
+
+| file | description |
+|---|---|
+| `train_coord_gnn.py` | Local training script for the coordinate GNN (Track 2 equivalent of the Colab notebook) |
+| `train_difumo_gat.py` | Training script for the DiFuMo soft atlas GAT (early Track 1 experiment, predates the KG approach) |
+| `difumo_gat.ipynb` | Interactive walkthrough of the DiFuMo/GAT approach — early Track 1 experiment, kept for reference |
+| `rgcn_pipeline.md` | Architecture, training config, and embedding details for the R-GCN (Phase 3) |
+| `unified_kg_pipeline.md` | This file — documents the KG build pipeline (Phases 1–2) |
+| `data.zip` | Old data snapshot (predates the qualifier-typed edges and v2 embeddings — **do not use as the authoritative data source**) |
+
+> **Note on notebook output staleness:** `kg_unification.ipynb` outputs show
+> 329,566 edges because it was last run before the qualifier step existed. The
+> files on disk reflect the merged 15.1M-edge state produced by `kg_edge_merge.ipynb`.
 
 ---
 
 ## Overview
 
 ```
-PubMed abstracts (1.2 M)
+PubMed abstracts (1,231,613)
     │
-    ├─► MeSH annotations ──────► MeSH KG          (31,110 nodes, 305,227 edges)
-    │                                 │
-    ├─► NLP extraction ────────► NLP KG            (12,841 nodes, 155,352 edges)
-    │                                 │
-    └─► CogAtlas scrape ───────► CogAtlas KG       (918 nodes)
-                                      │
-                                      ▼
-                               Entity normalisation
-                                      │
-                                      ▼
-                               Unified KG            (33,784 nodes, 329,566 edges)
+    ├─► MeSH annotations ──► mesh_kg.ipynb ──────────────────────────────┐
+    │                         mesh_kg_cooccurrence.ipynb                  │ MeSH KG
+    │                         305,227 edges                               │
+    │                                                                     ▼
+    ├─► NLP extraction ────► nlp_graph.ipynb                       kg_unification.ipynb
+    │                         12,841 nodes, 155,352 edges         (entity normalisation)
+    │                                                                     │
+    └─► CogAtlas scrape ───► (in kg_unification.ipynb)                   │
+                              752 new cogat_ nodes, 0 edges              ▼
+                                                              unified_kg_nodes.parquet
+                                                              unified_kg_edges.parquet
+                                                              (33,784 nodes, 329,566 edges)
+                                                                         │
+                                                                         ▼
+    MeSH annotation qualifiers ──► mesh_qualifier_re.ipynb          kg_edge_merge.ipynb
+    14,790,106 typed edges                                               │
+                                                                         ▼
+    LLM relation extraction ────► llm_relation_extraction.ipynb   unified_kg_edges.parquet
+    52 typed edges                                                (15,113,176 edges — FINAL)
 ```
 
 ---
 
 ## Stage 1 — MeSH Knowledge Graph
 
-**Source:** PubMed MeSH annotations for 1,231,613 neuroimaging abstracts.  
+**Notebooks:** `mesh_kg.ipynb`, `mesh_kg_cooccurrence.ipynb`  
 **Code:** `src/neurovlm/gnn/mesh.py`
 
 ### Nodes
 
-All 31,110 MeSH descriptors are retained. Each descriptor has a `DescriptorUI` (e.g. `D006624`), a preferred name, a set of synonyms (entry terms), and one or more tree numbers that encode its position in the MeSH hierarchy.
-
-Node types are assigned by mapping tree-number prefixes to semantic categories:
+All 31,110 MeSH descriptors are retained. Node types are assigned from tree-number prefixes:
 
 | node_type | MeSH tree prefix | count |
 |---|---|---|
@@ -49,192 +95,155 @@ Node types are assigned by mapping tree-number prefixes to semantic categories:
 
 ### Edges
 
-Three edge layers are combined into `mesh_kg_edges_all.parquet`:
+Three edge layers combined into `mesh_kg_edges_all.parquet`:
 
-| relation_type | count | construction method |
+| relation_type | count | construction |
 |---|---|---|
-| `co_occurs_with` | 257,290 | Abstract-level co-occurrence: an edge `(A, B)` is added when descriptors A and B both annotate the same abstract, with weight = number of shared abstracts. Only edges with at least one endpoint in the neuroimaging-relevant subtrees are kept. |
-| `narrower_term_of` | 42,519 | Direct MeSH tree-number parent → child relationships. Encodes the ontological hierarchy. |
-| `associated_with_disorder` | 2,107 | Curated disorder–anatomy / disorder–gene associations derived from MeSH supplementary records. |
-| `implicated_in` | 1,803 | Gene/molecule → biological process links from MeSH qualifier pairings. |
-| `co_activates_with` | 931 | Region–region co-activation edges sourced from neuroimaging co-activation metadata. |
-| `expressed_in` | 577 | Gene → anatomical region expression links. |
-
-**Total: 305,227 edges.**
-
-The MeSH KG is the canonical backbone. Every concept that can be mapped to a MeSH DescriptorUI inherits that UI as its canonical identifier throughout the pipeline.
+| `co_occurs_with` | 257,290 | Descriptor pairs co-annotating the same abstract; ≥1 endpoint in neuroimaging subtrees |
+| `narrower_term_of` | 42,519 | Direct MeSH tree-number parent → child (ontological hierarchy) |
+| `associated_with_disorder` | 2,107 | Curated disorder–anatomy/gene associations from MeSH supplementary records |
+| `implicated_in` | 1,803 | Gene/molecule → biological process from MeSH qualifier pairings |
+| `co_activates_with` | 931 | Region–region co-activation edges from neuroimaging metadata |
+| `expressed_in` | 577 | Gene → anatomical region expression links |
 
 ---
 
 ## Stage 2 — NLP Co-occurrence Graph
 
-**Source:** Entity extraction from the same 1,231,613 PubMed abstracts using an NLP pipeline (spaCy + custom NER + community detection).  
-**Code:** `experiments/nlp_graph.ipynb`
+**Notebook:** `nlp_graph.ipynb`
 
-### Construction
+Raw graph from 1,231,613 PubMed abstracts: 133,625 typed nodes, 11,043,916 edges (min weight 50 — floor set at extraction time, cannot be lowered here).
 
-**Extraction:** Named entities and noun phrases were extracted from abstracts, normalised (lowercased, punctuation-stripped, whitespace-collapsed), and counted for pairwise co-occurrence within each abstract.
-
-**Raw graph:**
-- 214,495 unique terms (nodes)
-- 11,043,916 co-occurrence edges (minimum weight 50 — floor set upstream at extraction time)
-
-**Node typing:** A multi-class NLP classifier assigns each term one of eight semantic categories: `anatomical_region`, `cognitive_construct`, `disorder`, `intervention`, `method`, `metric`, `modality`, `network`, or `other`. The classifier outputs a confidence score per class; the argmax is taken as the label.
-
-`other` nodes have `label_confidence = 1.0` with all eight category scores at `0.0` — the classifier is maximally certain these terms have no neuroscience semantic type (generic vocabulary: *data*, *findings*, *patient*, *age*, …). They are dropped entirely.
-
-**Node filters** applied to the remaining 133,625 typed nodes:
+Node filters applied:
 
 | filter | rationale |
 |---|---|
 | `degree > 10` | removes rare terms too sparse to be reliable |
-| `degree < 10,000` | removes hub non-terms (generic words like *study*, *model*) |
+| `degree < 10,000` | removes hub non-terms (*study*, *model*, *data*) |
 | `strength < 2,500,000` | removes hyper-frequent stop-like terms |
-| community size ≥ 20 | Louvain communities with fewer than 20 members are considered noise |
-| `alias_count < limit` (type-conditional) | collapses near-duplicate surface forms; limit is 50 for anatomical/cognitive types, 15–20 for method/metric/modality |
-| `node_label != "other"` | excludes untyped terms |
+| community size ≥ 20 | Louvain micro-clusters are noise |
+| `alias_count < limit` (type-conditional) | collapses near-duplicate surface forms; 50 for anatomical/cognitive types, 15–20 for method/metric/modality |
+| `node_label != "other"` | `other` nodes have all category scores = 0 — no semantic type |
 
-**After filtering:**
-
-| node_type | count | retention |
-|---|---|---|
-| modality | 4,759 | 28.7% |
-| method | 1,833 | 24.7% |
-| anatomical_region | 1,783 | 27.1% |
-| metric | 1,470 | 30.4% |
-| disorder | 1,397 | 31.9% |
-| cognitive_construct | 708 | 30.3% |
-| intervention | 677 | 27.0% |
-| network | 214 | 29.4% |
-| **total** | **12,841** | |
-
-**Edge filter:** Edges where either endpoint was removed by node filtering are dropped.  
-155,352 edges remain (from 11,043,916), all typed `co_occurs_with`, weight range [50, 17,708].
+After filtering: **12,841 nodes, 155,352 edges**.
 
 ---
 
 ## Stage 3 — CogAtlas Knowledge Graph
 
-**Source:** [cognitiveatlas.org](https://www.cognitiveatlas.org) — a community-curated cognitive ontology.  
-**Code:** `src/neurovlm/cogatlas.py`, `src/neurovlm/gnn/normalize.py`
+**Code:** `src/neurovlm/gnn/normalize.py` (run inside `kg_unification.ipynb`)
 
-### Construction
-
-The CogAtlas JSON API returns HTTP 500 for bulk requests. Concepts were scraped from the HTML listing pages (`/concepts/a-z`) using BeautifulSoup, yielding 918 unique concepts with their `trm_id` and preferred name.
-
-All CogAtlas concepts are typed `cognitive_construct`. No relation edges are available from the scrape (the API would be required for those).
+918 cognitive concepts scraped from cognitiveatlas.org. 166 map to existing MeSH descriptors via string matching; 752 become new `cogat_` nodes. No relation edges are available (the CogAtlas API returns HTTP 500 for bulk relation requests; the `kind_of` scrape produced zero edges that survived endpoint remapping). CogAtlas contributes **nodes only** to the unified graph.
 
 ---
 
 ## Stage 4 — Entity Normalisation and Unification
 
-**Code:** `src/neurovlm/gnn/normalize.py`, `experiments/kg_unification.ipynb`
+**Notebook:** `kg_unification.ipynb`  
+**Code:** `src/neurovlm/gnn/normalize.py`
 
-### Canonical ID assignment
+MeSH DescriptorUI is the canonical backbone. Concepts resolved to MeSH inherit its UI; others get `cogat_trm_*` or `nlp_*` IDs.
 
-MeSH `DescriptorUI` is the canonical backbone. Every concept that can be resolved to a MeSH descriptor inherits its UI.
-
-**MeSH synonym lookup** is built from all 31,110 descriptors expanded with their full synonym lists (entry terms):
-
-```
-245,494 normalised-string → DescriptorUI mappings
-```
-
-String normalisation (`_norm`): lowercase → strip punctuation → collapse whitespace.
-
-### CogAtlas mapping
-
-Each CogAtlas concept is string-matched against the MeSH synonym lookup:
-
-| outcome | count |
-|---|---|
-| Mapped to MeSH (`mesh_synonym_match`) | 166 |
-| New node (`cogat_{trm_id}`) | 752 |
-
-Unmapped concepts retain their CogAtlas identifier as `cogat_trm_XXXXX`.
-
-### NLP entity normalisation
-
-NLP terms go through a type-conditional five-step matching cascade:
+**NLP matching cascade (type-conditional):**
 
 ```
-Step 1  exact MeSH synonym match          → canonical MeSH UI
-Step 2  exact CogAtlas name match         → cogat_ or MeSH UI (via cogat mapping)
-Step 3  word-boundary substring match     → canonical MeSH UI      (KEEP_TYPES only)
-Step 4  keep as nlp_ node                 → nlp_{slug}             (KEEP_TYPES only)
-Step 5  discard                           → dropped                (DISCARD_TYPES if no exact match)
+Step 1  exact MeSH synonym match          → MeSH UI                 (all types)
+Step 2  exact CogAtlas name match         → cogat_ or MeSH UI       (all types)
+Step 3  word-boundary substring match     → MeSH UI                 (KEEP_TYPES only)
+Step 4  keep as nlp_ node                 → nlp_{slug}              (KEEP_TYPES only)
+Step 5  discard                           → dropped                 (DISCARD_TYPES if no exact match)
 ```
 
-**DISCARD_TYPES** (`modality`, `method`, `metric`): Exact match only. These types contain high noise from the NLP classifier; unmatched terms are dropped rather than kept as new nodes, since a generic term like *analysis* or *scan* should not become a graph node.
+DISCARD_TYPES (`modality`, `method`, `metric`): exact match only — unmatched terms are too noisy.  
+KEEP_TYPES (`disorder`, `anatomical_region`, `cognitive_construct`, `network`, `intervention`): proceed through all five steps — valid concepts often absent from MeSH (*default mode network*, *frontoparietal*, *endovascular treatment*).
 
-**KEEP_TYPES** (`disorder`, `anatomical_region`, `cognitive_construct`, `network`, `intervention`): Proceed through all five steps. Unmatched terms are retained as `nlp_{slug}` nodes because these types frequently contain valid concepts absent from MeSH (e.g. *default mode network*, *frontoparietal*, *endovascular treatment*).
-
-**Substring matching** (Step 3): Word-boundary aware — implemented as `" term " in " syn "` using space-padding to prevent false matches (e.g. `brain` does not match `brainstem`). Minimum term length 6 characters. Primary descriptor names are preferred over synonyms in case of ambiguity (prevents e.g. `alzheimer` resolving to *Amyloid beta-Peptides* instead of *Alzheimer Disease*).
-
-**Secondary type filter** (`NLP_NODE_FILTERS`): After Step 3 fails, a per-type regex discards known-bad residuals before they become `nlp_` nodes. Example for `anatomical_region`:
-```
-\b(?:activity|activation)\b | \bmri\b | ^(?:hemisphere|lobes|whole-brain|whole brain)$
-```
-This discards functional states and modality contamination that the NLP classifier mislabelled as anatomical regions.
-
-**LLM audits (post-hoc):** Two Ollama (`qwen2.5:7b-instruct`) verification passes were run after the programmatic pipeline:
-
-1. **nlp_ node audit** — checked all 3,296 kept `nlp_` nodes; flagged 1,603 as NO/UNCERTAIN. Flagged nodes are removed from the canonical mapping (treated as discarded).
-2. **Substring match audit** — checked all 543 substring matches for correctness of the MeSH mapping (ignoring node_type). Flagged KEEP_TYPE nodes are remapped to `nlp_{slug}` instead of the wrong MeSH ID; DISCARD_TYPE nodes are dropped.
-
-**FORCE_MAP:** A manually maintained override dict corrects known-bad matches that are too ambiguous for programmatic resolution (e.g. `occipital → Occipital Bone` should be `occipital → Occipital Lobe`).
+Two LLM audit passes (`qwen2.5:7b-instruct` via Ollama) were run post-hoc to flag and remove bad substring matches and miscategorised `nlp_` nodes.
 
 **NLP match summary:**
 
 | match_type | count |
 |---|---|
 | discarded | 7,267 |
-| new_nlp_node | 3,296 |
+| new_nlp_node | 1,922 (after LLM audit from 3,296) |
 | mesh_synonym_match | 1,662 |
-| mesh_substring_match | 543 |
+| mesh_substring_match | 300 (after LLM audit from 543) |
 | cogat_name_match | 73 |
 
-### Master entity table
+**Master entity table: 33,784 canonical entities.**
 
-The three node sets are merged into a single canonical entity table. When multiple sources map to the same canonical ID, the `sources` column records all contributing KGs.
+Initial unified edge file: **329,566 edges** (MeSH 305,227 + NLP 24,339).
 
-| primary_source | count |
-|---|---|
-| mesh | 31,110 |
-| nlp | 1,922 |
-| cogatlas | 752 |
-| **total** | **33,784** |
+---
 
-### Edge remapping
+## Stage 5 — Qualifier-Based Edge Typing
 
-NLP edges are remapped: both endpoints are replaced with their canonical IDs. Edges where either endpoint has no canonical mapping (discarded terms) are dropped.
+**Notebook:** `mesh_qualifier_re.ipynb`  
+**Code:** `src/neurovlm/gnn/mesh_re.py`
 
-| source | edges retained |
-|---|---|
-| MeSH (identity mapping) | 305,227 |
-| NLP (after remapping) | 24,339 (of 155,352) |
-| **Unified total** | **329,566** |
+MeSH annotations include qualifier suffixes (e.g. `Brain/pathology`, `Surgery/methods`) that encode semantic relationships. This notebook maps qualifier suffixes to relation types:
 
-**Relation types in unified graph:**
+| qualifier group | relation_type | example |
+|---|---|---|
+| pathology, physiology, metabolism, genetics, … | `implicated_in` | Brain/pathology |
+| diagnostic imaging, diagnosis, complications, etiology, … | `associated_with_disorder` | Hippocampus/diagnostic imaging |
+| surgery, therapeutic use, therapy, drug therapy | `treated_by` | Brain Neoplasms/surgery |
+| methods, instrumentation | `used_in` | MRI/methods |
 
-| relation_type | count |
-|---|---|
-| `co_occurs_with` | 281,629 |
-| `narrower_term_of` | 42,519 |
-| `associated_with_disorder` | 2,107 |
-| `implicated_in` | 1,803 |
-| `co_activates_with` | 931 |
-| `expressed_in` | 577 |
+83.8% of qualified annotation rows are covered by the mapping. After pairing terms within the same abstract and filtering to unified KG node endpoints: **14,790,106 typed edges** saved to `nlp_kg/nlp_kg_edges_qualified.parquet`.
+
+---
+
+## Stage 6 — LLM Relation Extraction
+
+**Notebook:** `llm_relation_extraction.ipynb`
+
+Extracts a small set of typed edges from raw abstract text using an LLM for cases the qualifier approach misses. Produces 52 high-confidence edges saved to `nlp_kg/nlp_kg_edges_llm.parquet`.
+
+---
+
+## Stage 7 — Final Edge Merge
+
+**Notebook:** `kg_edge_merge.ipynb`
+
+Concatenates the three edge sources and deduplicates: for the same `(subject, relation, object)` triple appearing in multiple sources, the row with the highest weight is kept (ties broken by source priority: `mesh > mesh_qualifier > llm_re > nlp`). Self-loops are dropped.
+
+| source | edges in | edges after dedup |
+|---|---|---|
+| original unified (MeSH + NLP) | 329,566 | — |
+| qualifier-typed | 14,790,106 | — |
+| LLM-RE | 52 | — |
+| **merged total** | **15,119,724** | **15,113,176** |
+
+**Final relation distribution:**
+
+| relation_type | count | % | primary source |
+|---|---|---|---|
+| `implicated_in` | 6,619,101 | 43.8% | mesh_qualifier |
+| `associated_with_disorder` | 4,185,364 | 27.7% | mesh_qualifier |
+| `treated_by` | 2,695,381 | 17.8% | mesh_qualifier |
+| `used_in` | 1,290,297 | 8.5% | mesh_qualifier |
+| `co_occurs_with` | 278,985 | 1.8% | mesh / nlp |
+| `narrower_term_of` | 42,519 | 0.3% | mesh |
+| `co_activates_with` | 933 | 0.0% | mesh |
+| `expressed_in` | 596 | 0.0% | mesh |
 
 ---
 
 ## Output Files
 
-All outputs written to `experiments/data/unified_kg/`:
+All outputs in `experiments/data/`:
 
 | file | description |
 |---|---|
-| `unified_kg_nodes.parquet` | 33,784 canonical entities with `canonical_id`, `name`, `node_type`, `primary_source`, `sources` |
-| `unified_kg_edges.parquet` | 329,566 edges with `subject_id`, `relation_type`, `object_id`, `source`, `weight`, `source_kg` |
-| `cogat_kg_nodes.parquet` | 918 CogAtlas concepts with match metadata |
-| `merge_log.json` | Full audit log — one record per mapped/discarded NLP and CogAtlas entity |
+| `unified_kg/unified_kg_nodes.parquet` | 33,784 canonical entities — `canonical_id`, `name`, `node_type`, `primary_source`, `sources` |
+| `unified_kg/unified_kg_edges.parquet` | 15,113,176 typed edges — `subject_id`, `relation_type`, `object_id`, `source`, `weight`, `source_kg` |
+| `unified_kg/unified_kg_edges_backup.parquet` | Pre-merge backup (329,566 edges, pre-qualifier state) |
+| `unified_kg/cogat_kg_nodes.parquet` | 918 CogAtlas concepts with match metadata |
+| `unified_kg/merge_log.json` | Audit log — one record per mapped/discarded NLP and CogAtlas entity |
+| `mesh_kg/mesh_descriptors.parquet` | 31,110 MeSH descriptors with tree numbers and synonyms |
+| `mesh_kg/mesh_kg_nodes.parquet` | MeSH node table with semantic node types |
+| `mesh_kg/mesh_kg_edges_all.parquet` | Combined MeSH edges (305,227) |
+| `nlp_kg/nlp_kg_nodes.parquet` | 12,841 filtered NLP nodes |
+| `nlp_kg/nlp_kg_edges.parquet` | 155,352 NLP co-occurrence edges |
+| `nlp_kg/nlp_kg_edges_qualified.parquet` | 14,790,106 qualifier-typed edges |
+| `nlp_kg/nlp_kg_edges_llm.parquet` | 52 LLM-extracted typed edges |
