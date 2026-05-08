@@ -53,6 +53,9 @@ class CoordGNN(nn.Module):
         Output embedding dimension.  Default 384 (matches NeuroVLM latent space).
     dropout:
         Dropout applied inside GATConv attention.  Default 0.1.
+    add_self_loops:
+        If True, each GAT layer adds self-loop edges. Turn this off for
+        ablations that test whether attention is dominated by node identity.
     """
 
     def __init__(
@@ -62,6 +65,7 @@ class CoordGNN(nn.Module):
         heads: int = 8,
         out_dim: int = 384,
         dropout: float = 0.1,
+        add_self_loops: bool = True,
     ):
         super().__init__()
         try:
@@ -87,17 +91,17 @@ class CoordGNN(nn.Module):
         self.conv1 = GATConv(
             hidden, hidden,
             heads=heads, concat=True,
-            dropout=dropout, edge_dim=4, add_self_loops=True,
+            dropout=dropout, edge_dim=4, add_self_loops=add_self_loops,
         )
         self.conv2 = GATConv(
             hidden * heads, hidden,
             heads=heads, concat=True,
-            dropout=dropout, edge_dim=4, add_self_loops=True,
+            dropout=dropout, edge_dim=4, add_self_loops=add_self_loops,
         )
         self.conv3 = GATConv(
             hidden * heads, hidden,
             heads=1, concat=False,
-            dropout=dropout, edge_dim=4, add_self_loops=True,
+            dropout=dropout, edge_dim=4, add_self_loops=add_self_loops,
         )
 
         # LayerNorm after each concat layer (not BatchNorm)
@@ -106,6 +110,7 @@ class CoordGNN(nn.Module):
 
         self.proj = nn.Linear(hidden, out_dim)
         self.dropout_p = dropout
+        self.add_self_loops = add_self_loops
 
     def forward(
         self,

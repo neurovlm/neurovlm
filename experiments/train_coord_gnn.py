@@ -26,7 +26,9 @@ Optional flags
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -36,10 +38,17 @@ import torch.nn.functional as F
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from neurovlm.data import load_dataset, load_latent
-from neurovlm.metrics import recall_at_k, recall_curve
+from neurovlm.metrics import bidirectional_retrieval_metrics
 from neurovlm.retrieval_resources import _load_pubmed_coordinates
 from neurovlm.gnn.coord_graph import normalize_coords
 from neurovlm.gnn.coord_dataset import CoordGraphDataset
+from neurovlm.gnn.coord_baselines import CoordDeepSet
+from neurovlm.gnn.coord_diagnostics import (
+    coord_graph_covariates,
+    embedding_covariate_correlations,
+    evaluate_pretrained_neurovlm_baseline,
+    retrieval_diagnostics,
+)
 from neurovlm.gnn.coord_model import CoordGNN
 from neurovlm.gnn.coord_train import CoordTrainer
 from neurovlm.gnn.model import TextProjHead
@@ -62,13 +71,38 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lr-proj", type=float, default=1e-5)
     p.add_argument("--hidden", type=int, default=128)
     p.add_argument("--heads", type=int, default=8)
+    p.add_argument("--out-dim", type=int, default=384)
+    p.add_argument("--model", default="coord_gnn",
+                   choices=["coord_gnn", "coord_deepset"])
+    p.add_argument("--no-self-loops", action="store_true",
+                   help="Disable GAT-added self-loops for CoordGNN ablations.")
+    p.add_argument("--text-proj-init", default="random",
+                   choices=["random", "pretrained_infonce"],
+                   help="Initialize text projector randomly or from NeuroVLM InfoNCE.")
+    p.add_argument("--freeze-text-proj", action="store_true",
+                   help="Train coordinates into the fixed pretrained text latent space.")
     p.add_argument("--warmup-epochs", type=int, default=15)
     p.add_argument("--temperature", type=float, default=0.07)
     p.add_argument("--checkpoint-dir", default="checkpoints/coord_gnn")
     p.add_argument("--cache-dir", default="data/coord_graphs")
+    p.add_argument("--cache-file", default=None,
+                   help="Optional packed graph cache file. Faster than tiny .pt files.")
+    p.add_argument("--preload-to-ram", action="store_true")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda", "mps"])
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--val-interval", type=int, default=5)
+    p.add_argument("--num-workers", type=int, default=0)
+    p.add_argument("--prefetch-factor", type=int, default=None)
+    p.add_argument("--pin-memory", action="store_true")
+    p.add_argument("--amp", action="store_true")
+    p.add_argument("--early-stopping-patience", type=int, default=None)
+    p.add_argument("--monitor-metric", default="mean_auc")
+    p.add_argument("--run-dir", default=None,
+                   help="Directory for config, metrics, and diagnostics.")
+    p.add_argument("--diagnostics", action="store_true",
+                   help="Save covariate/rank/PC correlation diagnostics.")
+    p.add_argument("--eval-neurovlm-baseline", action="store_true",
+                   help="Evaluate pretrained NeuroVLM image/text projectors on the same split.")
     return p.parse_args()
 
 
@@ -182,8 +216,10 @@ def phase2_build_dataset(
         text_embeddings=text_tensor,
         unique_pmids=unique_pmids,
         cache_dir=args.cache_dir,
+        cache_file=args.cache_file,
         k=args.k,
         max_dist_mm=args.max_dist_mm,
+        preload_to_ram=args.preload_to_ram,
     )
     print(f"  Dataset size: {len(ds):,} papers")
 
@@ -211,19 +247,40 @@ def phase2_build_dataset(
 # Phase 3 — Model
 # ---------------------------------------------------------------------------
 
-def phase3_build_model(args: argparse.Namespace) -> tuple[CoordGNN, TextProjHead]:
+def phase3_build_model(args: argparse.Namespace) -> tuple[torch.nn.Module, TextProjHead]:
     print("\n── Phase 3: Model ───────────────────────────────────────────────")
-    brain_encoder = CoordGNN(
-        in_dim=5,
-        hidden=args.hidden,
-        heads=args.heads,
-        out_dim=384,
-    )
-    text_proj = TextProjHead(in_dim=768, hidden_dim=512, out_dim=384)
+    if args.model == "coord_gnn":
+        brain_encoder = CoordGNN(
+            in_dim=5,
+            hidden=args.hidden,
+            heads=args.heads,
+            out_dim=args.out_dim,
+            add_self_loops=not args.no_self_loops,
+        )
+    elif args.model == "coord_deepset":
+        brain_encoder = CoordDeepSet(
+            in_dim=5,
+            hidden=args.hidden,
+            out_dim=args.out_dim,
+        )
+    else:
+        raise ValueError(f"Unsupported model: {args.model}")
+
+    if args.text_proj_init == "pretrained_infonce":
+        if args.out_dim != 384:
+            raise ValueError("pretrained_infonce text projector requires --out-dim 384")
+        from neurovlm.models import ProjHead
+
+        text_proj = ProjHead.from_pretrained("text_infonce")
+    else:
+        text_proj = TextProjHead(in_dim=768, hidden_dim=512, out_dim=args.out_dim)
 
     n_brain = brain_encoder.count_parameters()
     n_text = sum(p.numel() for p in text_proj.parameters())
-    print(f"  CoordGNN params     : {n_brain:,}")
+    print(f"  Brain encoder       : {args.model}")
+    print(f"  Text projector init : {args.text_proj_init}")
+    print(f"  Text projector train: {not args.freeze_text_proj}")
+    print(f"  Brain params        : {n_brain:,}")
     print(f"  TextProjHead params : {n_text:,}")
 
     if n_brain < 500_000:
@@ -244,8 +301,8 @@ def phase3_build_model(args: argparse.Namespace) -> tuple[CoordGNN, TextProjHead
             batch_obj.x, batch_obj.edge_index,
             batch_obj.edge_attr, batch_obj.batch
         )
-        assert out.shape == (2, 384), f"Unexpected output shape: {out.shape}"
-    print("  Shape check passed: CoordGNN output (2, 384) ✓")
+        assert out.shape == (2, args.out_dim), f"Unexpected output shape: {out.shape}"
+    print(f"  Shape check passed: brain output (2, {args.out_dim}) ✓")
 
     return brain_encoder, text_proj
 
@@ -255,7 +312,7 @@ def phase3_build_model(args: argparse.Namespace) -> tuple[CoordGNN, TextProjHead
 # ---------------------------------------------------------------------------
 
 def phase4_train(
-    brain_encoder: CoordGNN,
+    brain_encoder: torch.nn.Module,
     text_proj: TextProjHead,
     train_ds,
     val_ds,
@@ -274,6 +331,14 @@ def phase4_train(
         device=args.device,
         val_interval=args.val_interval,
         checkpoint_dir=args.checkpoint_dir,
+        num_workers=args.num_workers,
+        prefetch_factor=args.prefetch_factor,
+        pin_memory=args.pin_memory,
+        use_amp=args.amp,
+        monitor_metric=args.monitor_metric,
+        early_stopping_patience=args.early_stopping_patience,
+        freeze_text_proj=args.freeze_text_proj,
+        config=vars(args),
         verbose=True,
     )
     trainer.fit(train_ds, val_ds)
@@ -289,54 +354,74 @@ def phase5_evaluate(
     trainer: CoordTrainer,
     test_ds,
     val_ds,
+    args: argparse.Namespace,
 ) -> None:
     print("\n── Phase 5: Evaluation ──────────────────────────────────────────")
     trainer.restore_best()
+    all_metrics: dict[str, dict[str, float]] = {}
 
     for split_name, ds in [("Val", val_ds), ("Test", test_ds)]:
         brain_emb, text_emb = trainer.collect_embeddings(ds)
-        brain_n = F.normalize(brain_emb, dim=1)
-        text_n = F.normalize(text_emb, dim=1)
-        sim = text_n @ brain_n.T   # (N, N)
-
-        r1 = recall_at_k(sim, 1)
-        r5 = recall_at_k(sim, 5)
-        r10 = recall_at_k(sim, 10)
-        t2i, i2t = recall_curve(text_emb, brain_emb)
-        auc = float((t2i.mean() + i2t.mean()) / 2)
+        metrics = bidirectional_retrieval_metrics(text_emb, brain_emb)
+        all_metrics[split_name.lower()] = metrics
 
         print(f"\n  {split_name} set ({len(ds)} papers):")
-        print(f"    recall@1  = {r1:.4f}")
-        print(f"    recall@5  = {r5:.4f}")
-        print(f"    recall@10 = {r10:.4f}")
-        print(f"    AUC       = {auc:.4f}  (NeuroVLM MLP baseline ≈ 0.81)")
+        print(f"    recall@1   = {metrics['mean_recall@1']:.4f}")
+        print(f"    recall@5   = {metrics['mean_recall@5']:.4f}")
+        print(f"    recall@10  = {metrics['mean_recall@10']:.4f}")
+        print(f"    recall@50  = {metrics['mean_recall@50']:.4f}")
+        print(f"    MRR        = {metrics['mean_mrr']:.4f}")
+        print(f"    median rank= {metrics['mean_median_rank']:.1f}")
+        print(
+            f"    AUC        = {metrics['mean_auc']:.4f}  "
+            "(recall-curve AUC; compare only to same metric)"
+        )
+
+    if args.eval_neurovlm_baseline:
+        print("\n  Pretrained NeuroVLM baseline on the same PMID split:")
+        for split_name, ds in [("Val", val_ds), ("Test", test_ds)]:
+            baseline = evaluate_pretrained_neurovlm_baseline(ds, args.device)
+            all_metrics[f"{split_name.lower()}_neurovlm_baseline"] = baseline
+            print(
+                f"    {split_name}: AUC={baseline['mean_auc']:.4f} "
+                f"r@10={baseline['mean_recall@10']:.4f} "
+                f"MRR={baseline['mean_mrr']:.4f} "
+                f"n={int(baseline['n_eval'])}/{int(baseline['n_requested'])}"
+            )
 
     # ── Comparison table ──────────────────────────────────────────────────
     print("\n  ┌─────────────────────────┬──────────┬────────────┬────────┐")
     print("  │ Model                   │ AUC      │ Atlas-free │ Params │")
     print("  ├─────────────────────────┼──────────┼────────────┼────────┤")
-    print("  │ NeuroVLM MLP (baseline) │ 0.81     │ No         │ —      │")
+    print("  │ NeuroVLM MLP baseline   │ report   │ No         │ —      │")
     print("  │ Track 1 DiFuMo GAT      │ (run it) │ No         │ —      │")
-    print(f"  │ Track 2 Coord GNN       │ {auc:.4f}   │ Yes        │ {trainer.brain_encoder.count_parameters()//1000}K  │")
+    auc = all_metrics["test"]["mean_auc"]
+    print(f"  │ Track 2 {args.model:<14} │ {auc:.4f}   │ Yes        │ {trainer.brain_encoder.count_parameters()//1000}K  │")
     print("  └─────────────────────────┴──────────┴────────────┴────────┘")
 
     # ── Attention analysis ─────────────────────────────────────────────────
     print("\n── Phase 6: Attention Analysis (top-5 edges per paper) ──────────")
-    snapshots = trainer.get_attention_snapshot(val_ds, n_samples=10)
-    for snap in snapshots:
-        print(f"\n  Paper idx={snap['paper_idx']} "
-              f"({snap['node_coords_mni'].shape[0]} peaks):")
-        for e in snap["top_edges"]:
-            src = [f"{v:.1f}" for v in e["src_mni"]]
-            dst = [f"{v:.1f}" for v in e["dst_mni"]]
-            print(f"    [{', '.join(src)}] → [{', '.join(dst)}]  "
-                  f"attn={e['weight']:.4f}")
+    if args.model == "coord_gnn":
+        snapshots = trainer.get_attention_snapshot(
+            val_ds, n_samples=10, exclude_self_loops=True
+        )
+        for snap in snapshots:
+            print(f"\n  Paper idx={snap['paper_idx']} "
+                  f"({snap['node_coords_mni'].shape[0]} peaks, "
+                  f"self-loop mass={snap['attention_self_loop_mass']:.2f}):")
+            for e in snap["top_edges"]:
+                src = [f"{v:.1f}" for v in e["src_mni"]]
+                dst = [f"{v:.1f}" for v in e["dst_mni"]]
+                print(f"    [{', '.join(src)}] → [{', '.join(dst)}]  "
+                      f"attn={e['weight']:.4f}")
+    else:
+        print("  Skipped: selected baseline has no attention weights.")
 
     # ── Failure analysis ───────────────────────────────────────────────────
     print("\n── Failure Analysis (20 worst papers) ───────────────────────────")
     brain_emb, text_emb = trainer.collect_embeddings(test_ds)
-    brain_n = F.normalize(brain_emb, dim=1)
-    text_n = F.normalize(text_emb, dim=1)
+    brain_n = F.normalize(brain_emb.float(), dim=1)
+    text_n = F.normalize(text_emb.float(), dim=1)
     sim = text_n @ brain_n.T
     hits = (sim.argsort(dim=1, descending=True)[:, :10] ==
             torch.arange(len(sim)).unsqueeze(1)).any(dim=1)
@@ -345,6 +430,21 @@ def phase5_evaluate(
           f"out of {len(sim)} test papers.")
     print("  (Run UMAP visualization in the notebook for spatial analysis.)")
 
+    if args.run_dir:
+        run_dir = Path(args.run_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        with open(run_dir / "metrics.json", "w") as f:
+            json.dump(all_metrics, f, indent=2)
+
+        if args.diagnostics:
+            cov = coord_graph_covariates(test_ds)
+            rank_df = retrieval_diagnostics(text_emb, brain_emb, covariates=cov)
+            corr = embedding_covariate_correlations(brain_emb, cov)
+            cov.to_csv(run_dir / "test_coord_covariates.csv", index=False)
+            rank_df.to_csv(run_dir / "test_retrieval_diagnostics.csv", index=False)
+            corr.to_csv(run_dir / "test_embedding_pc_covariates.csv", index=False)
+            print(f"  Diagnostics saved to {run_dir}")
+
 
 # ---------------------------------------------------------------------------
 # Main
@@ -352,6 +452,17 @@ def phase5_evaluate(
 
 def main() -> None:
     args = parse_args()
+    if args.run_dir is None:
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        args.run_dir = str(Path("runs") / f"{args.model}_{stamp}")
+    Path(args.run_dir).mkdir(parents=True, exist_ok=True)
+    if args.cache_file is None:
+        cache_name = f"coord_graphs_k{args.k}_d{str(args.max_dist_mm).replace('.', 'p')}.pt"
+        args.cache_file = str(Path(args.cache_dir).with_suffix("") / cache_name)
+    Path(args.checkpoint_dir).mkdir(parents=True, exist_ok=True)
+    with open(Path(args.run_dir) / "config.json", "w") as f:
+        json.dump(vars(args), f, indent=2)
+
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
@@ -368,7 +479,7 @@ def main() -> None:
     trainer = phase4_train(brain_encoder, text_proj, train_ds, val_ds, args)
 
     # Phase 5 — Evaluation
-    phase5_evaluate(trainer, test_ds, val_ds)
+    phase5_evaluate(trainer, test_ds, val_ds, args)
 
     print("\nDone.")
 

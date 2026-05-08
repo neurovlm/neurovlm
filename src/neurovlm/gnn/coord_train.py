@@ -25,7 +25,7 @@ from torch import nn, Tensor
 import torch.nn.functional as F
 
 from neurovlm.loss import InfoNCELoss
-from neurovlm.metrics import recall_at_k, recall_curve
+from neurovlm.metrics import bidirectional_retrieval_metrics, recall_curve
 from .coord_dataset import CoordGraphDataset, _SubsetCoordDataset
 from .coord_model import CoordGNN
 from .model import TextProjHead
@@ -101,6 +101,10 @@ class CoordTrainer:
         pin_memory: bool = False,
         use_amp: bool = False,
         prefetch_factor: Optional[int] = None,
+        monitor_metric: str = "mean_auc",
+        early_stopping_patience: Optional[int] = None,
+        freeze_text_proj: bool = False,
+        config: Optional[dict] = None,
         verbose: bool = True,
     ):
         if device == "auto":
@@ -118,6 +122,10 @@ class CoordTrainer:
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.prefetch_factor = prefetch_factor
+        self.monitor_metric = monitor_metric
+        self.early_stopping_patience = early_stopping_patience
+        self.freeze_text_proj = freeze_text_proj
+        self.config = config or {}
         # BF16 AMP only makes sense on CUDA; silently disable elsewhere
         self.use_amp = use_amp and self.device.type == "cuda"
         self.verbose = verbose
@@ -125,23 +133,29 @@ class CoordTrainer:
 
         self.loss_fn = InfoNCELoss(temperature=temperature)
 
-        self.optimizer = torch.optim.AdamW(
-            [
-                {"params": self.brain_encoder.parameters(), "lr": lr_gnn},
-                {"params": self.text_proj.parameters(), "lr": lr_proj},
-            ],
-            weight_decay=1e-4,
-        )
+        param_groups = [{"params": self.brain_encoder.parameters(), "lr": lr_gnn}]
+        if freeze_text_proj:
+            for p in self.text_proj.parameters():
+                p.requires_grad_(False)
+        else:
+            param_groups.append({"params": self.text_proj.parameters(), "lr": lr_proj})
+
+        self.optimizer = torch.optim.AdamW(param_groups, weight_decay=1e-4)
 
         self.scheduler: Optional[torch.optim.lr_scheduler.LambdaLR] = None
 
         self._best_state: Optional[dict] = None
         self._best_val_recall: float = -1.0
+        self._last_epoch: int = -1
         self.history: dict[str, list] = {
             "train_loss": [],
-            "val_recall_t2i": [],
+            "val_loss": [],
+            "val_recall_t2i": [],  # legacy aliases for val_t2i_auc / val_i2t_auc
             "val_recall_i2t": [],
             "embed_sim": [],       # collapse monitor
+            "epoch": [],
+            "lr_gnn": [],
+            "lr_proj": [],
         }
 
     # ------------------------------------------------------------------
@@ -197,17 +211,21 @@ class CoordTrainer:
 
         Values near 1.0 indicate embedding collapse.
         """
+        self.brain_encoder.eval()
+        self.text_proj.eval()
         loader = self._make_dataloader(val_dataset, shuffle=True)
         brain_embs = []
         for batch in loader:
             b, _ = self._forward_batch(batch)
-            brain_embs.append(b.clone())
+            brain_embs.append(b.float().clone())
             if sum(e.shape[0] for e in brain_embs) >= self.collapse_sample_n:
                 break
         embs = F.normalize(torch.cat(brain_embs, dim=0)[:self.collapse_sample_n], dim=1)
         sim_matrix = embs @ embs.T
         # Exclude diagonal (self-similarity = 1.0)
         mask = ~torch.eye(len(embs), dtype=torch.bool, device=embs.device)
+        self.brain_encoder.train()
+        self.text_proj.train()
         return float(sim_matrix[mask].mean())
 
     # ------------------------------------------------------------------
@@ -223,8 +241,8 @@ class CoordTrainer:
         all_brain, all_text = [], []
         for batch in loader:
             b, t = self._forward_batch(batch)
-            all_brain.append(b.clone())
-            all_text.append(t.clone())
+            all_brain.append(b.float().clone())
+            all_text.append(t.float().clone())
 
         brain_emb = torch.cat(all_brain, dim=0)
         text_emb = torch.cat(all_text, dim=0)
@@ -236,6 +254,38 @@ class CoordTrainer:
         self.brain_encoder.train()
         self.text_proj.train()
         return auc_t2i, auc_i2t
+
+    @torch.no_grad()
+    def _evaluate(self, dataset: _AnyDataset) -> dict[str, float]:
+        """Return validation loss and bidirectional retrieval metrics."""
+        self.brain_encoder.eval()
+        self.text_proj.eval()
+
+        brain_emb, text_emb = self.collect_embeddings(dataset)
+        loss = float(self.loss_fn(brain_emb, text_emb).item())
+        metrics = bidirectional_retrieval_metrics(text_emb, brain_emb)
+        metrics["loss"] = loss
+
+        self.brain_encoder.train()
+        self.text_proj.train()
+        return metrics
+
+    def _record_val_metrics(self, epoch: int, metrics: dict[str, float]) -> None:
+        self.history["epoch"].append(epoch)
+        self.history["val_loss"].append(metrics["loss"])
+        self.history["val_recall_t2i"].append(metrics["t2i_auc"])
+        self.history["val_recall_i2t"].append(metrics["i2t_auc"])
+        for key, value in metrics.items():
+            self.history.setdefault(f"val_{key}", []).append(float(value))
+
+    def _monitor_value(self, metrics: dict[str, float]) -> float:
+        if self.monitor_metric not in metrics:
+            available = ", ".join(sorted(metrics))
+            raise KeyError(
+                f"Unknown monitor_metric={self.monitor_metric!r}; "
+                f"available metrics: {available}"
+            )
+        return float(metrics[self.monitor_metric])
 
     # ------------------------------------------------------------------
     # Training loop
@@ -263,10 +313,14 @@ class CoordTrainer:
                     f"pin_memory={self.pin_memory} "
                     f"prefetch_factor={self.prefetch_factor}"
                 )
+            if self.freeze_text_proj:
+                print("  text projection: frozen")
             if val_dataset is not None:
                 print(f"  train={len(train_dataset)}  val={len(val_dataset)}")
 
+        bad_val_checks = 0
         for epoch in range(self.n_epochs):
+            self._last_epoch = epoch
             self.brain_encoder.train()
             self.text_proj.train()
 
@@ -294,6 +348,9 @@ class CoordTrainer:
 
             mean_loss = float(np.mean(epoch_losses))
             self.history["train_loss"].append(mean_loss)
+            self.history["lr_gnn"].append(float(self.optimizer.param_groups[0]["lr"]))
+            lr_proj = 0.0 if self.freeze_text_proj else self.optimizer.param_groups[1]["lr"]
+            self.history["lr_proj"].append(float(lr_proj))
 
             if epoch == 0 and max_nodes_seen > 8000:
                 import warnings
@@ -303,11 +360,9 @@ class CoordTrainer:
                 )
 
             if val_dataset is not None and epoch % self.val_interval == 0:
-                auc_t2i, auc_i2t = self._validate(val_dataset)
+                val_metrics = self._evaluate(val_dataset)
                 embed_sim = self._embedding_collapse_sim(val_dataset)
-
-                self.history["val_recall_t2i"].append(auc_t2i)
-                self.history["val_recall_i2t"].append(auc_i2t)
+                self._record_val_metrics(epoch, val_metrics)
                 self.history["embed_sim"].append(embed_sim)
 
                 if embed_sim > 0.95:
@@ -323,21 +378,40 @@ class CoordTrainer:
                     print(
                         f"Epoch {epoch:4d}/{self.n_epochs} | "
                         f"loss={mean_loss:.4f} | "
-                        f"t2i={auc_t2i:.4f} i2t={auc_i2t:.4f} | "
+                        f"val_loss={val_metrics['loss']:.4f} | "
+                        f"auc={val_metrics['mean_auc']:.4f} "
+                        f"r@10={val_metrics['mean_recall@10']:.4f} "
+                        f"mrr={val_metrics['mean_mrr']:.4f} | "
                         f"embed_sim={embed_sim:.3f} | "
                         f"lr={lr_now:.2e}"
                     )
 
-                mean_recall = (auc_t2i + auc_i2t) / 2
-                if mean_recall > self._best_val_recall:
-                    self._best_val_recall = mean_recall
+                score = self._monitor_value(val_metrics)
+                if score > self._best_val_recall:
+                    self._best_val_recall = score
                     self._best_state = {
                         "brain_encoder": deepcopy(self.brain_encoder.state_dict()),
                         "text_proj": deepcopy(self.text_proj.state_dict()),
                         "epoch": epoch,
-                        "val_recall": mean_recall,
+                        "val_recall": score,
+                        "monitor_metric": self.monitor_metric,
+                        "metrics": val_metrics,
+                        "config": self.config,
                     }
                     self._save_checkpoint("best_coord_gnn.pt")
+                    bad_val_checks = 0
+                else:
+                    bad_val_checks += 1
+                    if (
+                        self.early_stopping_patience is not None
+                        and bad_val_checks >= self.early_stopping_patience
+                    ):
+                        if self.verbose:
+                            print(
+                                f"Early stopping after {bad_val_checks} "
+                                f"validation checks without improvement."
+                            )
+                        break
 
             elif self.verbose and epoch % max(1, self.n_epochs // 20) == 0:
                 lr_now = self.optimizer.param_groups[0]["lr"]
@@ -371,8 +445,10 @@ class CoordTrainer:
             {
                 "brain_encoder": self.brain_encoder.state_dict(),
                 "text_proj": self.text_proj.state_dict(),
-                "epoch": self.n_epochs - 1,
+                "epoch": self._last_epoch,
                 "history": self.history,
+                "config": self.config,
+                "monitor_metric": self.monitor_metric,
             },
             path,
         )
@@ -407,15 +483,19 @@ class CoordTrainer:
         all_b, all_t = [], []
         for batch in loader:
             b, t = self._forward_batch(batch)
-            all_b.append(b.clone())
-            all_t.append(t.clone())
+            all_b.append(b.float().clone())
+            all_t.append(t.float().clone())
         self.brain_encoder.train()
         self.text_proj.train()
         return torch.cat(all_b, dim=0), torch.cat(all_t, dim=0)
 
     @torch.no_grad()
     def get_attention_snapshot(
-        self, dataset: _AnyDataset, n_samples: int = 10
+        self,
+        dataset: _AnyDataset,
+        n_samples: int = 10,
+        top_k: int = 5,
+        exclude_self_loops: bool = True,
     ) -> list[dict]:
         """Extract per-paper top-attention edges with MNI coordinates.
 
@@ -439,24 +519,39 @@ class CoordTrainer:
             )
             ei, attn_weights = attn           # (2,E), (E,1)
             attn_weights = attn_weights.squeeze(-1)
+            is_self_loop = ei[0].eq(ei[1])
 
-            top5_idx = attn_weights.topk(min(5, len(attn_weights))).indices
-            coords_norm = batch.x[:, :3].cpu()  # (N, 3)
+            candidate = ~is_self_loop if exclude_self_loops else torch.ones_like(
+                is_self_loop, dtype=torch.bool
+            )
+            if not candidate.any():
+                candidate = torch.ones_like(is_self_loop, dtype=torch.bool)
+
+            candidate_idx = candidate.nonzero(as_tuple=True)[0]
+            weights = attn_weights[candidate_idx]
+            top_idx = weights.topk(min(top_k, len(weights))).indices
+            top_edge_idx = candidate_idx[top_idx]
+            coords_norm = batch.x[:, :3].float().cpu()  # (N, 3)
             coords_mni = (coords_norm * MNI_HALF).numpy()
 
             top_edges = []
-            for eidx in top5_idx.tolist():
+            for eidx in top_edge_idx.tolist():
                 s, d = ei[0, eidx].item(), ei[1, eidx].item()
                 top_edges.append({
                     "src_mni": coords_mni[s].tolist(),
                     "dst_mni": coords_mni[d].tolist(),
                     "weight": float(attn_weights[eidx]),
+                    "is_self_loop": bool(is_self_loop[eidx]),
                 })
 
             results.append({
                 "paper_idx": int(batch.paper_idx[0]),
                 "node_coords_mni": coords_mni,
                 "top_edges": top_edges,
+                "attention_self_loop_frac": float(is_self_loop.float().mean()),
+                "attention_self_loop_mass": float(
+                    attn_weights[is_self_loop].sum() / attn_weights.sum().clamp_min(1e-8)
+                ),
             })
 
         self.brain_encoder.train()

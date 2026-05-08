@@ -44,6 +44,7 @@ from .kg_train import RGCNTrainer, evaluate_link_prediction
 from .coord_graph import coords_to_graph, normalize_coords, denormalize_coords, MNI_HALF
 from .coord_dataset import CoordGraphDataset
 from .coord_model import CoordGNN
+from .coord_baselines import CoordDeepSet
 from .coord_train import CoordTrainer
 
 __all__ = [
@@ -72,5 +73,6 @@ __all__ = [
     "MNI_HALF",
     "CoordGraphDataset",
     "CoordGNN",
+    "CoordDeepSet",
     "CoordTrainer",
 ]
