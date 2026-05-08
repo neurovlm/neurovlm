@@ -12,6 +12,7 @@ Supported backends:
 
 from __future__ import annotations
 
+import re
 from typing import List, Optional, Tuple, Literal
 
 import torch
@@ -104,8 +105,53 @@ def load_huggingface_model(
     return _MODEL, _TOKENIZER
 
 
-def system_prompt(for_brain_input: bool = False) -> str:
+def _wants_short_output(user_prompt: str = "") -> bool:
+    """Heuristic for notebook/eval prompts that request a title or one-liner."""
+    text = str(user_prompt or "").lower()
+    markers = (
+        "title only",
+        "output only",
+        "single concise sentence",
+        "one concise sentence",
+        "reply with a single",
+        "generate only a paper title",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _postprocess_short_output(output_text: str, user_prompt: str = "") -> str:
+    """Trim accidental paragraphs from title/one-sentence generations."""
+    text = str(output_text or "").strip()
+    if not _wants_short_output(user_prompt) or not text:
+        return text
+
+    text = re.sub(r"^\s*(?:#+\s*)?", "", text)
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), text)
+    first_line = first_line.strip(" \"'")
+
+    prompt = str(user_prompt or "").lower()
+    if "title" in prompt:
+        return first_line
+
+    match = re.match(r"^(.+?[.!?])(?:\s|$)", first_line)
+    return (match.group(1) if match else first_line).strip()
+
+
+def system_prompt(for_brain_input: bool = False, short_output: bool = False) -> str:
     """Return instructions for the LLM."""
+    if short_output:
+        return """You are a neuroscience editor converting ranked neuroimaging retrieval evidence into a very short answer.
+
+INPUT: ranked neuroscience evidence from a brain-to-text retrieval model. Each row may include
+a rank number and cosine similarity score. Rank 1 is the strongest evidence.
+OUTPUT: Follow the user's requested format exactly. Write only the requested title or one sentence.
+Do not add explanations, definitions, headings, bullets, abstracts, or supporting paragraphs.
+
+Ranking rules:
+- Use rank 1 as the main clue.
+- Use lower-ranked rows only to disambiguate the wording.
+- Do not mention ranks, scores, retrieval, evidence, or this prompt."""
+
     return """You are a neuroscience editor writing a concise explanatory entry from ranked neuroimaging retrieval evidence.
 
 INPUT: ranked neuroscience evidence from a brain-to-text retrieval model. Each row may include
@@ -252,7 +298,7 @@ def generate_response(
 
     # Build the messages
     messages = [
-        {"role": "system", "content": system_prompt(for_brain_input=for_brain_input)},
+        {"role": "system", "content": system_prompt(for_brain_input=for_brain_input, short_output=_wants_short_output(user_prompt))},
         {
             "role": "user",
             "content": build_user_prompt(query, papers_context, wiki_context, cogatlas_context, user_prompt),
@@ -261,7 +307,7 @@ def generate_response(
 
     # Generate response based on backend
     if backend == "ollama":
-        output_text = _generate_with_ollama(messages, model_name, verbose)
+        output_text = _generate_with_ollama(messages, model_name, max_new_tokens, verbose)
     elif backend == "huggingface":
         output_text = _generate_with_huggingface(messages, model_name, max_new_tokens, think, verbose)
     else:
@@ -271,12 +317,13 @@ def generate_response(
         print("LLM finished.")
         print(output_text)
 
-    return output_text
+    return _postprocess_short_output(output_text, user_prompt)
 
 
 def _generate_with_ollama(
     messages: List[dict],
     model_name: Optional[str] = None,
+    max_new_tokens: Optional[int] = 512,
     verbose: bool = False,
 ) -> str:
     """Generate response using Ollama backend.
@@ -313,6 +360,7 @@ def _generate_with_ollama(
         response = ollama.chat(
             model=model_name,
             messages=messages,
+            options={"num_predict": max_new_tokens} if max_new_tokens is not None else None,
         )
         return response["message"]["content"]
     except Exception as e:

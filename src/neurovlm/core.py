@@ -21,9 +21,13 @@ TEXT_EMBED_DIM = 768
 LATENT_DIM = 384
 BRAIN_FLAT_DIM = 28542
 
-DEFAULT_TEXT_DATASETS = ("wiki", "cogatlas", "ngrams", "kg_mesh")
+DEFAULT_TEXT_DATASETS = ("wiki", "cogatlas", "ngrams", "kg_mesh", "llm_neuro_terms")
 DATASET_ALIASES = {
     "publications": "pubmed",
+    "summaries": "pubmed_summaries",
+    "summary": "pubmed_summaries",
+    "neuro_summaries": "pubmed_summaries",
+    "pubmed_summary": "pubmed_summaries",
     "neurowiki": "wiki",
     "concepts": "cogatlas",
     "tasks": "cogatlas_task",
@@ -37,9 +41,14 @@ DATASET_ALIASES = {
     "n-grams": "ngrams",
     "mesh_kg": "kg_mesh",
     "pubmed_mesh": "kg_mesh",
+    "llm_terms": "llm_neuro_terms",
+    "llm_extracted_terms": "llm_neuro_terms",
+    "llm_extracted_neuro_terms": "llm_neuro_terms",
+    "llm_extracted__neuro_terms": "llm_neuro_terms",
 }
 DATASET_ID_COLUMNS = {
     "pubmed": "pmid",
+    "pubmed_summaries": "pmid",
     "wiki": "id",
     "cogatlas": "term",
     "cogatlas_task": "term",
@@ -47,25 +56,30 @@ DATASET_ID_COLUMNS = {
     "networks": "title",
     "ngrams": "term",
     "kg_mesh": "term",
+    "llm_neuro_terms": "term",
 }
 
 TEXT_DATASET_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
     "pubmed": ("pubmed_text", "publications", "pubmed"),
+    "pubmed_summaries": ("pubmed_summaries", "neuro_summaries"),
     "wiki": ("wiki", "neurowiki"),
     "cogatlas": ("cogatlas",),
     "cogatlas_task": ("cogatlas_task",),
     "cogatlas_disorder": ("cogatlas_disorder",),
     "ngrams": ("ngrams",),
     "kg_mesh": ("kg_mesh",),
+    "llm_neuro_terms": ("llm_neuro_terms", "llm_terms", "llm_extracted_neuro_terms"),
 }
 TEXT_LATENT_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
     "pubmed": ("pubmed_text", "publications", "pubmed"),
+    "pubmed_summaries": ("pubmed_summaries", "neuro_summaries"),
     "wiki": ("wiki", "neurowiki"),
     "cogatlas": ("cogatlas",),
     "cogatlas_task": ("cogatlas_task",),
     "cogatlas_disorder": ("cogatlas_disorder",),
     "ngrams": ("ngrams",),
     "kg_mesh": ("kg_mesh",),
+    "llm_neuro_terms": ("llm_neuro_terms", "llm_terms", "llm_extracted_neuro_terms"),
 }
 
 
@@ -164,7 +178,8 @@ class TextSearchResult:
             - ``description``
             - ``cosine_similarity``
             and ``query_index`` when multiple queries are present.
-            When ``dataset=None``, each dataset contributes up to ``k`` rows.
+            When ``dataset=None``, returns the global top ``k`` rows across
+            all active datasets.
         """
         if k <= 0:
             raise ValueError("k must be > 0")
@@ -183,7 +198,7 @@ class TextSearchResult:
             candidates: List[pd.DataFrame] = []
             for ds in datasets:
                 scores = self.scores_by_dataset[ds][:, q_idx]
-                n = min(int(k), int(scores.shape[0]))
+                n = min(int(k), int(scores.shape[0])) if dataset is not None else int(scores.shape[0])
                 if n == 0:
                     continue
                 top_idx = torch.topk(scores, k=n, largest=True, sorted=True).indices
@@ -203,6 +218,8 @@ class TextSearchResult:
                 continue
 
             merged = pd.concat(candidates, ignore_index=True)
+            if dataset is None and len(merged) > k:
+                merged = merged.nlargest(k, "cosine_similarity").reset_index(drop=True)
             if n_queries > 1:
                 merged.insert(0, "query_index", q_idx)
             out_blocks.append(merged)
@@ -215,9 +232,14 @@ class TextSearchResult:
 
         out = pd.concat(out_blocks, ignore_index=True)
         if n_queries > 1:
-            out = out.sort_values(["query_index", "dataset", "cosine_similarity"], ascending=[True, True, False]).reset_index(drop=True)
+            sort_cols = ["query_index", "cosine_similarity"] if dataset is None else ["query_index", "dataset", "cosine_similarity"]
+            ascending = [True, False] if dataset is None else [True, True, False]
+            out = out.sort_values(sort_cols, ascending=ascending).reset_index(drop=True)
         else:
-            out = out.sort_values(["dataset", "cosine_similarity"], ascending=[True, False]).reset_index(drop=True)
+            if dataset is None:
+                out = out.sort_values("cosine_similarity", ascending=False).reset_index(drop=True)
+            else:
+                out = out.sort_values(["dataset", "cosine_similarity"], ascending=[True, False]).reset_index(drop=True)
         return out
 
     def format(
@@ -1955,13 +1977,21 @@ class NeuroVLM:
             table = self.last_text_result.top_k(k=k)
         ranking_context = self._format_ranked_evidence(table)
         if ranking_context:
-            rank_instruction = (
-                "Ranked retrieval evidence from the brain activation map:\n"
-                f"{ranking_context}\n\n"
-                "Writing rule: define and explain row 1 as the main topic. If rows 1-2 are closely related, "
-                "define them together. Use lower-ranked rows to explain related functions, regions, or "
-                "component concepts. Do not call the result a hypothesis."
-            )
+            if self._wants_short_llm_output(user_prompt):
+                rank_instruction = (
+                    "Ranked retrieval evidence from the brain activation map:\n"
+                    f"{ranking_context}\n\n"
+                    "Writing rule: use this evidence only to choose the best wording. "
+                    "Follow the additional user instruction exactly. Do not define or explain the rows."
+                )
+            else:
+                rank_instruction = (
+                    "Ranked retrieval evidence from the brain activation map:\n"
+                    f"{ranking_context}\n\n"
+                    "Writing rule: define and explain row 1 as the main topic. If rows 1-2 are closely related, "
+                    "define them together. Use lower-ranked rows to explain related functions, regions, or "
+                    "component concepts. Do not call the result a hypothesis."
+                )
             user_prompt = (
                 f"{rank_instruction}\n\nAdditional user instruction: {user_prompt}"
                 if user_prompt else rank_instruction
@@ -2096,7 +2126,7 @@ class NeuroVLM:
                 # NeuroWiki concepts and brain-atlas networks are both
                 # neuroscience reference material.
                 wiki_lines.append(entry)
-            elif dataset in ("cogatlas", "cogatlas_task", "cogatlas_disorder", "ngrams", "kg_mesh"):
+            elif dataset in ("cogatlas", "cogatlas_task", "cogatlas_disorder", "ngrams", "kg_mesh", "llm_neuro_terms"):
                 cogatlas_lines.append(entry)
             else:
                 papers_lines.append(entry)
@@ -2118,6 +2148,20 @@ class NeuroVLM:
         ranked = ranked.reset_index(drop=True)
         ranked["_llm_rank"] = np.arange(1, len(ranked) + 1)
         return ranked
+
+    @staticmethod
+    def _wants_short_llm_output(user_prompt: str = "") -> bool:
+        """Detect title/one-sentence generation requests."""
+        text = str(user_prompt or "").lower()
+        markers = (
+            "title only",
+            "output only",
+            "single concise sentence",
+            "one concise sentence",
+            "reply with a single",
+            "generate only a paper title",
+        )
+        return any(marker in text for marker in markers)
 
     @classmethod
     def _format_ranked_evidence(cls, table: pd.DataFrame, max_description_chars: int = 180) -> str:

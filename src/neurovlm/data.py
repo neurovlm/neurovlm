@@ -14,6 +14,7 @@ from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 import pandas as pd
 from neurovlm.retrieval_resources import (
     _load_pubmed_dataframe,
+    _load_pubmed_summaries_dataframe,
     _load_pubmed_coordinates,
     _load_neuro_wiki,
     _load_neuro_wiki_graph,
@@ -25,6 +26,7 @@ from neurovlm.retrieval_resources import (
     _load_networks_labels,
     _load_networks_canonical,
     _load_latent_text,
+    _load_latent_neuro_summaries,
     _load_latent_neuro,
     _load_latent_networks_neuro,
     _load_latent_networks_canonical_text,
@@ -48,6 +50,8 @@ from neurovlm.retrieval_resources import (
     _load_ngram,
     _load_kg_mesh_dataset,
     _load_latent_kg_mesh,
+    _load_llm_neuro_terms_dataset,
+    _load_latent_llm_neuro_terms,
 )
 
 
@@ -307,6 +311,7 @@ def load_dataset(name: str):
     -----
 
     - "pubmed_text": dataframe that includes pubmed dois, pmids, pmcids, titles, abstracts
+    - "pubmed_summaries": dataframe with PubMed pmids, generated/curated summaries, and optional train/val/test flags
     - "pubmed_coordinates": pubmed coordinate tables
     - "pubmed_images": tensor containing pubmed images
     - "neurowiki": wikipedia article titles and descriptions
@@ -314,6 +319,7 @@ def load_dataset(name: str):
     - "cogatlas_task": cogatlas task terms
     - "cogatlas_disorder": cogatlas disorder terms
     - "cogatlas_graph": how cogatlas terms are related
+    - "llm_neuro_terms": novel LLM-extracted neuroscience terms filtered against CogAtlas and MeSH
     - "networks": dict that contains atlas and network name keys, and .nii.gz keys.
     - "publications_neurovault": neurovault-linked publication metadata (titles, abstracts, dois)
     - "neurovault_text": publication data for each neurovault image
@@ -324,6 +330,8 @@ def load_dataset(name: str):
     match name:
         case "pubmed_text":
             return _load_pubmed_dataframe()
+        case "pubmed_summaries" | "neuro_summaries":
+            return _load_pubmed_summaries_dataframe()
         case "pubmed_coordinates":
             return _load_pubmed_coordinates()
         case "pubmed_images":
@@ -355,11 +363,13 @@ def load_dataset(name: str):
             return pd.DataFrame({"term": labels})
         case "kg_mesh" | "mesh_kg" | "pubmed_mesh":
             return _load_kg_mesh_dataset()
+        case "llm_neuro_terms" | "llm_terms" | "llm_extracted_neuro_terms":
+            return _load_llm_neuro_terms_dataset()
         case _:
-            valid_names = ["pubmed_text", "pubmed_coordinates", "pubmed_images", "wiki", "neurowiki",
+            valid_names = ["pubmed_text", "pubmed_summaries", "pubmed_coordinates", "pubmed_images", "wiki", "neurowiki",
                            "neurowiki_graph", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks",
                            "networks_canonical", "neurovault_text", "neurovault_images", "neurovault_meta",
-                           "ngrams", "kg_mesh"]
+                           "ngrams", "kg_mesh", "llm_neuro_terms"]
             raise ValueError(f"{name} not in {valid_names}")
 
 
@@ -380,17 +390,21 @@ def load_latent(name: str):
     -----
 
     - "pubmed_text": pubmed papers passed through specter.
+    - "pubmed_summaries": PubMed neuro summaries passed through specter.
     - "pubmed_images": encoded neuroimages from pubmed coordinate tables
     - "neurowiki": wikipedia articles pass through specter
     - "cogatlas": cogatlas terms and definitions passed through specter
     - "networks": encoded network images
     - "neurovault_images": latent embeddings for neurovault images
     - "neurovault_text": latent embeddings for neurovault-linked text
+    - "llm_neuro_terms": SPECTER embeddings for novel LLM-extracted neuroscience terms
 
     """
     match name:
         case "pubmed_text":
             payload = _load_latent_text()
+        case "pubmed_summaries" | "neuro_summaries":
+            payload = _load_latent_neuro_summaries()
         case "pubmed_images":
             payload = _load_latent_neuro()
         case "wiki" | "neurowiki":
@@ -413,11 +427,13 @@ def load_latent(name: str):
             payload = _load_latent_ngram()
         case "kg_mesh" | "mesh_kg" | "pubmed_mesh":
             payload = _load_latent_kg_mesh()
+        case "llm_neuro_terms" | "llm_terms" | "llm_extracted_neuro_terms":
+            payload = _load_latent_llm_neuro_terms()
         case _:
-            valid_names = ["pubmed_text", "pubmed_images", "wiki", "neurowiki", "cogatlas",
+            valid_names = ["pubmed_text", "pubmed_summaries", "pubmed_images", "wiki", "neurowiki", "cogatlas",
                            "cogatlas_task", "cogatlas_disorder", "networks_text",
                            "networks_neuro", "neurovault_images", "neurovault_text", "ngrams",
-                           "kg_mesh"]
+                           "kg_mesh", "llm_neuro_terms"]
             raise ValueError(f"{name} not in {valid_names}")
     return _without_grad(payload)
 
