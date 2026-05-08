@@ -77,6 +77,9 @@ class CoordTrainer:
         Use BF16 automatic mixed precision on CUDA. A100 Tensor Cores run BF16
         at ~2x the speed of FP32. No GradScaler needed (BF16 doesn't overflow).
         Ignored silently on MPS/CPU.
+    prefetch_factor : int or None
+        Number of batches loaded in advance by each worker. Only used when
+        num_workers > 0.
     verbose : bool
     """
 
@@ -97,6 +100,7 @@ class CoordTrainer:
         num_workers: int = 0,
         pin_memory: bool = False,
         use_amp: bool = False,
+        prefetch_factor: Optional[int] = None,
         verbose: bool = True,
     ):
         if device == "auto":
@@ -113,6 +117,7 @@ class CoordTrainer:
         self.collapse_sample_n = collapse_sample_n
         self.num_workers = num_workers
         self.pin_memory = pin_memory
+        self.prefetch_factor = prefetch_factor
         # BF16 AMP only makes sense on CUDA; silently disable elsewhere
         self.use_amp = use_amp and self.device.type == "cuda"
         self.verbose = verbose
@@ -156,14 +161,16 @@ class CoordTrainer:
 
     def _make_dataloader(self, dataset: _AnyDataset, shuffle: bool = True):
         from torch_geometric.loader import DataLoader
-        return DataLoader(
-            dataset,
+        kwargs = dict(
             batch_size=self.batch_size,
             shuffle=shuffle,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             persistent_workers=(self.num_workers > 0),
         )
+        if self.num_workers > 0 and self.prefetch_factor is not None:
+            kwargs["prefetch_factor"] = self.prefetch_factor
+        return DataLoader(dataset, **kwargs)
 
     def _forward_batch(self, batch) -> tuple[Tensor, Tensor]:
         batch = batch.to(self.device, non_blocking=self.pin_memory)
@@ -239,11 +246,7 @@ class CoordTrainer:
         train_dataset: _AnyDataset,
         val_dataset: Optional[_AnyDataset] = None,
     ) -> None:
-        from torch_geometric.loader import DataLoader
-
-        train_loader = DataLoader(
-            train_dataset, batch_size=self.batch_size, shuffle=True
-        )
+        train_loader = self._make_dataloader(train_dataset, shuffle=True)
         steps_per_epoch = len(train_loader)
         self._build_scheduler(steps_per_epoch)
 
@@ -254,6 +257,12 @@ class CoordTrainer:
                 f"{self.n_epochs} epochs, "
                 f"batch={self.batch_size}, device={self.device}"
             )
+            if self.device.type == "cuda":
+                print(
+                    f"  dataloader: workers={self.num_workers} "
+                    f"pin_memory={self.pin_memory} "
+                    f"prefetch_factor={self.prefetch_factor}"
+                )
             if val_dataset is not None:
                 print(f"  train={len(train_dataset)}  val={len(val_dataset)}")
 

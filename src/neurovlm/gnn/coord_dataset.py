@@ -37,6 +37,10 @@ class CoordGraphDataset:
         Array of length N giving the PMID for each row in text_embeddings.
     cache_dir:
         Directory for pre-computed graph .pt files.  Created automatically.
+    cache_file:
+        Optional single-file cache for all pre-computed graphs. This is much
+        faster on Colab/Drive than managing thousands of tiny ``paper_*.pt``
+        files.
     k:
         KNN neighbor count.  Default 7.
     max_dist_mm:
@@ -49,6 +53,7 @@ class CoordGraphDataset:
         text_embeddings: Tensor,
         unique_pmids: np.ndarray,
         cache_dir: str = "data/coord_graphs",
+        cache_file: Optional[str] = None,
         k: int = 7,
         max_dist_mm: float = 30.0,
         preload_to_ram: bool = False,
@@ -57,6 +62,9 @@ class CoordGraphDataset:
         self.max_dist_mm = max_dist_mm
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_file = Path(cache_file) if cache_file is not None else None
+        if self.cache_file is not None:
+            self.cache_file.parent.mkdir(parents=True, exist_ok=True)
 
         self.text_embeddings = text_embeddings.float()   # (N, 768)
         self.unique_pmids = np.asarray(unique_pmids)     # (N,)
@@ -75,13 +83,16 @@ class CoordGraphDataset:
             if str(pmid) in self._pmid_to_coords
         ]
 
-        # Build disk cache before any __getitem__ call
-        self._build_cache()
-
-        # Optional: load all graphs into RAM for fast __getitem__ (eliminates Drive I/O)
+        # Optional: load all graphs into RAM for fast __getitem__ (eliminates Drive I/O).
         # Each graph is ~2KB; 30K graphs ≈ 60MB total — trivial on A100 (83GB system RAM).
         self._ram_cache: Optional[List[Data]] = None
-        if preload_to_ram:
+        if self.cache_file is not None:
+            self._build_or_load_packed_cache()
+        else:
+            # Backward-compatible legacy mode: one graph file per paper.
+            self._build_cache()
+
+        if preload_to_ram and self._ram_cache is None:
             self._load_to_ram()
 
     # ------------------------------------------------------------------
@@ -90,6 +101,93 @@ class CoordGraphDataset:
 
     def _cache_path(self, dataset_idx: int) -> Path:
         return self.cache_dir / f"paper_{dataset_idx}.pt"
+
+    def _build_graph(self, dataset_idx: int) -> Data:
+        pmid = str(self.unique_pmids[dataset_idx])
+        raw_coords = self._pmid_to_coords[pmid]
+
+        # Deduplicate peaks within the same paper
+        raw_coords = np.unique(raw_coords, axis=0)
+
+        if len(raw_coords) == 0:
+            raise ValueError(f"Paper {pmid} has no coordinates after deduplication")
+
+        norm_coords = normalize_coords(raw_coords)
+        return coords_to_graph(norm_coords, k=self.k, max_dist_mm=self.max_dist_mm)
+
+    def _pmids_digest(self) -> str:
+        import hashlib
+
+        pmids = np.asarray(self.unique_pmids, dtype=str)
+        return hashlib.sha1("\n".join(pmids.tolist()).encode("utf-8")).hexdigest()
+
+    def _build_or_load_packed_cache(self) -> None:
+        """Load or build one packed graph cache file.
+
+        A single packed cache avoids the main Colab bottleneck: repeated
+        metadata checks and tiny-file reads/writes through Google Drive FUSE.
+        """
+        assert self.cache_file is not None
+        pmids_digest = self._pmids_digest()
+
+        if self.cache_file.exists():
+            payload = torch.load(self.cache_file, weights_only=False)
+            if (
+                payload.get("version") == 1
+                and payload.get("k") == self.k
+                and float(payload.get("max_dist_mm", "nan")) == float(self.max_dist_mm)
+                and payload.get("n_unique_pmids") == len(self.unique_pmids)
+                and payload.get("pmids_digest") == pmids_digest
+            ):
+                self._valid_indices = list(payload["valid_indices"])
+                self._ram_cache = list(payload["graphs"])
+                print(
+                    f"CoordGraphDataset: loaded {len(self._ram_cache):,} graphs "
+                    f"from packed cache {self.cache_file}."
+                )
+                return
+
+            print(
+                "CoordGraphDataset: packed cache parameters changed; "
+                "rebuilding graph cache."
+            )
+
+        try:
+            from tqdm import tqdm
+        except ImportError:
+            def tqdm(it, **kw):  # type: ignore[misc]
+                return it
+
+        print(
+            f"CoordGraphDataset: building {len(self._valid_indices):,} graphs "
+            f"into packed cache {self.cache_file} "
+            f"(k={self.k}, max_dist={self.max_dist_mm}mm)."
+        )
+
+        valid_indices: List[int] = []
+        graphs: List[Data] = []
+        for i in tqdm(self._valid_indices, desc="Building coord graphs", unit="graph"):
+            try:
+                graph = self._build_graph(i)
+            except ValueError:
+                continue
+            valid_indices.append(i)
+            graphs.append(graph)
+
+        payload = {
+            "version": 1,
+            "k": self.k,
+            "max_dist_mm": self.max_dist_mm,
+            "n_unique_pmids": len(self.unique_pmids),
+            "pmids_digest": pmids_digest,
+            "valid_indices": valid_indices,
+            "graphs": graphs,
+        }
+        torch.save(payload, self.cache_file)
+
+        self._valid_indices = valid_indices
+        self._ram_cache = graphs
+        print(f"Packed graph cache build complete ({len(graphs):,} graphs).")
 
     def _build_cache(self) -> None:
         """Pre-compute and save all graphs to disk (with progress bar)."""
@@ -111,18 +209,10 @@ class CoordGraphDataset:
             return
 
         for i in tqdm(missing, desc="Building coord graphs", unit="graph"):
-            pmid = str(self.unique_pmids[i])
-            raw_coords = self._pmid_to_coords[pmid]
-
-            # Deduplicate peaks within the same paper
-            raw_coords = np.unique(raw_coords, axis=0)
-
-            if len(raw_coords) == 0:
+            try:
+                graph = self._build_graph(i)
+            except ValueError:
                 continue
-
-            norm_coords = normalize_coords(raw_coords)
-            graph = coords_to_graph(norm_coords, k=self.k,
-                                    max_dist_mm=self.max_dist_mm)
             torch.save(graph, self._cache_path(i))
 
         print("Graph cache build complete.")
