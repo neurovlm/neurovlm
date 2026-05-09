@@ -166,36 +166,76 @@ def _torch_dtype(name: str) -> torch.dtype:
 
 def _build_difumo_compatible_volumes(config: ALEPreprocessConfig) -> tuple[Tensor, np.ndarray, dict]:
     """Reconstruct NeuroVLM processed flatmaps into 3D masked volumes."""
-    from neurovlm.data import load_masker
-
     flatmaps, pmids = load_pubmed_flatmaps()
     if config.max_papers is not None:
         flatmaps = flatmaps[: config.max_papers]
         pmids = pmids[: config.max_papers]
 
-    masker = load_masker()
     mask, affine = _mask_data_and_affine(None)
     crop = _brain_crop(mask) if config.crop_to_brain else (slice(None), slice(None), slice(None))
+    crop_mask = mask[crop]
+    if int(mask.sum()) != int(flatmaps.shape[1]):
+        raise ValueError(
+            f"Mask has {int(mask.sum())} voxels but flatmaps have "
+            f"{int(flatmaps.shape[1])} features."
+        )
+    if int(crop_mask.sum()) != int(flatmaps.shape[1]):
+        raise ValueError("Brain crop unexpectedly excluded masked voxels.")
 
-    vols = []
+    voxel_sizes = np.sqrt((affine[:3, :3] ** 2).sum(axis=0)).astype(np.float32)
+    target_resolution = float(config.resolution_mm)
+    native_shape = tuple(int(s.stop - s.start) for s in crop)
+    target_shape = native_shape
+    needs_resample = target_resolution > 0 and not np.allclose(
+        voxel_sizes, target_resolution, atol=0.05
+    )
+    if needs_resample:
+        target_shape = tuple(
+            max(1, int(round(native_shape[i] * float(voxel_sizes[i]) / target_resolution)))
+            for i in range(3)
+        )
+
+    dtype = _torch_dtype(config.cache_dtype)
+    out = torch.empty((len(flatmaps), *target_shape), dtype=dtype)
+    chunk_size = 64
+
     try:
         from tqdm import tqdm
     except ImportError:
         tqdm = lambda x, **_: x  # type: ignore[assignment]
 
-    for row in tqdm(flatmaps.numpy(), desc="Reconstructing flatmaps", unit="map"):
-        img = masker.inverse_transform(row[None, :])
-        data = np.asarray(img.get_fdata(dtype=np.float32))
-        vol = data[..., 0] if data.ndim == 4 else data
-        vol = _normalize_volume(vol, config.normalize, config.clamp)
-        vol = vol[crop]
-        vols.append(torch.from_numpy(vol))
+    for start in tqdm(
+        range(0, len(flatmaps), chunk_size),
+        desc="Reconstructing flatmaps",
+        unit="chunk",
+    ):
+        stop = min(start + chunk_size, len(flatmaps))
+        rows = flatmaps[start:stop].float().numpy()
+        chunk = np.zeros((stop - start, *native_shape), dtype=np.float32)
+        chunk[:, crop_mask] = rows
+        for i in range(len(chunk)):
+            chunk[i] = _normalize_volume(chunk[i], config.normalize, config.clamp)
+        chunk_t = torch.from_numpy(chunk).unsqueeze(1)
+        if needs_resample:
+            import torch.nn.functional as F
 
-    tensor = torch.stack(vols).to(_torch_dtype(config.cache_dtype)).contiguous()
+            chunk_t = F.interpolate(
+                chunk_t,
+                size=target_shape,
+                mode="trilinear",
+                align_corners=False,
+            )
+        out[start:stop] = chunk_t.squeeze(1).to(dtype)
+
+    tensor = out.contiguous()
     meta = {
-        "source": "pubmed_images flatmaps reconstructed with NeuroVLM masker",
+        "source": "pubmed_images flatmaps scattered into NeuroVLM mask",
         "affine": affine.tolist(),
         "original_shape": list(mask.shape),
+        "native_crop_shape": list(native_shape),
+        "native_voxel_sizes": voxel_sizes.tolist(),
+        "target_resolution_mm": target_resolution,
+        "resampled_from_native": bool(needs_resample),
         "crop_slices": [[s.start, s.stop, s.step] for s in crop],
     }
     return tensor, pmids.astype(str), meta

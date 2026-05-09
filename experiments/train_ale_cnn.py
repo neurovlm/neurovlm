@@ -70,6 +70,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cache-dtype", choices=["float16", "bfloat16", "float32"], default="float16")
     p.add_argument("--cache-file", default=None)
     p.add_argument("--force-rebuild-cache", action="store_true")
+    p.add_argument(
+        "--build-cache-only",
+        action="store_true",
+        help="Build or refresh the packed ALE cache, then exit before training.",
+    )
     p.add_argument("--max-papers", type=int, default=None, help="Smoke-test subset size.")
 
     p.add_argument("--text-proj-init", choices=["random", "pretrained_infonce"], default="random")
@@ -135,18 +140,59 @@ def build_dataset(args: argparse.Namespace):
         max_papers=args.max_papers,
     )
     if args.cache_file is None:
-        name = (
-            f"{args.mode}_ale_{int(args.resolution_mm)}mm_"
-            f"fwhm{str(args.kernel_fwhm_mm).replace('.', 'p')}_"
-            f"{'crop' if args.crop_to_brain else 'full'}_{args.cache_dtype}.pt"
-        )
-        args.cache_file = str(Path("data/ale_caches") / name)
+        args.cache_file = default_cache_file(args)
     payload = build_or_load_ale_cache(
         args.cache_file, config, force_rebuild=args.force_rebuild_cache
     )
     ds = ALEVolumeDataset.from_cache(payload)
     train_ds, val_ds, test_ds = ds.split(args.val_frac, args.test_frac, seed=args.seed)
     return ds, train_ds, val_ds, test_ds, payload, config
+
+
+def default_cache_file(args: argparse.Namespace) -> str:
+    name = (
+        f"{args.mode}_ale_{int(args.resolution_mm)}mm_"
+        f"fwhm{str(args.kernel_fwhm_mm).replace('.', 'p')}_"
+        f"{'crop' if args.crop_to_brain else 'full'}_{args.cache_dtype}.pt"
+    )
+    return str(Path("data/ale_caches") / name)
+
+
+def build_cache_only(args: argparse.Namespace) -> None:
+    config = ALEPreprocessConfig(
+        mode=args.mode,
+        kernel_fwhm_mm=args.kernel_fwhm_mm,
+        resolution_mm=args.resolution_mm,
+        crop_to_brain=args.crop_to_brain,
+        normalize=args.normalize,
+        clamp=not args.no_clamp,
+        cache_dtype=args.cache_dtype,
+        max_papers=args.max_papers,
+    )
+    if args.cache_file is None:
+        args.cache_file = default_cache_file(args)
+    payload = build_or_load_ale_cache(
+        args.cache_file,
+        config,
+        force_rebuild=args.force_rebuild_cache,
+    )
+    run_dir = Path(args.run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    with (run_dir / "cache_metadata.json").open("w") as f:
+        json.dump(
+            {
+                "cache_file": args.cache_file,
+                "config": payload.get("config", {}),
+                "metadata": payload.get("metadata", {}),
+            },
+            f,
+            indent=2,
+        )
+    print("\nCache build complete.")
+    print(f"  cache_file: {args.cache_file}")
+    print(f"  n_volumes : {payload['metadata']['n_volumes']:,}")
+    print(f"  shape     : {tuple(payload['metadata']['shape'])}")
+    print(f"  metadata  : {run_dir / 'cache_metadata.json'}")
 
 
 def build_model(args: argparse.Namespace, input_shape: tuple[int, ...]):
@@ -597,6 +643,12 @@ def main() -> None:
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+
+    if args.build_cache_only:
+        with (run_dir / "training_config.json").open("w") as f:
+            json.dump(vars(args), f, indent=2)
+        build_cache_only(args)
+        return
 
     ds, train_ds, val_ds, test_ds, payload, preprocess_config = build_dataset(args)
     brain_encoder, text_proj = build_model(args, ds.input_shape)
