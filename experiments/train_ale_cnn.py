@@ -129,6 +129,7 @@ def make_loader(ds, args: argparse.Namespace, shuffle: bool) -> DataLoader:
 
 
 def build_dataset(args: argparse.Namespace):
+    print("Preparing ALE preprocessing config ...", flush=True)
     config = ALEPreprocessConfig(
         mode=args.mode,
         kernel_fwhm_mm=args.kernel_fwhm_mm,
@@ -144,7 +145,9 @@ def build_dataset(args: argparse.Namespace):
     payload = build_or_load_ale_cache(
         args.cache_file, config, force_rebuild=args.force_rebuild_cache
     )
+    print("Constructing aligned ALE dataset ...", flush=True)
     ds = ALEVolumeDataset.from_cache(payload)
+    print("Creating train/val/test split ...", flush=True)
     train_ds, val_ds, test_ds = ds.split(args.val_frac, args.test_frac, seed=args.seed)
     return ds, train_ds, val_ds, test_ds, payload, config
 
@@ -196,6 +199,7 @@ def build_cache_only(args: argparse.Namespace) -> None:
 
 
 def build_model(args: argparse.Namespace, input_shape: tuple[int, ...]):
+    print("Building ALE model ...", flush=True)
     if args.batch_size_auto:
         voxels = int(np.prod(input_shape))
         args.batch_size = 8 if voxels > 150_000 else 16 if voxels > 75_000 else 32
@@ -653,6 +657,7 @@ def main() -> None:
     ds, train_ds, val_ds, test_ds, payload, preprocess_config = build_dataset(args)
     brain_encoder, text_proj = build_model(args, ds.input_shape)
     device = which_device(args.device)
+    print(f"Selected device: {device}", flush=True)
     if args.pin_memory is False and device.type == "cuda":
         args.pin_memory = True
 

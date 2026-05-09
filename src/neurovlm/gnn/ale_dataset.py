@@ -44,6 +44,7 @@ def load_pubmed_text_embeddings() -> tuple[Tensor, np.ndarray]:
     """Return SPECTER embeddings and PMIDs as CPU tensors/strings."""
     from neurovlm.data import load_latent
 
+    print("Loading SPECTER PubMed text embeddings ...", flush=True)
     payload = load_latent("pubmed_text")
     if isinstance(payload, tuple):
         text, pmids = payload
@@ -54,7 +55,10 @@ def load_pubmed_text_embeddings() -> tuple[Tensor, np.ndarray]:
         raise TypeError(
             "Expected load_latent('pubmed_text') to return (tensor, pmids) or a dict."
         )
-    return torch.as_tensor(text, dtype=torch.float32).cpu(), np.asarray(pmids).astype(str)
+    text = torch.as_tensor(text, dtype=torch.float32).cpu()
+    pmids = np.asarray(pmids).astype(str)
+    print(f"Loaded SPECTER text embeddings: {tuple(text.shape)}", flush=True)
+    return text, pmids
 
 
 def load_pubmed_flatmaps() -> tuple[Tensor, np.ndarray]:
@@ -349,8 +353,11 @@ def build_or_load_ale_cache(
     cache_path = Path(cache_file)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     if cache_path.exists() and not force_rebuild:
+        print(f"Loading packed ALE cache: {cache_path}", flush=True)
         payload = torch.load(cache_path, map_location="cpu", weights_only=False)
         if payload.get("version") == 1 and payload.get("config", {}).get("cache_key") == config.cache_key():
+            shape = tuple(payload["volumes"].shape)
+            print(f"Loaded packed ALE cache: volumes={shape}", flush=True)
             return payload
         print("ALE cache config changed; rebuilding packed cache.")
 
@@ -376,6 +383,7 @@ def build_or_load_ale_cache(
         "covariates": covariates,
     }
     torch.save(payload, cache_path)
+    print(f"Saved packed ALE cache: {cache_path}", flush=True)
     return payload
 
 
@@ -407,13 +415,19 @@ class ALEVolumeDataset(Dataset):
     @classmethod
     def from_cache(cls, cache_payload: dict) -> "ALEVolumeDataset":
         text, text_pmids = load_pubmed_text_embeddings()
-        return cls(
+        print("Aligning ALE volumes with SPECTER PMIDs ...", flush=True)
+        ds = cls(
             volumes=cache_payload["volumes"],
             pmids=np.asarray(cache_payload["pmids"]).astype(str),
             text_embeddings=text,
             text_pmids=text_pmids,
             covariates=cache_payload.get("covariates"),
         )
+        print(
+            f"Aligned ALE/text dataset: n={len(ds):,}, input_shape={ds.input_shape}",
+            flush=True,
+        )
+        return ds
 
     def __len__(self) -> int:
         return int(self.volumes.shape[0])

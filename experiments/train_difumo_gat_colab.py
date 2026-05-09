@@ -141,6 +141,10 @@ def which_device(name: str) -> torch.device:
     return torch.device("cpu")
 
 
+def log_step(message: str) -> None:
+    print(f"\n[{time.strftime('%H:%M:%S')}] {message}", flush=True)
+
+
 def count_parameters(module: nn.Module) -> int:
     return sum(p.numel() for p in module.parameters() if p.requires_grad)
 
@@ -1170,6 +1174,7 @@ def append_comparison_row(
 
 def main() -> None:
     args = parse_args()
+    log_step("Starting DiFuMo GAT/MLP run")
     stamp = time.strftime("%Y%m%d_%H%M%S")
     if args.run_dir is None:
         args.run_dir = str(Path("runs") / f"difumo_{args.model}_{args.graph_type}_{stamp}")
@@ -1184,13 +1189,22 @@ def main() -> None:
     device = which_device(args.device)
     if device.type == "cuda" and not args.pin_memory:
         args.pin_memory = True
+    log_step(f"Resolved device={device}; amp={args.amp and device.type == 'cuda'}")
 
+    log_step(f"Loading/building DiFuMo coefficients from source={args.coeff_source}")
     data = load_difumo_data(args)
+    log_step(f"Loaded aligned data: n={len(data.coeffs):,}; dim={data.coeffs.shape[1]}")
     edge_index = torch.empty((2, 0), dtype=torch.long)
     edge_attr: Optional[torch.Tensor] = None
     graph_info: dict[str, float] = graph_stats(edge_index, edge_attr)
     if args.model in {"gat", "deepset"}:
+        log_step(f"Building graph type={args.graph_type}")
         edge_index, edge_attr, graph_info = build_graph(data, args)
+        log_step(
+            f"Graph ready: edges={int(graph_info['number_of_edges']):,}; "
+            f"avg_degree={graph_info['average_degree']:.1f}; "
+            f"components={int(graph_info['connected_components'])}"
+        )
     use_edge_attr = edge_attr is not None and edge_attr.numel() > 0 and args.model == "gat"
     in_dim = 1 + (3 if args.add_centroids else 0)
     extra = data.centroids if args.add_centroids else None
@@ -1206,6 +1220,7 @@ def main() -> None:
         test_ds = DifumoGraphDataset(data.coeffs, data.text, data.pmids, data.test_idx, edge_index, edge_attr, extra)
         test_graph_ds = test_ds
 
+    log_step(f"Building model={args.model}; conv={args.conv}; batch_size={args.batch_size}")
     brain_encoder, text_proj = build_model(args, in_dim=in_dim, use_edge_attr=use_edge_attr)
     config_payload = vars(args).copy()
     config_payload.update(
@@ -1234,12 +1249,15 @@ def main() -> None:
     print(f"  brain params={count_parameters(brain_encoder):,} text params={count_parameters(text_proj):,}")
     print(f"  device={device} amp={args.amp and device.type == 'cuda'} batch={args.batch_size}")
 
+    log_step("Starting training loop")
     trainer = DifumoTrainer(brain_encoder, text_proj, args, device)
     trainer.fit(train_ds, val_ds)
+    log_step("Training finished; restoring best checkpoint from RAM")
     trainer.restore_best()
 
     all_metrics: dict[str, dict[str, float]] = {}
     eval_payloads = {}
+    log_step("Evaluating validation and test splits")
     for name, split_ds in [("val", val_ds), ("test", test_ds)]:
         metrics, brain_emb, text_emb = trainer.evaluate(split_ds)
         all_metrics[name] = metrics
@@ -1270,8 +1288,10 @@ def main() -> None:
     diag_df.to_csv(run_dir / "test_retrieval_diagnostics.csv", index=False)
     save_embedding_correlations(run_dir, test_brain, cov)
     if args.save_plots:
+        log_step("Saving plots and diagnostics")
         save_plots(run_dir, trainer.history, curve_df, diag_df, test_brain, args.umap)
 
+    log_step("Writing final manifests and comparison rows")
     comparison_row = append_comparison_row(args, test_metrics, graph_info, trainer)
     manifest = {
         "run_dir": str(run_dir),
