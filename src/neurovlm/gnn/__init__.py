@@ -41,11 +41,19 @@ from .rgcn import RGCNLinkPredictor
 from .kg_train import RGCNTrainer, evaluate_link_prediction
 
 # Track 2 — Atlas-Free Coordinate GNN
-from .coord_graph import coords_to_graph, normalize_coords, denormalize_coords, MNI_HALF
-from .coord_dataset import CoordGraphDataset
-from .coord_model import CoordGNN
-from .coord_baselines import CoordDeepSet
-from .coord_train import CoordTrainer
+try:
+    from .coord_graph import coords_to_graph, normalize_coords, denormalize_coords, MNI_HALF
+    from .coord_dataset import CoordGraphDataset
+    from .coord_model import CoordGNN
+    from .coord_baselines import CoordDeepSet
+    from .coord_train import CoordTrainer
+except ImportError:  # pragma: no cover - optional torch_geometric dependency
+    coords_to_graph = normalize_coords = denormalize_coords = MNI_HALF = None
+    CoordGraphDataset = CoordGNN = CoordDeepSet = CoordTrainer = None
+
+# Track 3 — ALE dense CNN
+from .ale_cnn import ALE3DCNNEncoder, ALEFlatMLPEncoder
+from .ale_dataset import ALEPreprocessConfig, ALEVolumeDataset, build_or_load_ale_cache
 
 __all__ = [
     # Track 1 — DiFuMo GAT
@@ -75,4 +83,10 @@ __all__ = [
     "CoordGNN",
     "CoordDeepSet",
     "CoordTrainer",
+    # Track 3 — ALE dense CNN
+    "ALE3DCNNEncoder",
+    "ALEFlatMLPEncoder",
+    "ALEPreprocessConfig",
+    "ALEVolumeDataset",
+    "build_or_load_ale_cache",
 ]
