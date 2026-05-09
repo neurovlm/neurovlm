@@ -75,7 +75,10 @@ def compute_fc_from_coefficients(difumo_coeffs: np.ndarray) -> np.ndarray:
     X = difumo_coeffs - difumo_coeffs.mean(axis=0, keepdims=True)
     norms = np.linalg.norm(X, axis=0, keepdims=True) + 1e-8
     X_norm = X / norms
-    fc = (X_norm.T @ X_norm) / X.shape[0]   # (K, K)
+    # ``norms`` already contain sqrt(sum((x - mean)^2)) for each component, so
+    # this dot product is the Pearson correlation.  Dividing by n_papers again
+    # shrinks correlations toward zero and produces nearly useless edge weights.
+    fc = X_norm.T @ X_norm                  # (K, K)
     np.fill_diagonal(fc, 0.0)               # remove self-loops
     return fc.astype(np.float32)
 
