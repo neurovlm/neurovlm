@@ -90,6 +90,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--weight-decay", type=float, default=1e-4)
     p.add_argument("--val-interval", type=int, default=1)
     p.add_argument("--early-stopping-patience", type=int, default=12)
+    p.add_argument(
+        "--early-stopping-monitor",
+        choices=["train_loss", "val_metric", "none"],
+        default="train_loss",
+        help=(
+            "What triggers early stopping. 'train_loss' stops after the training "
+            "loss stops decreasing for N consecutive epochs; 'val_metric' stops "
+            "after the monitored validation metric stops improving; 'none' runs "
+            "all epochs. Best checkpoint is still selected by validation metric."
+        ),
+    )
+    p.add_argument("--early-stopping-min-delta", type=float, default=1e-4)
     p.add_argument("--monitor-metric", default="mean_auc")
     p.add_argument("--text-proj-init", choices=["random", "pretrained_infonce"], default="random")
     p.add_argument("--freeze-text-proj", action="store_true")
@@ -893,7 +905,9 @@ class DifumoTrainer:
             self.optimizer,
             lr_lambda=lambda step: cosine_warmup(step, warmup_steps, total_steps),
         )
-        bad_checks = 0
+        bad_val_checks = 0
+        bad_loss_epochs = 0
+        best_train_loss = float("inf")
         for epoch in range(self.args.epochs):
             if self.device.type == "cuda":
                 torch.cuda.reset_peak_memory_stats(self.device)
@@ -917,10 +931,17 @@ class DifumoTrainer:
             epoch_time = time.perf_counter() - start
             peak_vram = torch.cuda.max_memory_allocated(self.device) / 1024**2 if self.device.type == "cuda" else 0.0
             self.history["train_loss"].append(float(np.mean(losses)))
+            mean_loss = self.history["train_loss"][-1]
             self.history["epoch_time_sec"].append(float(epoch_time))
             self.history["peak_vram_mb"].append(float(peak_vram))
             self.history["lr_brain"].append(float(self.optimizer.param_groups[0]["lr"]))
             self.history["lr_proj"].append(0.0 if self.args.freeze_text_proj else float(self.optimizer.param_groups[1]["lr"]))
+
+            if mean_loss < best_train_loss - self.args.early_stopping_min_delta:
+                best_train_loss = mean_loss
+                bad_loss_epochs = 0
+            else:
+                bad_loss_epochs += 1
 
             if epoch % self.args.val_interval == 0:
                 metrics, _, _ = self.evaluate(val_ds)
@@ -930,12 +951,12 @@ class DifumoTrainer:
                 score = float(metrics[self.args.monitor_metric])
                 print(
                     f"Epoch {epoch:03d}/{self.args.epochs} "
-                    f"loss={self.history['train_loss'][-1]:.4f} "
+                    f"loss={mean_loss:.4f} "
                     f"val_auc={metrics['mean_auc']:.4f} "
                     f"val_r@10={metrics['mean_recall@10']:.4f} "
                     f"time={epoch_time:.1f}s vram={peak_vram:.0f}MB"
                 )
-                if score > self.best_score:
+                if score > self.best_score + self.args.early_stopping_min_delta:
                     self.best_score = score
                     self.best_state = {
                         "brain_encoder": deepcopy(self.brain_encoder.state_dict()),
@@ -944,14 +965,43 @@ class DifumoTrainer:
                         "metrics": metrics,
                         "config": vars(self.args),
                     }
-                    bad_checks = 0
+                    bad_val_checks = 0
                 else:
-                    bad_checks += 1
-                    if self.args.early_stopping_patience is not None and bad_checks >= self.args.early_stopping_patience:
-                        print(f"Early stopping after {bad_checks} validation checks.")
-                        break
+                    bad_val_checks += 1
             else:
-                print(f"Epoch {epoch:03d}/{self.args.epochs} loss={self.history['train_loss'][-1]:.4f} time={epoch_time:.1f}s")
+                print(f"Epoch {epoch:03d}/{self.args.epochs} loss={mean_loss:.4f} time={epoch_time:.1f}s")
+
+            if self.args.early_stopping_patience is not None:
+                if (
+                    self.args.early_stopping_monitor == "train_loss"
+                    and bad_loss_epochs >= self.args.early_stopping_patience
+                ):
+                    print(
+                        "Early stopping after "
+                        f"{bad_loss_epochs} epochs without training-loss improvement "
+                        f"(min_delta={self.args.early_stopping_min_delta:g})."
+                    )
+                    break
+                if (
+                    self.args.early_stopping_monitor == "val_metric"
+                    and bad_val_checks >= self.args.early_stopping_patience
+                ):
+                    print(
+                        "Early stopping after "
+                        f"{bad_val_checks} validation checks without "
+                        f"{self.args.monitor_metric} improvement "
+                        f"(min_delta={self.args.early_stopping_min_delta:g})."
+                    )
+                    break
+
+        if self.best_state is None:
+            self.best_state = {
+                "brain_encoder": deepcopy(self.brain_encoder.state_dict()),
+                "text_proj": deepcopy(self.text_proj.state_dict()),
+                "epoch": len(self.history["train_loss"]) - 1,
+                "metrics": {},
+                "config": vars(self.args),
+            }
         self.save_checkpoint("best_difumo_gat.pt")
         self.save_last()
 
