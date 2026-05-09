@@ -767,7 +767,6 @@ class DifumoTrainer:
                         "config": vars(self.args),
                     }
                     bad_checks = 0
-                    self.save_checkpoint("best_difumo_gat.pt")
                 else:
                     bad_checks += 1
                     if self.args.early_stopping_patience is not None and bad_checks >= self.args.early_stopping_patience:
@@ -775,6 +774,7 @@ class DifumoTrainer:
                         break
             else:
                 print(f"Epoch {epoch:03d}/{self.args.epochs} loss={self.history['train_loss'][-1]:.4f} time={epoch_time:.1f}s")
+        self.save_checkpoint("best_difumo_gat.pt")
         self.save_last()
 
     @torch.no_grad()
@@ -947,7 +947,12 @@ def save_plots(run_dir: Path, history: dict, curve_df: pd.DataFrame, diag_df: pd
     plt.close(fig)
 
 
-def append_comparison_row(args: argparse.Namespace, metrics: dict[str, float], graph_info: dict[str, float], trainer: DifumoTrainer) -> None:
+def append_comparison_row(
+    args: argparse.Namespace,
+    metrics: dict[str, float],
+    graph_info: dict[str, float],
+    trainer: DifumoTrainer,
+) -> dict:
     path = Path(args.comparison_file)
     path.parent.mkdir(parents=True, exist_ok=True)
     row = {
@@ -982,6 +987,9 @@ def append_comparison_row(args: argparse.Namespace, metrics: dict[str, float], g
         writer.writerow(row)
     with path.with_suffix(".jsonl").open("a") as f:
         f.write(json.dumps(row) + "\n")
+    with (Path(args.run_dir) / "comparison_row.json").open("w") as f:
+        json.dump(row, f, indent=2)
+    return row
 
 
 def main() -> None:
@@ -1088,9 +1096,35 @@ def main() -> None:
     if args.save_plots:
         save_plots(run_dir, trainer.history, curve_df, diag_df, test_brain, args.umap)
 
-    append_comparison_row(args, test_metrics, graph_info, trainer)
+    comparison_row = append_comparison_row(args, test_metrics, graph_info, trainer)
+    manifest = {
+        "run_dir": str(run_dir),
+        "checkpoint_dir": str(Path(args.checkpoint_dir)),
+        "best_checkpoint": str(Path(args.checkpoint_dir) / "best_difumo_gat.pt"),
+        "last_checkpoint": str(Path(args.checkpoint_dir) / "last_difumo_gat.pt"),
+        "config": str(run_dir / "config.json"),
+        "graph_stats": str(run_dir / "graph_stats.json"),
+        "training_history": str(run_dir / "training_history.json"),
+        "eval_results": str(run_dir / "eval_results.json"),
+        "test_recall_curve": str(run_dir / "test_recall_curve.csv"),
+        "test_covariates": str(run_dir / "test_difumo_covariates.csv"),
+        "test_retrieval_diagnostics": str(run_dir / "test_retrieval_diagnostics.csv"),
+        "embedding_covariate_correlations": str(run_dir / "embedding_covariate_correlations.csv"),
+        "training_curves_plot": str(run_dir / "training_curves.png"),
+        "recall_curve_plot": str(run_dir / "recall_curve.png"),
+        "umap_diagnostics_plot": str(run_dir / "umap_diagnostics.png"),
+        "comparison_file": str(Path(args.comparison_file)),
+        "comparison_jsonl": str(Path(args.comparison_file).with_suffix(".jsonl")),
+        "comparison_row": str(run_dir / "comparison_row.json"),
+        "coefficient_cache": str(Path(args.coeff_cache_file)),
+        "test_metrics": test_metrics,
+        "comparison_row_payload": comparison_row,
+    }
+    with (run_dir / "artifacts_manifest.json").open("w") as f:
+        json.dump(manifest, f, indent=2)
     print(f"\nArtifacts saved to {run_dir}")
     print(f"Comparison row appended to {args.comparison_file}")
+    print(f"Artifact manifest saved to {run_dir / 'artifacts_manifest.json'}")
 
 
 if __name__ == "__main__":

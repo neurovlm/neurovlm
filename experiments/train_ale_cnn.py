@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--temperature", type=float, default=0.07)
     p.add_argument("--val-interval", type=int, default=1)
     p.add_argument("--early-stopping-patience", type=int, default=None)
-    p.add_argument("--monitor-metric", default="mean_auc")
+    p.add_argument("--monitor-metric", default="paper_recall_curve_auc")
 
     p.add_argument("--base-channels", type=int, default=16)
     p.add_argument("--num-blocks", type=int, default=3)
@@ -293,7 +293,7 @@ class ALETrainer:
                 print(
                     f"Epoch {epoch:03d}/{self.args.epochs} "
                     f"loss={self.history['train_loss'][-1]:.4f} "
-                    f"val_auc={metrics['mean_auc']:.4f} "
+                    f"val_paper_recall_curve_auc={metrics['paper_recall_curve_auc']:.4f} "
                     f"val_r@10={metrics['mean_recall@10']:.4f} "
                     f"time={epoch_time:.1f}s vram={peak_vram:.0f}MB"
                 )
@@ -307,7 +307,6 @@ class ALETrainer:
                         "config": vars(self.args),
                     }
                     bad_checks = 0
-                    self.save_checkpoint("best_ale_cnn.pt")
                 else:
                     bad_checks += 1
                     if (
@@ -322,6 +321,7 @@ class ALETrainer:
                     f"loss={self.history['train_loss'][-1]:.4f} time={epoch_time:.1f}s"
                 )
 
+        self.save_best()
         self.save_last()
 
     @torch.no_grad()
@@ -340,6 +340,9 @@ class ALETrainer:
     def evaluate(self, ds) -> tuple[dict[str, float], torch.Tensor, torch.Tensor]:
         brain, text = self.collect_embeddings(ds)
         metrics = bidirectional_retrieval_metrics(text, brain)
+        metrics["paper_recall_curve_auc"] = metrics["mean_auc"]
+        metrics["full_recall_curve_auc_k1_to_N"] = metrics["mean_auc"]
+        metrics["random_recall@10"] = metrics["mean_random_recall@10"]
         loss = self.loss_fn(brain, text)
         metrics["loss"] = float(loss.item())
         return metrics, brain, text
@@ -350,10 +353,10 @@ class ALETrainer:
         self.brain_encoder.load_state_dict(self.best_state["brain_encoder"])
         self.text_proj.load_state_dict(self.best_state["text_proj"])
 
-    def save_checkpoint(self, filename: str) -> None:
+    def save_best(self) -> None:
         if self.best_state is None:
             return
-        path = Path(self.args.checkpoint_dir) / filename
+        path = Path(self.args.checkpoint_dir) / "best_ale_cnn.pt"
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(self.best_state, path)
 
@@ -387,6 +390,21 @@ def recall_curve_frame(text_emb: torch.Tensor, brain_emb: torch.Tensor) -> pd.Da
 
 
 @torch.no_grad()
+def recall_curve_payload(text_emb: torch.Tensor, brain_emb: torch.Tensor) -> dict:
+    """Return paper-style full recall curves as JSON-serializable arrays."""
+    t2i, i2t = recall_curve(text_emb, brain_emb)
+    n = len(t2i)
+    return {
+        "k_values": list(range(1, n + 1)),
+        "text_to_brain_recall_curve": t2i.cpu().tolist(),
+        "brain_to_text_recall_curve": i2t.cpu().tolist(),
+        "mean_recall_curve": ((t2i + i2t) / 2).cpu().tolist(),
+        "random_recall_curve": (torch.arange(1, n + 1).float() / float(n)).tolist(),
+        "paper_recall_curve_auc": float(((t2i + i2t) / 2).mean().item()),
+    }
+
+
+@torch.no_grad()
 def retrieval_diagnostics(text_emb: torch.Tensor, brain_emb: torch.Tensor, cov: pd.DataFrame) -> pd.DataFrame:
     import torch.nn.functional as F
 
@@ -415,8 +433,12 @@ def save_plots(run_dir: Path, history: dict, curve_df: pd.DataFrame, diag_df: Op
     ax[0].set_title("Training Loss")
     ax[0].set_xlabel("epoch")
     ax[0].set_ylabel("InfoNCE")
-    if "val_mean_auc" in history:
-        ax[1].plot(history["val_epoch"], history["val_mean_auc"], label="AUC")
+    if "val_paper_recall_curve_auc" in history:
+        ax[1].plot(
+            history["val_epoch"],
+            history["val_paper_recall_curve_auc"],
+            label="paper recall-curve AUC",
+        )
         for k in [1, 5, 10, 50]:
             key = f"val_mean_recall@{k}"
             if key in history:
@@ -521,7 +543,7 @@ def evaluate_neurovlm_baseline_by_pmids(pmids: np.ndarray, device: torch.device)
     return metrics
 
 
-def append_comparison_row(args, payload, metrics, trainer, input_shape) -> None:
+def append_comparison_row(args, payload, metrics, trainer, input_shape) -> dict:
     path = Path(args.comparison_file)
     path.parent.mkdir(parents=True, exist_ok=True)
     row = {
@@ -533,7 +555,9 @@ def append_comparison_row(args, payload, metrics, trainer, input_shape) -> None:
         "number_of_parameters": count_parameters(trainer.brain_encoder),
         "training_time_per_epoch": float(np.mean(trainer.history["epoch_time_sec"])),
         "peak_vram": float(max(trainer.history["peak_vram_mb"] or [0.0])),
-        "full_recall_curve_auc": metrics["mean_auc"],
+        "paper_recall_curve_auc": metrics["paper_recall_curve_auc"],
+        "full_recall_curve_auc_k1_to_N": metrics["full_recall_curve_auc_k1_to_N"],
+        "full_recall_curve_auc": metrics["paper_recall_curve_auc"],
         "recall@1": metrics["mean_recall@1"],
         "recall@5": metrics["mean_recall@5"],
         "recall@10": metrics["mean_recall@10"],
@@ -555,6 +579,9 @@ def append_comparison_row(args, payload, metrics, trainer, input_shape) -> None:
     jsonl = path.with_suffix(".jsonl")
     with jsonl.open("a") as f:
         f.write(json.dumps(row) + "\n")
+    with (Path(args.run_dir) / "comparison_row.json").open("w") as f:
+        json.dump(row, f, indent=2)
+    return row
 
 
 def main() -> None:
@@ -619,7 +646,7 @@ def main() -> None:
         eval_payloads[name] = (metrics, brain_emb, text_emb)
         print(
             f"\n{name.upper()} n={len(split_ds):,} "
-            f"AUC={metrics['mean_auc']:.4f} "
+            f"paper_recall_curve_auc={metrics['paper_recall_curve_auc']:.4f} "
             f"r@1={metrics['mean_recall@1']:.4f} "
             f"r@5={metrics['mean_recall@5']:.4f} "
             f"r@10={metrics['mean_recall@10']:.4f} "
@@ -637,9 +664,16 @@ def main() -> None:
     with (run_dir / "eval_results.json").open("w") as f:
         json.dump(all_metrics, f, indent=2)
 
+    curve_frames = {}
+    for split_name, (_, brain_emb, text_emb) in eval_payloads.items():
+        curve_df = recall_curve_frame(text_emb, brain_emb)
+        curve_frames[split_name] = curve_df
+        curve_df.to_csv(run_dir / f"{split_name}_recall_curve.csv", index=False)
+        with (run_dir / f"{split_name}_recall_curve.json").open("w") as f:
+            json.dump(recall_curve_payload(text_emb, brain_emb), f, indent=2)
+
     test_metrics, test_brain, test_text = eval_payloads["test"]
-    curve_df = recall_curve_frame(test_text, test_brain)
-    curve_df.to_csv(run_dir / "test_recall_curve.csv", index=False)
+    curve_df = curve_frames["test"]
     cov = test_ds.covariate_frame()
     diag_df = retrieval_diagnostics(test_text, test_brain, cov)
     diag_df.to_csv(run_dir / "test_retrieval_diagnostics.csv", index=False)
