@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import sys
@@ -103,6 +104,22 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--test-frac", type=float, default=0.1)
     p.add_argument("--max-papers", type=int, default=None)
 
+    p.add_argument(
+        "--coeff-source",
+        choices=["flatmap", "ale_coordinates"],
+        default="flatmap",
+        help=(
+            "Source for DiFuMo node coefficients. 'flatmap' projects existing "
+            "pubmed_images flatmaps; 'ale_coordinates' builds Gaussian ALE maps "
+            "from sparse MNI coordinates before DiFuMo projection."
+        ),
+    )
+    p.add_argument("--ale-kernel-fwhm-mm", type=float, default=9.0)
+    p.add_argument("--ale-normalize", choices=["max", "mass", "none"], default="max")
+    p.add_argument("--ale-clamp", action="store_true", default=True)
+    p.add_argument("--ale-no-clamp", dest="ale_clamp", action="store_false")
+    p.add_argument("--difumo-normalize-coeffs", action="store_true", default=True)
+    p.add_argument("--no-difumo-normalize-coeffs", dest="difumo_normalize_coeffs", action="store_false")
     p.add_argument("--coeff-cache-file", default="data/difumo/difumo512_pubmed_coeffs.npz")
     p.add_argument("--force-rebuild-cache", action="store_true")
     p.add_argument("--run-dir", default=None)
@@ -230,18 +247,54 @@ def _pmids_to_numpy(pmids_raw, n: int) -> np.ndarray:
     return np.asarray(pmids_raw).astype(str)
 
 
-def build_or_load_coefficients(args: argparse.Namespace) -> tuple[np.ndarray, np.ndarray]:
-    cache = Path(args.coeff_cache_file)
-    if cache.exists() and not args.force_rebuild_cache:
-        payload = np.load(cache, allow_pickle=True)
-        coeffs = payload["coeffs"].astype(np.float32)
-        pmids = payload["pmids"].astype(str)
-        if args.max_papers is not None:
-            coeffs = coeffs[: args.max_papers]
-            pmids = pmids[: args.max_papers]
-        print(f"Loaded cached DiFuMo coefficients: {coeffs.shape} from {cache}")
-        return coeffs, pmids
+def _coeff_cache_config(args: argparse.Namespace) -> dict:
+    return {
+        "coeff_source": args.coeff_source,
+        "difumo_dim": DIFUMO_DIM,
+        "difumo_normalize_coeffs": bool(args.difumo_normalize_coeffs),
+        "max_papers": args.max_papers,
+        "ale_kernel_fwhm_mm": float(args.ale_kernel_fwhm_mm),
+        "ale_normalize": args.ale_normalize,
+        "ale_clamp": bool(args.ale_clamp),
+        "version": 2,
+    }
 
+
+def _cache_key(config: dict) -> str:
+    payload = json.dumps(config, sort_keys=True)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _normalize_flat_volume(vol: np.ndarray, normalize: str, clamp: bool) -> np.ndarray:
+    vol = np.nan_to_num(vol, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    if clamp:
+        vol = np.clip(vol, 0.0, None)
+    if normalize == "max":
+        mx = float(vol.max())
+        if mx > 0:
+            vol = vol / mx
+    elif normalize == "mass":
+        total = float(vol.sum())
+        if total > 0:
+            vol = vol / total
+    elif normalize == "none":
+        pass
+    else:
+        raise ValueError("normalize must be one of {'max', 'mass', 'none'}")
+    if clamp:
+        vol = np.clip(vol, 0.0, 1.0)
+    return vol.astype(np.float32)
+
+
+def _normalize_coefficients(coeffs: np.ndarray, enabled: bool) -> np.ndarray:
+    if not enabled:
+        return coeffs.astype(np.float32)
+    mu = coeffs.mean(axis=0, keepdims=True)
+    sigma = coeffs.std(axis=0, keepdims=True) + 1e-8
+    return ((coeffs - mu) / sigma).astype(np.float32)
+
+
+def _build_flatmap_difumo_coefficients(args: argparse.Namespace) -> tuple[np.ndarray, np.ndarray, dict]:
     print("Loading PubMed brain flatmaps...")
     images_data = load_dataset("pubmed_images")
     if isinstance(images_data, (tuple, list)):
@@ -257,9 +310,130 @@ def build_or_load_coefficients(args: argparse.Namespace) -> tuple[np.ndarray, np
     print(f"Loading DiFuMo {DIFUMO_DIM} atlas...")
     components = load_difumo_components(dimension=DIFUMO_DIM)
     print("Projecting flatmaps into DiFuMo coefficient space...")
-    coeffs = compute_difumo_coefficients(brain_flat, components, normalize=True).astype(np.float32)
+    coeffs = compute_difumo_coefficients(
+        brain_flat,
+        components,
+        normalize=args.difumo_normalize_coeffs,
+    ).astype(np.float32)
+    meta = {
+        "source": "pubmed_images flatmaps projected into DiFuMo space",
+        "n_papers": int(len(pmids)),
+        "n_voxels": int(brain_flat.shape[1]),
+    }
+    return coeffs, pmids, meta
+
+
+def _build_ale_coordinate_difumo_coefficients(args: argparse.Namespace) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Build sparse-coordinate -> Gaussian ALE -> DiFuMo coefficients."""
+    from scipy.ndimage import gaussian_filter
+    from neurovlm.data import load_masker
+    from neurovlm.retrieval_resources import _load_pubmed_coordinates
+
+    print("Loading PubMed MNI peak coordinates...")
+    coords_df = _load_pubmed_coordinates().copy()
+    coords_df["pmid"] = coords_df["pmid"].astype(str)
+    grouped = list(coords_df.groupby("pmid", sort=False))
+    if args.max_papers is not None:
+        grouped = grouped[: args.max_papers]
+
+    masker = load_masker()
+    mask_img = masker.mask_img_
+    mask = np.asarray(mask_img.get_fdata() > 0)
+    affine = np.asarray(mask_img.affine, dtype=np.float32)
+    inv_affine = np.linalg.inv(affine)
+    voxel_sizes = np.sqrt((affine[:3, :3] ** 2).sum(axis=0)).astype(np.float32)
+    sigma_mm = float(args.ale_kernel_fwhm_mm) / 2.354820045
+    sigma_vox = sigma_mm / voxel_sizes
+
+    print(f"Loading DiFuMo {DIFUMO_DIM} atlas...")
+    components = load_difumo_components(dimension=DIFUMO_DIM)
+    if int(mask.sum()) != int(components.shape[1]):
+        raise ValueError(
+            f"Mask has {int(mask.sum())} voxels but DiFuMo components have "
+            f"{int(components.shape[1])} masked voxels."
+        )
+
+    coeff_rows: list[np.ndarray] = []
+    pmids: list[str] = []
+    skipped_empty = 0
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        tqdm = lambda x, **_: x  # type: ignore[assignment]
+
+    print(
+        "Building Gaussian ALE maps from coordinates and projecting to DiFuMo "
+        f"(FWHM={args.ale_kernel_fwhm_mm:g}mm)..."
+    )
+    for pmid, grp in tqdm(grouped, desc="ALE->DiFuMo", unit="paper"):
+        impulse = np.zeros(mask.shape, dtype=np.float32)
+        coords = grp[["x", "y", "z"]].to_numpy(dtype=np.float32)
+        for xyz in np.unique(coords, axis=0):
+            vox = inv_affine @ np.asarray([xyz[0], xyz[1], xyz[2], 1.0], dtype=np.float32)
+            ijk = np.rint(vox[:3]).astype(int)
+            if np.any(ijk < 0) or np.any(ijk >= np.asarray(mask.shape)):
+                continue
+            idx = tuple(ijk.tolist())
+            if not mask[idx]:
+                continue
+            impulse[idx] += 1.0
+        if impulse.sum() == 0:
+            skipped_empty += 1
+            continue
+        vol = gaussian_filter(impulse, sigma=sigma_vox, mode="constant")
+        vol *= mask.astype(np.float32)
+        vol = _normalize_flat_volume(vol, args.ale_normalize, args.ale_clamp)
+        flat = vol[mask].astype(np.float32)
+        coeff_rows.append(flat @ components.T)
+        pmids.append(str(pmid))
+
+    if not coeff_rows:
+        raise RuntimeError("ALE coordinate DiFuMo builder produced no non-empty papers.")
+    coeffs = np.stack(coeff_rows).astype(np.float32)
+    coeffs = _normalize_coefficients(coeffs, args.difumo_normalize_coeffs)
+    meta = {
+        "source": "pubmed MNI coordinates -> Gaussian ALE maps -> DiFuMo coefficients",
+        "n_papers": int(len(pmids)),
+        "skipped_empty_papers": int(skipped_empty),
+        "kernel_fwhm_mm": float(args.ale_kernel_fwhm_mm),
+        "sigma_vox": sigma_vox.tolist(),
+        "voxel_sizes_mm": voxel_sizes.tolist(),
+        "ale_normalize": args.ale_normalize,
+        "ale_clamp": bool(args.ale_clamp),
+    }
+    return coeffs, np.asarray(pmids).astype(str), meta
+
+
+def build_or_load_coefficients(args: argparse.Namespace) -> tuple[np.ndarray, np.ndarray]:
+    cache = Path(args.coeff_cache_file)
+    config = _coeff_cache_config(args)
+    key = _cache_key(config)
+    if cache.exists() and not args.force_rebuild_cache:
+        payload = np.load(cache, allow_pickle=True)
+        cached_key = str(payload["config_key"]) if "config_key" in payload.files else None
+        if cached_key == key:
+            coeffs = payload["coeffs"].astype(np.float32)
+            pmids = payload["pmids"].astype(str)
+            print(f"Loaded cached DiFuMo coefficients: {coeffs.shape} from {cache}")
+            return coeffs, pmids
+        print("DiFuMo coefficient cache config changed; rebuilding cache.")
+
+    if args.coeff_source == "flatmap":
+        coeffs, pmids, meta = _build_flatmap_difumo_coefficients(args)
+    elif args.coeff_source == "ale_coordinates":
+        coeffs, pmids, meta = _build_ale_coordinate_difumo_coefficients(args)
+    else:
+        raise ValueError(f"Unknown coefficient source: {args.coeff_source}")
+
     cache.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(cache, coeffs=coeffs, pmids=pmids)
+    np.savez_compressed(
+        cache,
+        coeffs=coeffs,
+        pmids=pmids,
+        config_key=key,
+        config_json=json.dumps(config, sort_keys=True),
+        metadata_json=json.dumps(meta, sort_keys=True),
+    )
     print(f"Saved coefficient cache: {cache}")
     return coeffs, pmids
 
@@ -958,6 +1132,8 @@ def append_comparison_row(
     row = {
         "model_name": f"difumo_{args.model}",
         "preprocessing_type": "difumo_coefficients",
+        "coefficient_source": args.coeff_source,
+        "ale_kernel_fwhm_mm": args.ale_kernel_fwhm_mm if args.coeff_source == "ale_coordinates" else "",
         "uses_difumo": "yes",
         "atlas_free": "no",
         "graph_type": args.graph_type if args.model == "gat" else "none",
