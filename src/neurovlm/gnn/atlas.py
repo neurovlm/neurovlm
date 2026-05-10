@@ -41,7 +41,7 @@ def load_difumo_components(
         ``n_masked_voxels`` matches ``BRAIN_FLAT_DIM`` (28,542) from
         ``neurovlm.core``.
     """
-    from nilearn import datasets as nilearn_datasets
+    from nilearn import datasets as nilearn_datasets, image
     from neurovlm.data import load_masker
 
     atlas = nilearn_datasets.fetch_atlas_difumo(
@@ -50,10 +50,14 @@ def load_difumo_components(
 
     masker = load_masker()
 
-    # atlas.maps is a 4D NIfTI: (x, y, z, dimension).
-    # NiftiMasker.transform treats each 3-D volume as a sample → returns
-    # (dimension, n_masked_voxels).
-    P = masker.transform(atlas.maps)  # (dimension, n_voxels)
+    # atlas.maps is a 4D NIfTI: (x, y, z, dimension). Passing the full 4D
+    # image to NiftiMasker can transiently allocate a large resampled array and
+    # get Colab killed by the OS. Stream one 3D component at a time instead.
+    n_masked_voxels = int((masker.mask_img_.get_fdata() > 0).sum())
+    P = np.empty((dimension, n_masked_voxels), dtype=np.float32)
+    for k in range(dimension):
+        component_img = image.index_img(atlas.maps, k)
+        P[k] = masker.transform(component_img).reshape(-1).astype(np.float32)
     return P.astype(np.float32)
 
 
@@ -121,21 +125,18 @@ def get_component_centroids(dimension: int = DIFUMO_DIM, resolution_mm: int = 2)
         dimension=dimension, resolution_mm=resolution_mm
     )
     img = nib.load(atlas.maps)
-    data = img.get_fdata()           # (x, y, z, K)
     affine = img.affine
+    dataobj = img.dataobj
 
-    K = data.shape[-1]
+    K = img.shape[-1]
     centroids = np.zeros((K, 3), dtype=np.float32)
+    xs, ys, zs = np.mgrid[: img.shape[0], : img.shape[1], : img.shape[2]]
     for k in range(K):
-        vol = data[..., k]
+        vol = np.asarray(dataobj[..., k], dtype=np.float32)
         vol = np.clip(vol, 0, None)
         total = vol.sum()
         if total < 1e-12:
             continue
-        # Voxel-space weighted centroid
-        xs, ys, zs = np.mgrid[
-            : data.shape[0], : data.shape[1], : data.shape[2]
-        ]
         cx = (vol * xs).sum() / total
         cy = (vol * ys).sum() / total
         cz = (vol * zs).sum() / total

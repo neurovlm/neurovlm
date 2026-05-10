@@ -919,7 +919,9 @@ def main() -> None:
                 mesh_json=getattr(args, "mesh_json", None),
                 resource_use={
                     "network_label_csv": "networks_labels/network_test_set_labels.csv",
+                    "network_term_corpus_csv": "networks_labels/network_terms_with_definitions.csv",
                     "pmid_mesh_json": "mesh_kg/mesh_annotations.json",
+                    "mesh_node_types": "mesh_kg/mesh_kg_nodes.parquet",
                 },
                 extra_summary={
                     "params": count_parameters(trainer.brain_encoder),
@@ -943,6 +945,7 @@ def main() -> None:
                     "network_macro_auc": network_metrics.get("macro_auc"),
                 }
             )
+            semantic_summary.update({key: value for key, value in network_metrics.items() if key.startswith("network_term_")})
             with (run_dir / "main_comparison_summary_row.json").open("w") as f:
                 json.dump(semantic_summary, f, indent=2)
             pd.DataFrame([semantic_summary]).to_csv(run_dir / "main_comparison_summary_row.csv", index=False)

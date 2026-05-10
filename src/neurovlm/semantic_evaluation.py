@@ -62,6 +62,47 @@ DEFAULT_NETWORK_LABEL_DEFINITIONS: dict[str, tuple[str, str]] = {
     ),
 }
 
+NETWORK_TERM_COLUMNS: tuple[str, ...] = ("network_name", "cognitive_terms", "region_terms")
+DEFAULT_MESH_RANKING_NODE_TYPES: tuple[str, ...] = (
+    "cognitive_construct",
+    "biological_process",
+    "anatomical_region",
+    "disorder",
+)
+EXCLUDED_MESH_RANKING_NODE_TYPES: tuple[str, ...] = (
+    "molecular",
+    "organism",
+    "other",
+    "method",
+    "demographic",
+)
+
+
+def normalize_network_term(term: str) -> str:
+    """Normalize a network/cognitive/region term for deduplication and lookup."""
+
+    import re
+
+    text = re.sub(r"\([^)]*\)", " ", str(term).lower())
+    text = text.replace("&", " and ")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def split_network_term_cell(value: Any) -> list[str]:
+    """Split semicolon-separated network term cells while preserving display text."""
+
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return []
+    if pd.isna(value):
+        return []
+    out: list[str] = []
+    for piece in str(value).replace("|", ";").split(";"):
+        term = " ".join(piece.strip().split())
+        if term and term.lower() not in {"nan", "none", "unknown"}:
+            out.append(term)
+    return out
+
 
 def _as_bool_split_value(value: Any) -> bool:
     if pd.isna(value):
@@ -392,6 +433,100 @@ def build_network_label_corpus(labels_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def find_network_term_corpus(path: str | Path | None = None) -> Path | None:
+    """Find the deduplicated network-term definition corpus if it exists."""
+
+    module_repo_root = Path(__file__).resolve().parents[2]
+    search_roots = [Path.cwd(), module_repo_root]
+    search_roots.extend(Path.cwd().parents)
+
+    candidates: list[Path] = []
+    if path is not None:
+        path_obj = Path(path).expanduser()
+        if path_obj.is_absolute():
+            candidates.append(path_obj)
+        else:
+            candidates.extend(root / path_obj for root in search_roots)
+    relative_candidates = [
+        Path("experiments/evaluation_resources/networks_labels/network_terms_with_definitions.csv"),
+        Path("networks_labels/network_terms_with_definitions.csv"),
+    ]
+    candidates.extend(root / rel for root in search_roots for rel in relative_candidates)
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def load_network_term_corpus(path: str | Path | None = None) -> pd.DataFrame | None:
+    """Load the deduplicated network term corpus produced by the builder notebook."""
+
+    found = find_network_term_corpus(path)
+    if found is None:
+        return None
+    corpus = pd.read_csv(found)
+    if "term" not in corpus.columns:
+        raise KeyError(f"{found} must contain a 'term' column.")
+    if "normalized_term" not in corpus.columns:
+        corpus["normalized_term"] = corpus["term"].map(normalize_network_term)
+    if "definition" not in corpus.columns:
+        corpus["definition"] = ""
+    corpus["definition"] = corpus["definition"].fillna("").astype(str)
+    corpus["text"] = [
+        f"{term} [SEP] {definition}" if definition else str(term)
+        for term, definition in zip(corpus["term"].astype(str), corpus["definition"].astype(str))
+    ]
+    corpus = corpus.drop_duplicates("normalized_term", keep="first").reset_index(drop=True)
+    return corpus
+
+
+def build_network_term_corpus_from_label_table(
+    labels_df: pd.DataFrame,
+    definitions: Mapping[str, str] | None = None,
+) -> pd.DataFrame:
+    """Build a deduplicated term corpus from network_name/cognitive_terms/region_terms."""
+
+    definitions = definitions or {}
+    rows_by_norm: dict[str, dict[str, Any]] = {}
+    for _, row in labels_df.iterrows():
+        for column in NETWORK_TERM_COLUMNS:
+            if column not in labels_df.columns:
+                continue
+            for term in split_network_term_cell(row.get(column)):
+                norm = normalize_network_term(term)
+                if not norm:
+                    continue
+                entry = rows_by_norm.setdefault(
+                    norm,
+                    {
+                        "term": term,
+                        "normalized_term": norm,
+                        "source_columns": set(),
+                        "definition": "",
+                    },
+                )
+                entry["source_columns"].add(column)
+    rows = []
+    for norm, entry in sorted(rows_by_norm.items(), key=lambda item: item[1]["term"].lower()):
+        definition = definitions.get(entry["term"], "") or definitions.get(norm, "")
+        rows.append(
+            {
+                "term": entry["term"],
+                "normalized_term": norm,
+                "source_columns": "; ".join(sorted(entry["source_columns"])),
+                "definition": definition,
+                "text": f"{entry['term']} [SEP] {definition}" if definition else entry["term"],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def align_network_ground_truth(
     network_records: Sequence[Mapping[str, Any]],
     labels_df: pd.DataFrame,
@@ -418,6 +553,53 @@ def align_network_ground_truth(
             row["network_key"] = str(hit.get("network_key", "unknown"))
             row["network_name"] = str(hit.get("network_name", "Unknown"))
         rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def align_network_term_ground_truth(
+    network_records: Sequence[Mapping[str, Any]],
+    labels_df: pd.DataFrame,
+    term_corpus: pd.DataFrame,
+) -> pd.DataFrame:
+    """Attach multi-positive term labels to each raw network map record."""
+
+    if "raw_network_label" not in labels_df.columns:
+        raise KeyError("network label CSV must contain a raw_network_label column.")
+    if "normalized_term" not in term_corpus.columns:
+        term_corpus = term_corpus.copy()
+        term_corpus["normalized_term"] = term_corpus["term"].map(normalize_network_term)
+
+    corpus_norms = set(term_corpus["normalized_term"].astype(str))
+    lookup = labels_df.set_index("raw_network_label")
+    rows = []
+    for i, rec in enumerate(network_records):
+        raw_label = str(rec["network_label"])
+        base = {
+            "row_index": i,
+            "atlas": str(rec["atlas"]),
+            "raw_network_label": raw_label,
+            "network_key": "unknown",
+            "network_name": "Unknown",
+            "true_network_terms": [],
+        }
+        if raw_label not in lookup.index:
+            rows.append(base)
+            continue
+        hit = lookup.loc[raw_label]
+        if isinstance(hit, pd.DataFrame):
+            hit = hit.iloc[0]
+        base["network_key"] = str(hit.get("network_key", "unknown"))
+        base["network_name"] = str(hit.get("network_name", "Unknown"))
+        terms: list[str] = []
+        seen: set[str] = set()
+        for column in NETWORK_TERM_COLUMNS:
+            for term in split_network_term_cell(hit.get(column)):
+                norm = normalize_network_term(term)
+                if norm and norm in corpus_norms and norm not in seen:
+                    terms.append(term)
+                    seen.add(norm)
+        base["true_network_terms"] = terms
+        rows.append(base)
     return pd.DataFrame(rows)
 
 
@@ -494,6 +676,93 @@ def evaluate_network_labeling(
         _plot_one_vs_rest_auc(y_true_idx, eval_scores, label_names, out_path / "network_one_vs_rest_auc.png")
 
     return metrics, pred_rows
+
+
+def evaluate_network_term_ranking(
+    network_embeddings: torch.Tensor,
+    term_embeddings: torch.Tensor,
+    truth_df: pd.DataFrame,
+    term_corpus: pd.DataFrame,
+    *,
+    out_dir: str | Path | None = None,
+    top_k_examples: int = 20,
+) -> tuple[dict[str, Any], pd.DataFrame]:
+    """Evaluate each network map against a deduplicated term/definition corpus."""
+
+    out_path = Path(out_dir) if out_dir is not None else None
+    if out_path is not None:
+        out_path.mkdir(parents=True, exist_ok=True)
+
+    corpus = term_corpus.copy()
+    if "normalized_term" not in corpus.columns:
+        corpus["normalized_term"] = corpus["term"].map(normalize_network_term)
+    candidate_terms = corpus["term"].astype(str).tolist()
+    norm_to_idx = {norm: i for i, norm in enumerate(corpus["normalized_term"].astype(str))}
+
+    true_indices: list[set[int]] = []
+    true_terms: list[list[str]] = []
+    for terms in truth_df["true_network_terms"]:
+        terms_list = terms if isinstance(terms, list) else split_network_term_cell(terms)
+        positives = []
+        for term in terms_list:
+            idx = norm_to_idx.get(normalize_network_term(term))
+            if idx is not None:
+                positives.append(int(idx))
+        true_indices.append(set(positives))
+        true_terms.append([candidate_terms[i] for i in sorted(set(positives))])
+
+    sim = F.normalize(network_embeddings.float(), dim=1, eps=1e-8) @ F.normalize(term_embeddings.float(), dim=1, eps=1e-8).T
+    scores = sim.detach().cpu().numpy()
+    metrics = multi_positive_ranking_metrics(scores, true_indices, ks=(1, 5, 10, 20, 50), ndcg_k=10)
+    metrics.update(
+        {
+            "n_network_maps": int(len(truth_df)),
+            "n_candidate_terms": int(len(candidate_terms)),
+            "n_maps_with_terms": int(sum(bool(x) for x in true_indices)),
+        }
+    )
+
+    order = np.argsort(-scores, axis=1)
+    rows = []
+    for i, truth_row in truth_df.reset_index(drop=True).iterrows():
+        positives = true_indices[i]
+        if positives:
+            ranks_by_candidate = np.empty(len(candidate_terms), dtype=np.int64)
+            ranks_by_candidate[order[i]] = np.arange(1, len(candidate_terms) + 1)
+            best_rank = min(int(ranks_by_candidate[j]) for j in positives)
+            avg_rank = float(np.mean([int(ranks_by_candidate[j]) for j in positives]))
+        else:
+            best_rank = np.nan
+            avg_rank = np.nan
+        top = order[i, :top_k_examples]
+        rows.append(
+            {
+                "atlas": truth_row.get("atlas"),
+                "raw_network_label": truth_row.get("raw_network_label"),
+                "network_key": truth_row.get("network_key"),
+                "network_name": truth_row.get("network_name"),
+                "true_network_terms": "|".join(true_terms[i]),
+                f"top_{top_k_examples}_predicted_terms": "|".join(candidate_terms[j] for j in top),
+                "scores": "|".join(f"{scores[i, j]:.6f}" for j in top),
+                "hit@5": bool(any(j in positives for j in order[i, :5])),
+                "hit@10": bool(any(j in positives for j in order[i, :10])),
+                "best_true_term_rank": best_rank,
+                "average_true_term_rank": avg_rank,
+            }
+        )
+    pred_df = pd.DataFrame(rows)
+
+    if out_path is not None:
+        with (out_path / "network_term_ranking_metrics.json").open("w") as f:
+            json.dump(metrics, f, indent=2)
+        pred_df.to_csv(out_path / "network_term_predictions.csv", index=False)
+        pred_df.sort_values("best_true_term_rank", na_position="last").head(50).to_csv(
+            out_path / "network_term_topk_examples.csv",
+            index=False,
+        )
+        corpus.to_json(out_path / "network_term_candidate_corpus.json", orient="records", indent=2)
+
+    return metrics, pred_df
 
 
 def _plot_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, labels: Sequence[str], path: Path) -> None:
@@ -575,6 +844,8 @@ def build_mesh_candidate_corpus(
     *,
     definition_lookup: Mapping[str, str] | None = None,
     strip_qualifiers_for_candidates: bool = True,
+    node_type_lookup: Mapping[str, str] | None = None,
+    allowed_node_types: Sequence[str] | None = DEFAULT_MESH_RANKING_NODE_TYPES,
 ) -> pd.DataFrame:
     """Create the MeSH candidate corpus from true labels."""
 
@@ -584,11 +855,24 @@ def build_mesh_candidate_corpus(
         for term in pmid_mesh.get(str(pmid), []):
             terms.add(mesh_descriptor_name(term) if strip_qualifiers_for_candidates else str(term))
     rows = []
+    allowed = set(allowed_node_types) if allowed_node_types is not None else None
     for term in sorted(t for t in terms if t):
+        node_type = ""
+        if node_type_lookup is not None:
+            node_type = node_type_lookup.get(term, "") or node_type_lookup.get(term.lower(), "")
+            if allowed is not None and node_type not in allowed:
+                continue
         definition = ""
         if definition_lookup is not None:
             definition = definition_lookup.get(term, "") or definition_lookup.get(term.lower(), "")
-        rows.append({"term": term, "definition": definition, "text": f"{term} [SEP] {definition}" if definition else term})
+        rows.append(
+            {
+                "term": term,
+                "definition": definition,
+                "node_type": node_type,
+                "text": f"{term} [SEP] {definition}" if definition else term,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -611,6 +895,24 @@ def definition_lookup_from_dataframe(df: pd.DataFrame) -> dict[str, str]:
         if name:
             out[name] = definition
             out[name.lower()] = definition
+    return out
+
+
+def mesh_node_type_lookup_from_dataframe(df: pd.DataFrame) -> dict[str, str]:
+    """Build a permissive MeSH term -> node_type lookup."""
+
+    name_cols = [c for c in ("name", "term", "descriptor_name", "mesh_term", "label") if c in df.columns]
+    type_cols = [c for c in ("node_type", "semantic_type", "category", "type") if c in df.columns]
+    if not name_cols or not type_cols:
+        return {}
+    name_col, type_col = name_cols[0], type_cols[0]
+    out: dict[str, str] = {}
+    for _, row in df[[name_col, type_col]].dropna(subset=[name_col, type_col]).iterrows():
+        name = str(row[name_col]).strip()
+        node_type = str(row[type_col]).strip()
+        if name and node_type:
+            out[name] = node_type
+            out[name.lower()] = node_type
     return out
 
 
@@ -742,6 +1044,13 @@ def evaluate_mesh_term_ranking(
     sim = F.normalize(brain_embeddings.float(), dim=1, eps=1e-8) @ F.normalize(candidate_embeddings.float(), dim=1, eps=1e-8).T
     scores = sim.detach().cpu().numpy()
     metrics = multi_positive_ranking_metrics(scores, true_indices, ks=(1, 5, 10, 50), ndcg_k=10)
+    if "node_type" in candidate_corpus.columns:
+        metrics["candidate_allowed_node_types"] = list(DEFAULT_MESH_RANKING_NODE_TYPES)
+        metrics["candidate_excluded_node_types"] = list(EXCLUDED_MESH_RANKING_NODE_TYPES)
+        metrics["candidate_node_type_counts"] = {
+            str(k): int(v)
+            for k, v in candidate_corpus["node_type"].fillna("").astype(str).value_counts().to_dict().items()
+        }
 
     order = np.argsort(-scores, axis=1)
     rows = []

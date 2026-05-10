@@ -509,8 +509,15 @@ def align_text(coeffs: np.ndarray, brain_pmids: np.ndarray) -> tuple[np.ndarray,
 def load_difumo_data(args: argparse.Namespace) -> DifumoData:
     coeffs_np, brain_pmids = build_or_load_coefficients(args)
     coeffs_np, text_np, pmids = align_text(coeffs_np, brain_pmids)
-    centroids = get_component_centroids(dimension=DIFUMO_DIM).astype(np.float32)
-    centroids = centroids / 150.0
+    graph_base = args.shuffle_graph_base if args.graph_type == "shuffled" else args.graph_type
+    needs_centroids = bool(args.add_centroids or graph_base in {"spatial", "combined"})
+    if needs_centroids:
+        centroids = get_component_centroids(dimension=DIFUMO_DIM).astype(np.float32)
+        centroids = centroids / 150.0
+    else:
+        # MLP/coactivation/no-edge runs do not use atlas centroids. Avoid loading
+        # the full DiFuMo atlas a second time in memory-constrained Colab jobs.
+        centroids = np.zeros((DIFUMO_DIM, 3), dtype=np.float32)
     try:
         from neurovlm.data import load_dataset
         from neurovlm.semantic_evaluation import official_split_positions
@@ -1519,7 +1526,9 @@ def main() -> None:
                 mesh_json=getattr(args, "mesh_json", None),
                 resource_use={
                     "network_label_csv": "networks_labels/network_test_set_labels.csv",
+                    "network_term_corpus_csv": "networks_labels/network_terms_with_definitions.csv",
                     "pmid_mesh_json": "mesh_kg/mesh_annotations.json",
+                    "mesh_node_types": "mesh_kg/mesh_kg_nodes.parquet",
                 },
                 extra_summary={
                     "params": count_parameters(trainer.brain_encoder),
@@ -1547,6 +1556,7 @@ def main() -> None:
                     "network_macro_auc": network_metrics.get("macro_auc"),
                 }
             )
+            semantic_summary.update({key: value for key, value in network_metrics.items() if key.startswith("network_term_")})
             with (run_dir / "main_comparison_summary_row.json").open("w") as f:
                 json.dump(semantic_summary, f, indent=2)
             pd.DataFrame([semantic_summary]).to_csv(run_dir / "main_comparison_summary_row.csv", index=False)

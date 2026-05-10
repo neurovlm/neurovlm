@@ -23,19 +23,24 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from neurovlm.semantic_evaluation import (
+    DEFAULT_MESH_RANKING_NODE_TYPES,
     align_network_ground_truth,
+    align_network_term_ground_truth,
     build_mesh_candidate_corpus,
     build_network_label_corpus,
     encode_texts_with_specter,
     evaluate_mesh_term_ranking,
     evaluate_network_labeling,
+    evaluate_network_term_ranking,
     evaluate_semantic_neighbor_retrieval,
     exact_pmid_retrieval_metrics,
     exact_recall_curve,
     find_default_mesh_json,
     load_network_label_table,
     load_network_maps,
+    load_network_term_corpus,
     load_pmid_mesh_map,
+    mesh_node_type_lookup_from_dataframe,
     preprocess_network_maps,
 )
 
@@ -163,6 +168,7 @@ def run_embedding_semantic_evaluations(
         else:
             pmid_mesh = load_pmid_mesh_map(mesh_path)
             definition_lookup = {}
+            node_type_lookup = {}
             try:
                 from neurovlm.retrieval_resources import _load_kg_mesh_dataset
                 from neurovlm.semantic_evaluation import definition_lookup_from_dataframe
@@ -170,10 +176,20 @@ def run_embedding_semantic_evaluations(
                 definition_lookup = definition_lookup_from_dataframe(_load_kg_mesh_dataset())
             except Exception as exc:
                 warnings.warn(f"Could not load MeSH definitions; using term-only candidates where needed: {exc}")
+            mesh_nodes_path = resolve_resource_file(resource_dir, "mesh_kg/mesh_kg_nodes.parquet")
+            if mesh_nodes_path is not None:
+                try:
+                    node_type_lookup = mesh_node_type_lookup_from_dataframe(pd.read_parquet(mesh_nodes_path))
+                except Exception as exc:
+                    warnings.warn(f"Could not load MeSH node types from {mesh_nodes_path}; leaving MeSH candidates unfiltered: {exc}")
+            else:
+                warnings.warn("No mesh_kg_nodes.parquet found; leaving MeSH candidates unfiltered by node_type.")
             mesh_corpus = build_mesh_candidate_corpus(
                 pmid_mesh,
                 list(pmid_mesh.keys()),
                 definition_lookup=definition_lookup,
+                node_type_lookup=node_type_lookup or None,
+                allowed_node_types=DEFAULT_MESH_RANKING_NODE_TYPES if node_type_lookup else None,
             )
             from neurovlm.models import Specter
 
@@ -245,6 +261,7 @@ def run_embedding_semantic_evaluations(
             "mesh_term_ranking_metrics": str(out_path / "mesh_term_ranking_metrics.json"),
             "semantic_neighbor_retrieval_metrics": str(out_path / "semantic_neighbor_retrieval_metrics.json"),
             "network_labeling_metrics": str(out_path / "network_labeling_metrics.json"),
+            "network_term_ranking_metrics": str(out_path / "network_term_ranking_metrics.json"),
         },
     }
     with (out_path / "semantic_evaluation_manifest.json").open("w") as f:
@@ -256,7 +273,9 @@ def _network_label_inputs(resource_dir: str | Path | None):
     labels_csv = resolve_resource_file(resource_dir, "networks_labels/network_test_set_labels.csv")
     labels_df = load_network_label_table(labels_csv)
     label_corpus = build_network_label_corpus(labels_df)
-    return labels_df, label_corpus
+    term_corpus_path = resolve_resource_file(resource_dir, "networks_labels/network_terms_with_definitions.csv")
+    term_corpus = load_network_term_corpus(term_corpus_path) if term_corpus_path is not None else None
+    return labels_df, label_corpus, term_corpus
 
 
 def _save_network_skipped(out_dir: str | Path, reason: str) -> None:
@@ -264,6 +283,14 @@ def _save_network_skipped(out_dir: str | Path, reason: str) -> None:
     with (Path(out_dir) / "network_labeling_metrics.json").open("w") as f:
         json.dump(payload, f, indent=2)
     pd.DataFrame([payload]).to_csv(Path(out_dir) / "network_labeling_predictions.csv", index=False)
+    _save_network_term_skipped(out_dir, reason)
+
+
+def _save_network_term_skipped(out_dir: str | Path, reason: str) -> None:
+    payload = {"skipped": True, "reason": reason}
+    with (Path(out_dir) / "network_term_ranking_metrics.json").open("w") as f:
+        json.dump(payload, f, indent=2)
+    pd.DataFrame([payload]).to_csv(Path(out_dir) / "network_term_predictions.csv", index=False)
 
 
 @torch.no_grad()
@@ -277,7 +304,7 @@ def run_network_labeling_from_embeddings(
     device: torch.device | str,
     resource_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    labels_df, label_corpus = _network_label_inputs(resource_dir)
+    labels_df, label_corpus, term_corpus = _network_label_inputs(resource_dir)
     from neurovlm.models import Specter
 
     specter = Specter("allenai/specter2_aug2023refresh", adapter="adhoc_query", device=str(device))
@@ -296,18 +323,54 @@ def run_network_labeling_from_embeddings(
         label_corpus,
         out_dir=out_dir,
     )
+    summary_updates = {
+        "network_accuracy": metrics.get("accuracy"),
+        "network_top_2_accuracy": metrics.get("top_2_accuracy"),
+        "network_macro_auc": metrics.get("macro_auc"),
+    }
+
+    if term_corpus is not None and len(term_corpus):
+        term_embeddings = encode_texts_with_specter(
+            term_corpus["text"].tolist(),
+            specter,
+            text_projector,
+            batch_size=64,
+            device=device,
+        )
+        term_truth = align_network_term_ground_truth(network_records, labels_df, term_corpus)
+        term_metrics, _ = evaluate_network_term_ranking(
+            network_embeddings,
+            term_embeddings,
+            term_truth,
+            term_corpus,
+            out_dir=out_dir,
+        )
+        metrics.update({f"term_{key}": value for key, value in term_metrics.items()})
+        summary_updates.update(
+            {
+                "network_term_recall@5": term_metrics.get("recall@5"),
+                "network_term_recall@10": term_metrics.get("recall@10"),
+                "network_term_recall@20": term_metrics.get("recall@20"),
+                "network_term_map": term_metrics.get("map"),
+                "network_term_mrr": term_metrics.get("mrr"),
+                "network_term_ndcg@10": term_metrics.get("ndcg@10"),
+                "network_term_median_best_true_term_rank": term_metrics.get("median_best_true_term_rank"),
+                "network_term_n_candidate_terms": term_metrics.get("n_candidate_terms"),
+            }
+        )
+    else:
+        _save_network_term_skipped(
+            out_dir,
+            "network_terms_with_definitions.csv not found; run experiments/create_network_term_definition_corpus.ipynb.",
+        )
+
     summary_path = Path(out_dir) / "main_comparison_summary_row.json"
     if summary_path.exists():
         summary = json.loads(summary_path.read_text())
-        summary.update(
-            {
-                "network_accuracy": metrics.get("accuracy"),
-                "network_top_2_accuracy": metrics.get("top_2_accuracy"),
-                "network_macro_auc": metrics.get("macro_auc"),
-            }
-        )
+        summary.update(summary_updates)
         summary_path.write_text(json.dumps(_jsonable(summary), indent=2))
         pd.DataFrame([summary]).to_csv(Path(out_dir) / "main_comparison_summary_row.csv", index=False)
+    metrics.update(summary_updates)
     return metrics
 
 

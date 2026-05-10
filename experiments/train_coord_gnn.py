@@ -480,6 +480,7 @@ def phase5_evaluate(
                     resource_use={
                         "network_label_csv": "networks_labels/network_test_set_labels.csv",
                         "pmid_mesh_json": "mesh_kg/mesh_annotations.json",
+                        "mesh_node_types": "mesh_kg/mesh_kg_nodes.parquet",
                     },
                     extra_summary={
                         "params": trainer.brain_encoder.count_parameters(),
