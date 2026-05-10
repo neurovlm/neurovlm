@@ -14,6 +14,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from nilearn.image import resample_img
+from tqdm import tqdm
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC = REPO_ROOT / "src"
@@ -379,9 +380,9 @@ def ale_network_volume_records(preprocess_config, masker) -> tuple[list[dict[str
 
     from neurovlm.gnn.ale_dataset import _brain_crop, _get_mask_img_for_resolution, _mask_data_and_affine, _normalize_volume
 
-    records = preprocess_network_maps(load_network_maps(), masker)
     vols = []
     if preprocess_config.mode == "difumo_compatible":
+        records = preprocess_network_maps(load_network_maps(), masker)
         mask, affine = _mask_data_and_affine(None)
         crop = _brain_crop(mask) if preprocess_config.crop_to_brain else (slice(None), slice(None), slice(None))
         crop_mask = mask[crop]
@@ -402,15 +403,18 @@ def ale_network_volume_records(preprocess_config, masker) -> tuple[list[dict[str
                 vol_t = F.interpolate(vol_t, size=target_shape, mode="trilinear", align_corners=False)
             vols.append(vol_t.squeeze(0).squeeze(0))
     else:
+        records = load_network_maps()
         mask_img = _get_mask_img_for_resolution(float(preprocess_config.resolution_mm))
         mask = np.asarray(mask_img.get_fdata() > 0)
         crop = _brain_crop(mask) if preprocess_config.crop_to_brain else (slice(None), slice(None), slice(None))
-        for rec in records:
+        for rec in tqdm(records, total=len(records), desc="Converting network maps to atlas-free volumes"):
+            arr = rec["image"].get_fdata()
+            is_binary = len(np.unique(arr)) == 2
             img = resample_img(
                 rec["image"],
                 target_affine=mask_img.affine,
                 target_shape=mask.shape,
-                interpolation="nearest",
+                interpolation="nearest" if is_binary else "continuous",
                 force_resample=True,
                 copy_header=True,
             )
@@ -422,6 +426,10 @@ def ale_network_volume_records(preprocess_config, masker) -> tuple[list[dict[str
                     "Atlas-free network map shape does not match mask shape after resampling: "
                     f"map={vol.shape}, mask={mask.shape}"
                 )
+            if not is_binary:
+                vol[vol < 0] = 0.0
+                thresh = np.percentile(vol.ravel(), 95)
+                vol = (vol >= thresh).astype(np.float32)
             vol *= mask.astype(np.float32)
             vol = _normalize_volume(vol, preprocess_config.normalize, preprocess_config.clamp)
             vols.append(torch.from_numpy(vol[crop]))

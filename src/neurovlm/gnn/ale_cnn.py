@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -107,6 +108,132 @@ class ALE3DCNNEncoder(nn.Module):
         return count_parameters(self)
 
 
+class _DeconvBlock(nn.Module):
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        *,
+        norm: NormType = "group",
+    ):
+        super().__init__()
+        self.deconv = nn.ConvTranspose3d(in_ch, out_ch, kernel_size=2, stride=2)
+        self.norm = _norm_layer(norm, out_ch)
+        self.act = nn.GELU()
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.act(self.norm(self.deconv(x)))
+
+
+class ALE3DCNNDecoder(nn.Module):
+    """Decode an ALE3DCNN latent vector back to a dense ALE volume.
+
+    The encoder compresses the spatial feature map with adaptive average
+    pooling, so the decoder learns a compact seed grid from the latent vector
+    and upsamples it back to the requested output shape. A final interpolation
+    step makes non power-of-two cropped brain shapes reconstruct exactly.
+    """
+
+    def __init__(
+        self,
+        output_shape: tuple[int, int, int],
+        latent_dim: int = 384,
+        out_channels: int = 1,
+        base_channels: int = 16,
+        num_blocks: int = 3,
+        norm: NormType = "group",
+    ):
+        super().__init__()
+        if len(output_shape) != 3:
+            raise ValueError("output_shape must be a 3D (D, H, W) tuple")
+        if num_blocks < 1:
+            raise ValueError("num_blocks must be >= 1")
+        if num_blocks > 4:
+            raise ValueError(
+                "num_blocks > 4 is intentionally unsupported for this lightweight decoder"
+            )
+
+        self.output_shape = tuple(int(v) for v in output_shape)
+        self.latent_dim = latent_dim
+        self.out_channels = out_channels
+        self.base_channels = base_channels
+        self.num_blocks = num_blocks
+
+        start_channels = base_channels * (2 ** (num_blocks - 1))
+        scale = 2**num_blocks
+        self.seed_shape = tuple(
+            max(1, (dim + scale - 1) // scale) for dim in self.output_shape
+        )
+        self.fc = nn.Linear(latent_dim, start_channels * math.prod(self.seed_shape))
+
+        channels = [base_channels * (2**i) for i in reversed(range(num_blocks))]
+        blocks = []
+        prev = start_channels
+        for ch in channels[1:]:
+            blocks.append(_DeconvBlock(prev, ch, norm=norm))
+            prev = ch
+        blocks.append(_DeconvBlock(prev, base_channels, norm=norm))
+        self.up = nn.Sequential(*blocks)
+        self.out = nn.Conv3d(base_channels, out_channels, kernel_size=3, padding=1)
+
+    def forward(self, z: Tensor) -> Tensor:
+        if z.ndim != 2:
+            raise ValueError(f"Expected latent shape (B, D), got {tuple(z.shape)}")
+        x = self.fc(z).view(
+            z.shape[0],
+            self.base_channels * (2 ** (self.num_blocks - 1)),
+            *self.seed_shape,
+        )
+        x = self.up(x)
+        if tuple(x.shape[-3:]) != self.output_shape:
+            x = F.interpolate(x, size=self.output_shape, mode="trilinear", align_corners=False)
+        return self.out(x)
+
+    def count_parameters(self) -> int:
+        return count_parameters(self)
+
+
+class ALE3DCNNAutoEncoder(nn.Module):
+    """Atlas-free ALE volume autoencoder using the existing ALE3DCNN encoder."""
+
+    def __init__(
+        self,
+        output_shape: tuple[int, int, int],
+        *,
+        in_channels: int = 1,
+        base_channels: int = 16,
+        num_blocks: int = 3,
+        latent_dim: int = 384,
+        dropout: float = 0.1,
+        norm: NormType = "group",
+        pooling: PoolType = "max",
+    ):
+        super().__init__()
+        self.encoder = ALE3DCNNEncoder(
+            in_channels=in_channels,
+            base_channels=base_channels,
+            num_blocks=num_blocks,
+            out_dim=latent_dim,
+            dropout=dropout,
+            norm=norm,
+            pooling=pooling,
+        )
+        self.decoder = ALE3DCNNDecoder(
+            output_shape=output_shape,
+            latent_dim=latent_dim,
+            out_channels=in_channels,
+            base_channels=base_channels,
+            num_blocks=num_blocks,
+            norm=norm,
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.decoder(self.encoder(x))
+
+    def count_parameters(self) -> int:
+        return count_parameters(self)
+
+
 class ALEFlatMLPEncoder(nn.Module):
     """Flattened atlas-free ALE baseline with lazy input sizing."""
 
@@ -169,4 +296,3 @@ def embedding_covariate_correlations(
     from neurovlm.gnn.coord_diagnostics import embedding_covariate_correlations as _impl
 
     return _impl(embeddings, covariates, n_components=n_components)
-
