@@ -214,6 +214,17 @@ class DifumoGraphDataset:
         data.sample_idx = torch.tensor([idx], dtype=torch.long)
         return data
 
+    def flat_tensors(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return (node_feats, text) tensors for all split samples without PyG overhead.
+
+        node_feats: [N, n_nodes, feat_dim]  text: [N, text_dim]
+        """
+        x = self.coeffs[self.indices].unsqueeze(-1)  # [N, 512, 1]
+        if self.extra_node_feats is not None:
+            extra = self.extra_node_feats.unsqueeze(0).expand(len(self.indices), -1, -1)
+            x = torch.cat([x, extra], dim=-1)  # [N, 512, 1+extra_dim]
+        return x, self.text[self.indices]
+
     def covariate_frame(self) -> pd.DataFrame:
         rows = []
         coeffs = self.coeffs[self.indices].float()
@@ -842,6 +853,8 @@ class DifumoTrainer:
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp and self.amp_dtype == torch.float16)
         self.best_state: Optional[dict] = None
         self.best_score = -float("inf")
+        self._batch_templates: dict[tuple[int, int], object] = {}
+        self._graph_cache: Optional[dict] = None
         self.history: dict[str, list] = {
             "train_loss": [],
             "epoch_time_sec": [],
@@ -850,6 +863,28 @@ class DifumoTrainer:
             "lr_proj": [],
             "val_epoch": [],
         }
+
+    def _build_template(self, batch_size: int, n_nodes: int, feat_dim: int) -> object:
+        from torch_geometric.data import Data, Batch
+
+        gc = self._graph_cache
+        samples = [
+            Data(
+                x=torch.zeros(n_nodes, feat_dim),
+                edge_index=gc["edge_index"].cpu(),
+                **({} if gc["edge_attr"] is None else {"edge_attr": gc["edge_attr"].cpu()}),
+            )
+            for _ in range(batch_size)
+        ]
+        return Batch.from_data_list(samples).to(self.device)
+
+    def _get_template(self, batch_size: int, feat_dim: int) -> object:
+        key = (batch_size, feat_dim)
+        if key not in self._batch_templates:
+            self._batch_templates[key] = self._build_template(
+                batch_size, self._graph_cache["n_nodes"], feat_dim
+            )
+        return self._batch_templates[key]
 
     def make_loader(self, ds, shuffle: bool):
         if self.args.model == "mlp":
@@ -861,15 +896,24 @@ class DifumoTrainer:
                 pin_memory=self.args.pin_memory,
                 persistent_workers=self.args.num_workers > 0,
             )
-        from torch_geometric.loader import DataLoader as GraphLoader
-
-        return GraphLoader(
-            ds,
+        # For graph models (gat, deepset): avoid per-batch PyG collation by using a
+        # pre-built template batch whose edge_index/batch vector never changes.
+        if self._graph_cache is None:
+            self._graph_cache = {
+                "edge_index": ds.edge_index.to(self.device),
+                "edge_attr": ds.edge_attr.to(self.device) if ds.edge_attr is not None else None,
+                "n_nodes": int(ds.coeffs.shape[1]),
+            }
+        node_feats, text = ds.flat_tensors()
+        flat_ds = TensorDataset(node_feats, text)
+        return DataLoader(
+            flat_ds,
             batch_size=self.args.batch_size,
             shuffle=shuffle,
             num_workers=self.args.num_workers,
             pin_memory=self.args.pin_memory,
             persistent_workers=self.args.num_workers > 0,
+            drop_last=shuffle,
         )
 
     def _forward(self, batch) -> tuple[torch.Tensor, torch.Tensor]:
@@ -886,15 +930,21 @@ class DifumoTrainer:
                 text_emb = self.text_proj(text)
             return brain, text_emb
 
-        batch = batch.to(self.device, non_blocking=self.args.pin_memory)
-        edge_attr = getattr(batch, "edge_attr", None)
+        # Graph models: batch is (node_feats [B, N, F], text [B, D]) from flat loader.
+        x_batch, text_batch = batch
+        B, N, F = x_batch.shape
+        x_batch = x_batch.to(self.device, non_blocking=self.args.pin_memory)
+        text_batch = text_batch.to(self.device, non_blocking=self.args.pin_memory)
+        tmpl = self._get_template(B, F)
+        tmpl.x = x_batch.reshape(B * N, F)
+        edge_attr = self._graph_cache["edge_attr"]
         if self.use_amp:
             with torch.amp.autocast("cuda", dtype=self.amp_dtype):
-                brain = self.brain_encoder(batch.x, batch.edge_index, edge_attr, batch.batch)
-                text_emb = self.text_proj(batch.y)
+                brain = self.brain_encoder(tmpl.x, tmpl.edge_index, edge_attr, tmpl.batch)
+                text_emb = self.text_proj(text_batch)
         else:
-            brain = self.brain_encoder(batch.x, batch.edge_index, edge_attr, batch.batch)
-            text_emb = self.text_proj(batch.y)
+            brain = self.brain_encoder(tmpl.x, tmpl.edge_index, edge_attr, tmpl.batch)
+            text_emb = self.text_proj(text_batch)
         return brain, text_emb
 
     def fit(self, train_ds, val_ds) -> None:
