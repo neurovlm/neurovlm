@@ -937,7 +937,7 @@ class DifumoTrainer:
         text_batch = text_batch.to(self.device, non_blocking=self.args.pin_memory)
         tmpl = self._get_template(B, F)
         tmpl.x = x_batch.reshape(B * N, F)
-        edge_attr = self._graph_cache["edge_attr"]
+        edge_attr = getattr(tmpl, "edge_attr", None)
         if self.use_amp:
             with torch.amp.autocast("cuda", dtype=self.amp_dtype):
                 brain = self.brain_encoder(tmpl.x, tmpl.edge_index, edge_attr, tmpl.batch)
