@@ -27,7 +27,8 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
+import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -45,6 +46,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--epochs", type=int, default=50)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--batch-size-auto", action="store_true")
+    p.add_argument(
+        "--grad-accum-steps",
+        type=int,
+        default=1,
+        help=(
+            "Accumulate gradients across this many microbatches. This reduces "
+            "optimizer-step memory pressure, but InfoNCE negatives still come "
+            "only from each microbatch unless --batch-size itself is increased."
+        ),
+    )
     p.add_argument("--lr-cnn", type=float, default=1e-4)
     p.add_argument("--lr-proj", type=float, default=1e-5)
     p.add_argument("--warmup-epochs", type=int, default=5)
@@ -95,6 +106,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-save-plots", dest="save_plots", action="store_false")
     p.add_argument("--umap", action="store_true", help="Save UMAP/PCA diagnostics.")
     p.add_argument("--eval-neurovlm-baseline", action="store_true")
+    p.add_argument("--train-sanity-n", type=int, default=512,
+                   help="Evaluate retrieval on this many training examples after training.")
     return p.parse_args()
 
 
@@ -257,6 +270,7 @@ class ALETrainer:
             groups.append({"params": self.text_proj.parameters(), "lr": args.lr_proj})
         self.optimizer = torch.optim.AdamW(groups, weight_decay=1e-4)
         self.scheduler: Optional[torch.optim.lr_scheduler.LambdaLR] = None
+        self.grad_accum_steps = max(1, int(args.grad_accum_steps))
         self.use_amp = args.amp and device.type == "cuda"
         self.amp_dtype = (
             torch.bfloat16
@@ -266,6 +280,7 @@ class ALETrainer:
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp and self.amp_dtype == torch.float16)
         self.best_state: Optional[dict] = None
         self.best_score = -float("inf")
+        self._printed_contrastive_sanity = False
         self.history: dict[str, list] = {
             "train_loss": [],
             "epoch_time_sec": [],
@@ -274,6 +289,26 @@ class ALETrainer:
             "lr_proj": [],
             "val_epoch": [],
         }
+
+        n_text_trainable = sum(p.numel() for p in self.text_proj.parameters() if p.requires_grad)
+        print(
+            "Contrastive objective: symmetric InfoNCE over projected ALE-brain "
+            "and projected SPECTER-text embeddings (not reconstruction/MSE).",
+            flush=True,
+        )
+        print(
+            f"text_proj trainable={n_text_trainable > 0} "
+            f"trainable_text_params={n_text_trainable:,}",
+            flush=True,
+        )
+        if self.grad_accum_steps > 1:
+            print(
+                f"Gradient accumulation enabled: grad_accum_steps={self.grad_accum_steps}. "
+                "Optimizer sees a larger effective batch for gradients, but InfoNCE "
+                "in-batch negatives are still limited to each microbatch. Increase "
+                "--batch-size for more contrastive negatives.",
+                flush=True,
+            )
 
     def _forward(self, batch: dict) -> tuple[torch.Tensor, torch.Tensor]:
         volume = batch["volume"].to(self.device, non_blocking=self.args.pin_memory)
@@ -288,10 +323,62 @@ class ALETrainer:
             text_emb = self.text_proj(text)
         return brain, text_emb
 
+    @torch.no_grad()
+    def _print_contrastive_sanity(
+        self,
+        brain_emb: torch.Tensor,
+        text_emb: torch.Tensor,
+        batch: dict,
+    ) -> None:
+        """Print one explicit contrastive-batch alignment check.
+
+        The evaluation/query matrix is normalized projected text embeddings
+        multiplied by normalized CNN brain embeddings. Because each dataset
+        item returns the matched text and brain example together, diagonal
+        entries are the true pairs even when the DataLoader shuffles examples.
+        """
+        if self._printed_contrastive_sanity:
+            return
+        text_n = F.normalize(text_emb.float(), dim=1, eps=1e-8)
+        brain_n = F.normalize(brain_emb.float(), dim=1, eps=1e-8)
+        sim_text_brain = text_n @ brain_n.T
+        assert sim_text_brain.shape[0] == sim_text_brain.shape[1], (
+            "InfoNCE requires square batch similarity matrices with paired "
+            "text/brain rows on the diagonal."
+        )
+        diag = sim_text_brain.diag()
+        paper_idx = batch.get("paper_idx")
+        if torch.is_tensor(paper_idx):
+            paper_idx = paper_idx[: min(5, len(paper_idx))].cpu().tolist()
+        print("First-batch contrastive sanity check:", flush=True)
+        print(
+            f"  projected_text shape={tuple(text_emb.shape)} "
+            f"projected_brain shape={tuple(brain_emb.shape)}",
+            flush=True,
+        )
+        print(
+            "  similarity matrix = normalize(text_proj(SPECTER)) @ "
+            "normalize(brain_encoder(ALE)).T",
+            flush=True,
+        )
+        print(f"  sim shape={tuple(sim_text_brain.shape)}", flush=True)
+        print(
+            "  diagonal entries are true paired text-brain examples from the "
+            "same dataset row",
+            flush=True,
+        )
+        print(
+            f"  first paper_idx values={paper_idx} "
+            f"diag cosine mean={float(diag.mean()):.4f}",
+            flush=True,
+        )
+        self._printed_contrastive_sanity = True
+
     def fit(self, train_ds, val_ds) -> None:
         loader = make_loader(train_ds, self.args, shuffle=True)
-        total_steps = max(1, len(loader) * self.args.epochs)
-        warmup_steps = max(1, len(loader) * self.args.warmup_epochs)
+        steps_per_epoch = max(1, int(np.ceil(len(loader) / self.grad_accum_steps)))
+        total_steps = max(1, steps_per_epoch * self.args.epochs)
+        warmup_steps = max(1, steps_per_epoch * self.args.warmup_epochs)
         self.scheduler = torch.optim.lr_scheduler.LambdaLR(
             self.optimizer,
             lr_lambda=lambda step: cosine_warmup(step, warmup_steps, total_steps),
@@ -305,20 +392,31 @@ class ALETrainer:
             losses = []
             self.brain_encoder.train()
             self.text_proj.train()
+            self.optimizer.zero_grad(set_to_none=True)
 
-            for batch in loader:
+            for step, batch in enumerate(loader):
                 brain, text = self._forward(batch)
+                self._print_contrastive_sanity(brain, text, batch)
+                # Symmetric InfoNCE. The loss normalizes both sides internally,
+                # builds a batch x batch cosine-similarity matrix over matched
+                # projected brain/text pairs, and optimizes both directions.
                 loss = self.loss_fn(brain, text)
-                self.optimizer.zero_grad(set_to_none=True)
-                self.scaler.scale(loss).backward()
-                self.scaler.unscale_(self.optimizer)
-                nn.utils.clip_grad_norm_(
-                    list(self.brain_encoder.parameters()) + list(self.text_proj.parameters()),
-                    max_norm=1.0,
+                loss_for_backward = loss / float(self.grad_accum_steps)
+                self.scaler.scale(loss_for_backward).backward()
+                should_step = (
+                    (step + 1) % self.grad_accum_steps == 0
+                    or (step + 1) == len(loader)
                 )
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-                self.scheduler.step()
+                if should_step:
+                    self.scaler.unscale_(self.optimizer)
+                    nn.utils.clip_grad_norm_(
+                        list(self.brain_encoder.parameters()) + list(self.text_proj.parameters()),
+                        max_norm=1.0,
+                    )
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                    self.optimizer.zero_grad(set_to_none=True)
+                    self.scheduler.step()
                 losses.append(float(loss.detach().cpu()))
 
             epoch_time = time.perf_counter() - start
@@ -389,6 +487,9 @@ class ALETrainer:
 
     @torch.no_grad()
     def evaluate(self, ds) -> tuple[dict[str, float], torch.Tensor, torch.Tensor]:
+        # Evaluation ranks projected SPECTER embeddings against projected ALE
+        # embeddings: text_proj(SPECTER) vs brain_encoder(ALE volume), never
+        # raw SPECTER vectors.
         brain, text = self.collect_embeddings(ds)
         metrics = bidirectional_retrieval_metrics(text, brain)
         metrics["paper_recall_curve_auc"] = metrics["mean_auc"]
@@ -635,6 +736,31 @@ def append_comparison_row(args, payload, metrics, trainer, input_shape) -> dict:
     return row
 
 
+def evaluate_train_subset_sanity(
+    trainer: ALETrainer,
+    train_ds,
+    n: int,
+) -> tuple[dict[str, float], torch.Tensor, torch.Tensor]:
+    """Evaluate retrieval on a small training subset after training.
+
+    If train-subset retrieval is also low, suspect loss/projection/alignment or
+    model capacity. If train retrieval is high but val/test retrieval is low,
+    the model is likely overfitting or the exact-paper retrieval task is noisy.
+    """
+    n_eval = min(int(n), len(train_ds))
+    subset = Subset(train_ds, list(range(n_eval)))
+    metrics, brain_emb, text_emb = trainer.evaluate(subset)
+    metrics["n_eval"] = float(n_eval)
+    print(
+        f"\nTRAIN sanity subset n={n_eval:,} "
+        f"paper_recall_curve_auc={metrics['paper_recall_curve_auc']:.4f} "
+        f"r@10={metrics['mean_recall@10']:.4f} "
+        f"MRR={metrics['mean_mrr']:.4f}",
+        flush=True,
+    )
+    return metrics, brain_emb, text_emb
+
+
 def main() -> None:
     args = parse_args()
     stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -698,6 +824,13 @@ def main() -> None:
 
     all_metrics = {}
     eval_payloads = {}
+    if args.train_sanity_n and args.train_sanity_n > 0:
+        train_metrics, train_brain, train_text = evaluate_train_subset_sanity(
+            trainer, train_ds, args.train_sanity_n
+        )
+        all_metrics["train_subset"] = train_metrics
+        eval_payloads["train_subset"] = (train_metrics, train_brain, train_text)
+
     for name, split_ds in [("val", val_ds), ("test", test_ds)]:
         metrics, brain_emb, text_emb = trainer.evaluate(split_ds)
         all_metrics[name] = metrics

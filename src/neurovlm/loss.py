@@ -62,7 +62,13 @@ class FocalWithLogitsLoss(nn.Module):
         return loss.mean()
 
 class InfoNCELoss(torch.nn.Module):
-    """Compute InfoNCE loss between image and text embeddings."""
+    """Compute symmetric InfoNCE loss between paired image/brain and text embeddings.
+
+    This is not a reconstruction, cosine-regression, or MSE loss. Inputs are
+    first L2-normalized, the batch x batch similarity matrix is built from
+    paired embeddings, and the diagonal is treated as the true match in both
+    image-to-text and text-to-image directions.
+    """
     def __init__(self,  temperature=0.07):
         super().__init__()
         self.temperature = temperature

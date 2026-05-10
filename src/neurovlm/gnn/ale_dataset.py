@@ -76,7 +76,7 @@ def align_modalities_by_pmid(
     brain_pmids: np.ndarray,
     text_embeddings: Tensor,
     text_pmids: np.ndarray,
-) -> tuple[np.ndarray, Tensor, np.ndarray]:
+) -> tuple[np.ndarray, Tensor, np.ndarray, np.ndarray]:
     """Return aligned brain row indices, text embeddings, and shared PMIDs.
 
     Alignment follows SPECTER/text PMID order so the same random seed gives
@@ -99,6 +99,7 @@ def align_modalities_by_pmid(
         np.asarray(brain_rows, dtype=np.int64),
         text_embeddings[text_rows].float().cpu(),
         np.asarray(shared_pmids).astype(str),
+        np.asarray(text_pmids)[text_rows].astype(str),
     )
 
 
@@ -404,12 +405,28 @@ class ALEVolumeDataset(Dataset):
         *,
         covariates: Optional[pd.DataFrame] = None,
     ):
-        rows, text, shared_pmids = align_modalities_by_pmid(pmids, text_embeddings, text_pmids)
+        rows, text, shared_pmids, aligned_text_pmids = align_modalities_by_pmid(
+            pmids, text_embeddings, text_pmids
+        )
         self.volumes = volumes[rows].cpu()
         self.text_embeddings = text.cpu()
         self.pmids = shared_pmids
+        self.brain_pmids = np.asarray(pmids).astype(str)[rows]
+        self.text_pmids = aligned_text_pmids
         self.source_rows = rows
         self.input_shape = tuple(self.volumes.shape[1:])
+
+        if not np.array_equal(self.brain_pmids, self.text_pmids):
+            bad = np.flatnonzero(self.brain_pmids != self.text_pmids)[:5]
+            examples = [
+                {
+                    "sample": int(i),
+                    "brain_pmid": str(self.brain_pmids[i]),
+                    "text_pmid": str(self.text_pmids[i]),
+                }
+                for i in bad
+            ]
+            raise AssertionError(f"ALE/text PMID alignment failed: {examples}")
 
         self.covariates = None
         if covariates is not None:
@@ -432,6 +449,7 @@ class ALEVolumeDataset(Dataset):
             f"Aligned ALE/text dataset: n={len(ds):,}, input_shape={ds.input_shape}",
             flush=True,
         )
+        ds.print_alignment_examples(n=5)
         return ds
 
     def __len__(self) -> int:
@@ -443,6 +461,20 @@ class ALEVolumeDataset(Dataset):
             "text": self.text_embeddings[idx].float(),
             "paper_idx": torch.tensor(idx, dtype=torch.long),
         }
+
+    def print_alignment_examples(self, n: int = 5) -> None:
+        """Print and assert example PMID alignment for ALE/text pairs."""
+        print("PMID alignment sanity check:", flush=True)
+        for i in range(min(n, len(self))):
+            brain_pmid = str(self.brain_pmids[i])
+            text_pmid = str(self.text_pmids[i])
+            paired_pmid = str(self.pmids[i])
+            print(
+                f"  sample={i} pmid={paired_pmid} "
+                f"brain_pmid={brain_pmid} text_pmid={text_pmid}",
+                flush=True,
+            )
+            assert brain_pmid == text_pmid == paired_pmid
 
     def split(
         self,
