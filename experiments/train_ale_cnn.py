@@ -19,6 +19,7 @@ import csv
 import json
 import sys
 import time
+import traceback
 from copy import deepcopy
 from pathlib import Path
 from typing import Optional
@@ -951,6 +952,7 @@ def main() -> None:
             pd.DataFrame([semantic_summary]).to_csv(run_dir / "main_comparison_summary_row.csv", index=False)
         except Exception as exc:
             print(f"WARNING: semantic evaluation suite failed: {exc}", flush=True)
+            print(traceback.format_exc(), flush=True)
 
     append_comparison_row(args, payload, test_metrics, trainer, ds.input_shape)
     print(f"\nArtifacts saved to {run_dir}")

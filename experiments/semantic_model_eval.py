@@ -415,6 +415,13 @@ def ale_network_volume_records(preprocess_config, masker) -> tuple[list[dict[str
                 copy_header=True,
             )
             vol = np.asarray(img.get_fdata(), dtype=np.float32)
+            if vol.ndim == 4 and vol.shape[-1] == 1:
+                vol = vol[..., 0]
+            if vol.shape != mask.shape:
+                raise ValueError(
+                    "Atlas-free network map shape does not match mask shape after resampling: "
+                    f"map={vol.shape}, mask={mask.shape}"
+                )
             vol *= mask.astype(np.float32)
             vol = _normalize_volume(vol, preprocess_config.normalize, preprocess_config.clamp)
             vols.append(torch.from_numpy(vol[crop]))
