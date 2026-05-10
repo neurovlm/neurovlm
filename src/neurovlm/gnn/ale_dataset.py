@@ -503,6 +503,19 @@ class ALEVolumeDataset(Dataset):
             _SubsetALEDataset(self, test_pos),
         )
 
+    def split_by_index(
+        self,
+        train_pos: list[int],
+        val_pos: list[int],
+        test_pos: list[int],
+    ) -> tuple["_SubsetALEDataset", "_SubsetALEDataset", "_SubsetALEDataset"]:
+        """Split using precomputed dataset positions."""
+        return (
+            _SubsetALEDataset(self, train_pos),
+            _SubsetALEDataset(self, val_pos),
+            _SubsetALEDataset(self, test_pos),
+        )
+
     def covariate_frame(self, positions: Optional[list[int]] = None) -> pd.DataFrame:
         if positions is None:
             positions = list(range(len(self)))
@@ -552,6 +565,10 @@ class _SubsetALEDataset(Dataset):
     @property
     def pmids(self) -> np.ndarray:
         return self._parent.pmids[self._positions]
+
+    @property
+    def raw_text_embeddings(self) -> Tensor:
+        return self._parent.text_embeddings[self._positions]
 
     def covariate_frame(self) -> pd.DataFrame:
         return self._parent.covariate_frame(self._positions)

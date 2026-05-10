@@ -30,6 +30,7 @@ from torch import nn
 from torch.utils.data import DataLoader, Subset
 import torch.nn.functional as F
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from neurovlm.gnn.ale_cnn import ALE3DCNNEncoder, ALEFlatMLPEncoder, count_parameters
@@ -106,6 +107,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-save-plots", dest="save_plots", action="store_false")
     p.add_argument("--umap", action="store_true", help="Save UMAP/PCA diagnostics.")
     p.add_argument("--eval-neurovlm-baseline", action="store_true")
+    p.add_argument("--semantic-eval", action="store_true", default=False)
+    p.add_argument("--eval-resource-dir", default=None)
+    p.add_argument("--mesh-json", default=None)
     p.add_argument("--train-sanity-n", type=int, default=512,
                    help="Evaluate retrieval on this many training examples after training.")
     return p.parse_args()
@@ -161,7 +165,28 @@ def build_dataset(args: argparse.Namespace):
     print("Constructing aligned ALE dataset ...", flush=True)
     ds = ALEVolumeDataset.from_cache(payload)
     print("Creating train/val/test split ...", flush=True)
-    train_ds, val_ds, test_ds = ds.split(args.val_frac, args.test_frac, seed=args.seed)
+    try:
+        from neurovlm.data import load_dataset
+        from neurovlm.semantic_evaluation import official_split_positions
+
+        pubmed_df = load_dataset("pubmed_text")
+        split_pos = official_split_positions(
+            pubmed_df,
+            ds.pmids,
+            out_dir=args.run_dir,
+            random_state=args.seed,
+            random_val_frac=args.val_frac,
+            random_test_frac=args.test_frac,
+        )
+        train_ds, val_ds, test_ds = ds.split_by_index(
+            split_pos["train"].tolist(),
+            split_pos["val"].tolist(),
+            split_pos["test"].tolist(),
+        )
+        print("Using PubMed dataframe split columns for train/val/test.", flush=True)
+    except Exception as exc:
+        print(f"WARNING: official PubMed split failed ({exc}); falling back to random split.", flush=True)
+        train_ds, val_ds, test_ds = ds.split(args.val_frac, args.test_frac, seed=args.seed)
     return ds, train_ds, val_ds, test_ds, payload, config
 
 
@@ -871,6 +896,58 @@ def main() -> None:
     save_embedding_correlations(run_dir, test_brain, cov)
     if args.save_plots:
         save_plots(run_dir, trainer.history, curve_df, diag_df if args.umap else None, test_brain)
+
+    if getattr(args, "semantic_eval", False):
+        try:
+            from experiments.semantic_model_eval import (
+                run_ale_network_labeling,
+                run_embedding_semantic_evaluations,
+            )
+            from neurovlm.data import load_masker
+
+            print("\nRunning standard semantic evaluation suite ...", flush=True)
+            semantic_summary = run_embedding_semantic_evaluations(
+                model_name=f"{args.model}_{args.mode}",
+                brain_embeddings=test_brain,
+                text_embeddings=test_text,
+                raw_text_embeddings=test_ds.raw_text_embeddings,
+                pmids=test_ds.pmids,
+                text_projector=trainer.text_proj,
+                out_dir=run_dir,
+                device=device,
+                resource_dir=getattr(args, "eval_resource_dir", None),
+                mesh_json=getattr(args, "mesh_json", None),
+                resource_use={
+                    "network_label_csv": "networks_labels/network_test_set_labels.csv",
+                    "pmid_mesh_json": "mesh_kg/mesh_annotations.json",
+                },
+                extra_summary={
+                    "params": count_parameters(trainer.brain_encoder),
+                    "peak_vram": float(max(trainer.history["peak_vram_mb"] or [0.0])),
+                    "training_time_per_epoch": float(np.mean(trainer.history["epoch_time_sec"])),
+                    "preprocessing_type": args.mode,
+                },
+            )
+            network_metrics = run_ale_network_labeling(
+                trainer=trainer,
+                preprocess_config=preprocess_config,
+                masker=load_masker(),
+                out_dir=run_dir,
+                device=device,
+                resource_dir=getattr(args, "eval_resource_dir", None),
+            )
+            semantic_summary.update(
+                {
+                    "network_accuracy": network_metrics.get("accuracy"),
+                    "network_top_2_accuracy": network_metrics.get("top_2_accuracy"),
+                    "network_macro_auc": network_metrics.get("macro_auc"),
+                }
+            )
+            with (run_dir / "main_comparison_summary_row.json").open("w") as f:
+                json.dump(semantic_summary, f, indent=2)
+            pd.DataFrame([semantic_summary]).to_csv(run_dir / "main_comparison_summary_row.csv", index=False)
+        except Exception as exc:
+            print(f"WARNING: semantic evaluation suite failed: {exc}", flush=True)
 
     append_comparison_row(args, payload, test_metrics, trainer, ds.input_shape)
     print(f"\nArtifacts saved to {run_dir}")

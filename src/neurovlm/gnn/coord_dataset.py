@@ -245,6 +245,14 @@ class CoordGraphDataset:
     def __len__(self) -> int:
         return len(self._valid_indices)
 
+    @property
+    def pmids(self) -> np.ndarray:
+        return self.unique_pmids[self._valid_indices].astype(str)
+
+    @property
+    def raw_text_embeddings(self) -> Tensor:
+        return self.text_embeddings[self._valid_indices]
+
     def __getitem__(self, idx: int) -> Data:
         dataset_idx = self._valid_indices[idx]
 
@@ -313,3 +321,11 @@ class _SubsetCoordDataset:
 
     def __getitem__(self, idx: int) -> Data:
         return self._parent[self._positions[idx]]
+
+    @property
+    def pmids(self) -> np.ndarray:
+        return self._parent.pmids[self._positions]
+
+    @property
+    def raw_text_embeddings(self) -> Tensor:
+        return self._parent.raw_text_embeddings[self._positions]

@@ -35,6 +35,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from neurovlm.data import load_dataset, load_latent
@@ -103,6 +104,9 @@ def parse_args() -> argparse.Namespace:
                    help="Save covariate/rank/PC correlation diagnostics.")
     p.add_argument("--eval-neurovlm-baseline", action="store_true",
                    help="Evaluate pretrained NeuroVLM image/text projectors on the same split.")
+    p.add_argument("--semantic-eval", action="store_true", default=False)
+    p.add_argument("--eval-resource-dir", default=None)
+    p.add_argument("--mesh-json", default=None)
     return p.parse_args()
 
 
@@ -234,9 +238,28 @@ def phase2_build_dataset(
     print(f"    batch.batch.shape  = {probe_batch.batch.shape}")
     print(f"    batch.y.shape      = {probe_batch.y.shape}")
 
-    torch.manual_seed(args.seed)
-    train_ds, val_ds, test_ds = ds.split(val_frac=0.1, test_frac=0.1,
-                                          seed=args.seed)
+    try:
+        from neurovlm.semantic_evaluation import official_split_positions
+
+        split_pos = official_split_positions(
+            pubmed_df,
+            ds.pmids,
+            out_dir=args.run_dir,
+            random_state=args.seed,
+            random_val_frac=0.1,
+            random_test_frac=0.1,
+        )
+        train_ds, val_ds, test_ds = ds.split_by_index(
+            split_pos["train"].tolist(),
+            split_pos["val"].tolist(),
+            split_pos["test"].tolist(),
+        )
+        print("  Using PubMed dataframe split columns for train/val/test.")
+    except Exception as exc:
+        print(f"  WARNING: official PubMed split failed ({exc}); falling back to random split.")
+        torch.manual_seed(args.seed)
+        train_ds, val_ds, test_ds = ds.split(val_frac=0.1, test_frac=0.1,
+                                              seed=args.seed)
     print(f"  Split: train={len(train_ds):,}  "
           f"val={len(val_ds):,}  test={len(test_ds):,}")
 
@@ -435,6 +458,41 @@ def phase5_evaluate(
         run_dir.mkdir(parents=True, exist_ok=True)
         with open(run_dir / "metrics.json", "w") as f:
             json.dump(all_metrics, f, indent=2)
+
+        if getattr(args, "semantic_eval", False):
+            try:
+                from experiments.semantic_model_eval import (
+                    mark_network_labeling_skipped,
+                    run_embedding_semantic_evaluations,
+                )
+
+                semantic_summary = run_embedding_semantic_evaluations(
+                    model_name=args.model,
+                    brain_embeddings=brain_emb,
+                    text_embeddings=text_emb,
+                    raw_text_embeddings=test_ds.raw_text_embeddings,
+                    pmids=test_ds.pmids,
+                    text_projector=trainer.text_proj,
+                    out_dir=run_dir,
+                    device=trainer.device,
+                    resource_dir=getattr(args, "eval_resource_dir", None),
+                    mesh_json=getattr(args, "mesh_json", None),
+                    resource_use={
+                        "network_label_csv": "networks_labels/network_test_set_labels.csv",
+                        "pmid_mesh_json": "mesh_kg/mesh_annotations.json",
+                    },
+                    extra_summary={
+                        "params": trainer.brain_encoder.count_parameters(),
+                        "preprocessing_type": "coord_graph",
+                    },
+                )
+                mark_network_labeling_skipped(
+                    run_dir,
+                    "Coordinate models use sparse peak coordinates; network-map-to-coordinate conversion was intentionally skipped for this run.",
+                )
+                print(f"  Semantic evaluation summary saved to {run_dir / 'main_comparison_summary_row.csv'}")
+            except Exception as exc:
+                print(f"  WARNING: semantic evaluation suite failed: {exc}")
 
         if args.diagnostics:
             cov = coord_graph_covariates(test_ds)

@@ -28,6 +28,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from neurovlm.data import load_dataset, load_latent
@@ -49,7 +50,7 @@ from neurovlm.metrics import (
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train/evaluate stronger DiFuMo GAT controls.")
-    p.add_argument("--model", choices=["gat", "mlp", "deepset"], default="gat")
+    p.add_argument("--model", choices=["gat", "gcn", "sage", "mlp", "deepset"], default="gat")
     p.add_argument("--conv", choices=["gat", "gatv2"], default="gatv2")
     p.add_argument(
         "--graph-type",
@@ -140,6 +141,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--save-plots", action="store_true", default=True)
     p.add_argument("--no-save-plots", dest="save_plots", action="store_false")
     p.add_argument("--umap", action="store_true")
+    p.add_argument("--semantic-eval", action="store_true", default=False)
+    p.add_argument("--eval-resource-dir", default=None)
+    p.add_argument("--mesh-json", default=None)
     return p.parse_args()
 
 
@@ -507,7 +511,25 @@ def load_difumo_data(args: argparse.Namespace) -> DifumoData:
     coeffs_np, text_np, pmids = align_text(coeffs_np, brain_pmids)
     centroids = get_component_centroids(dimension=DIFUMO_DIM).astype(np.float32)
     centroids = centroids / 150.0
-    train_idx, val_idx, test_idx = split_indices(len(coeffs_np), args.val_frac, args.test_frac, args.seed)
+    try:
+        from neurovlm.data import load_dataset
+        from neurovlm.semantic_evaluation import official_split_positions
+
+        split_pos = official_split_positions(
+            load_dataset("pubmed_text"),
+            pmids,
+            out_dir=args.run_dir,
+            random_state=args.seed,
+            random_val_frac=args.val_frac,
+            random_test_frac=args.test_frac,
+        )
+        train_idx = torch.tensor(split_pos["train"], dtype=torch.long)
+        val_idx = torch.tensor(split_pos["val"], dtype=torch.long)
+        test_idx = torch.tensor(split_pos["test"], dtype=torch.long)
+        print("Using PubMed dataframe split columns for train/val/test.")
+    except Exception as exc:
+        print(f"WARNING: official PubMed split failed ({exc}); falling back to random split.")
+        train_idx, val_idx, test_idx = split_indices(len(coeffs_np), args.val_frac, args.test_frac, args.seed)
     return DifumoData(
         coeffs=torch.tensor(coeffs_np, dtype=torch.float32),
         text=torch.tensor(text_np, dtype=torch.float32),
@@ -718,7 +740,7 @@ class DifumoGATEncoder(nn.Module):
                     concat=True,
                     dropout=dropout,
                     edge_dim=edge_dim,
-                    add_self_loops=True,
+                    add_self_loops=False,
                 )
             )
             self.norms.append(nn.LayerNorm(dims[layer_idx + 1]) if layer_norm else nn.Identity())
@@ -734,7 +756,7 @@ class DifumoGATEncoder(nn.Module):
         )
 
     def forward(self, x, edge_index, edge_attr, batch) -> torch.Tensor:
-        from torch_geometric.nn import global_max_pool, global_mean_pool
+        from torch_geometric.nn import global_add_pool, global_mean_pool
 
         for conv, norm, res_proj in zip(self.convs, self.norms, self.res_proj):
             prev = x
@@ -744,7 +766,7 @@ class DifumoGATEncoder(nn.Module):
             if self.residual:
                 x = x + res_proj(prev)
             x = norm(x)
-        pooled = torch.cat([global_mean_pool(x, batch), global_max_pool(x, batch)], dim=1)
+        pooled = torch.cat([global_mean_pool(x, batch), global_add_pool(x, batch)], dim=1)
         return self.proj(pooled)
 
 
@@ -792,6 +814,70 @@ class DifumoDeepSetEncoder(nn.Module):
         return self.rho(pooled)
 
 
+class DifumoGraphConvEncoder(nn.Module):
+    """Faster message-passing baselines over the shared DiFuMo graph."""
+
+    def __init__(
+        self,
+        in_dim: int,
+        hidden: int,
+        layers: int,
+        out_dim: int,
+        dropout: float,
+        conv: str,
+        residual: bool,
+        layer_norm: bool,
+    ):
+        super().__init__()
+        try:
+            from torch_geometric.nn import GCNConv, SAGEConv
+        except ImportError as exc:
+            raise ImportError("Install PyTorch Geometric: pip install torch-geometric") from exc
+        if conv not in {"gcn", "sage"}:
+            raise ValueError("conv must be 'gcn' or 'sage'")
+        self.conv_kind = conv
+        self.dropout = dropout
+        self.residual = residual
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        self.res_proj = nn.ModuleList()
+        dims = [in_dim] + [hidden] * layers
+        for layer_idx in range(layers):
+            if conv == "gcn":
+                self.convs.append(GCNConv(dims[layer_idx], hidden, add_self_loops=False))
+            else:
+                self.convs.append(SAGEConv(dims[layer_idx], hidden))
+            self.norms.append(nn.LayerNorm(hidden) if layer_norm else nn.Identity())
+            if residual and dims[layer_idx] != hidden:
+                self.res_proj.append(nn.Linear(dims[layer_idx], hidden, bias=False))
+            else:
+                self.res_proj.append(nn.Identity())
+        self.proj = nn.Sequential(
+            nn.Linear(hidden * 2, hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, out_dim),
+        )
+
+    def forward(self, x, edge_index, edge_attr, batch) -> torch.Tensor:
+        from torch_geometric.nn import global_add_pool, global_mean_pool
+
+        for conv, norm, res_proj in zip(self.convs, self.norms, self.res_proj):
+            prev = x
+            if self.conv_kind == "gcn":
+                edge_weight = edge_attr.view(-1) if edge_attr is not None and edge_attr.numel() > 0 else None
+                x = conv(x, edge_index, edge_weight=edge_weight)
+            else:
+                x = conv(x, edge_index)
+            x = F.gelu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+            if self.residual:
+                x = x + res_proj(prev)
+            x = norm(x)
+        pooled = torch.cat([global_mean_pool(x, batch), global_add_pool(x, batch)], dim=1)
+        return self.proj(pooled)
+
+
 def build_model(args: argparse.Namespace, in_dim: int, use_edge_attr: bool) -> tuple[nn.Module, nn.Module]:
     if args.model == "gat":
         brain = DifumoGATEncoder(
@@ -803,6 +889,17 @@ def build_model(args: argparse.Namespace, in_dim: int, use_edge_attr: bool) -> t
             dropout=args.dropout,
             conv=args.conv,
             use_edge_attr=use_edge_attr,
+            residual=args.residual,
+            layer_norm=args.layer_norm,
+        )
+    elif args.model in {"gcn", "sage"}:
+        brain = DifumoGraphConvEncoder(
+            in_dim=in_dim,
+            hidden=args.hidden,
+            layers=args.layers,
+            out_dim=args.out_dim,
+            dropout=args.dropout,
+            conv=args.model,
             residual=args.residual,
             layer_norm=args.layer_norm,
         )
@@ -866,13 +963,19 @@ class DifumoTrainer:
 
     def _build_template(self, batch_size: int, n_nodes: int, feat_dim: int) -> object:
         from torch_geometric.data import Data, Batch
+        from torch_geometric.utils import add_self_loops as pyg_add_self_loops
 
         gc = self._graph_cache
+        # Pre-add self-loops so the graph is static and GATv2Conv (add_self_loops=False)
+        # doesn't need to allocate new tensors on every forward pass.
+        ei = gc["edge_index"].cpu()
+        ea = gc["edge_attr"].cpu() if gc["edge_attr"] is not None else None
+        ei, ea = pyg_add_self_loops(ei, ea, num_nodes=n_nodes)
         samples = [
             Data(
                 x=torch.zeros(n_nodes, feat_dim),
-                edge_index=gc["edge_index"].cpu(),
-                **({} if gc["edge_attr"] is None else {"edge_attr": gc["edge_attr"].cpu()}),
+                edge_index=ei,
+                **({} if ea is None else {"edge_attr": ea}),
             )
             for _ in range(batch_size)
         ]
@@ -1240,12 +1343,15 @@ def append_comparison_row(
         "ale_kernel_fwhm_mm": args.ale_kernel_fwhm_mm if args.coeff_source == "ale_coordinates" else "",
         "uses_difumo": "yes",
         "atlas_free": "no",
-        "graph_type": args.graph_type if args.model == "gat" else "none",
-        "conv": args.conv if args.model == "gat" else "",
+        "graph_type": args.graph_type if args.model in {"gat", "gcn", "sage"} else "none",
+        "conv": args.conv if args.model == "gat" else (args.model if args.model in {"gcn", "sage"} else ""),
         "input_shape": "(512,)",
         "number_of_parameters": count_parameters(trainer.brain_encoder),
         "training_time_per_epoch": float(np.mean(trainer.history["epoch_time_sec"])),
         "peak_vram": float(max(trainer.history["peak_vram_mb"] or [0.0])),
+        "validation_paper_recall_curve_auc": trainer.best_state.get("metrics", {}).get("mean_auc") if trainer.best_state else "",
+        "validation_recall@10": trainer.best_state.get("metrics", {}).get("mean_recall@10") if trainer.best_state else "",
+        "paper_recall_curve_auc": metrics["mean_auc"],
         "full_recall_curve_auc": metrics["mean_auc"],
         "recall@1": metrics["mean_recall@1"],
         "recall@5": metrics["mean_recall@5"],
@@ -1297,7 +1403,7 @@ def main() -> None:
     edge_index = torch.empty((2, 0), dtype=torch.long)
     edge_attr: Optional[torch.Tensor] = None
     graph_info: dict[str, float] = graph_stats(edge_index, edge_attr)
-    if args.model in {"gat", "deepset"}:
+    if args.model in {"gat", "gcn", "sage", "deepset"}:
         log_step(f"Building graph type={args.graph_type}")
         edge_index, edge_attr, graph_info = build_graph(data, args)
         log_step(
@@ -1305,7 +1411,7 @@ def main() -> None:
             f"avg_degree={graph_info['average_degree']:.1f}; "
             f"components={int(graph_info['connected_components'])}"
         )
-    use_edge_attr = edge_attr is not None and edge_attr.numel() > 0 and args.model == "gat"
+    use_edge_attr = edge_attr is not None and edge_attr.numel() > 0 and args.model in {"gat", "gcn"}
     in_dim = 1 + (3 if args.add_centroids else 0)
     extra = data.centroids if args.add_centroids else None
 
@@ -1391,6 +1497,62 @@ def main() -> None:
         log_step("Saving plots and diagnostics")
         save_plots(run_dir, trainer.history, curve_df, diag_df, test_brain, args.umap)
 
+    semantic_summary = None
+    if getattr(args, "semantic_eval", False):
+        try:
+            from experiments.semantic_model_eval import (
+                run_difumo_network_labeling,
+                run_embedding_semantic_evaluations,
+            )
+
+            log_step("Running standard semantic evaluation suite")
+            semantic_summary = run_embedding_semantic_evaluations(
+                model_name=f"difumo_{args.model}_{args.graph_type}",
+                brain_embeddings=test_brain,
+                text_embeddings=test_text,
+                raw_text_embeddings=data.text[data.test_idx],
+                pmids=data.pmids[data.test_idx.numpy()],
+                text_projector=trainer.text_proj,
+                out_dir=run_dir,
+                device=device,
+                resource_dir=getattr(args, "eval_resource_dir", None),
+                mesh_json=getattr(args, "mesh_json", None),
+                resource_use={
+                    "network_label_csv": "networks_labels/network_test_set_labels.csv",
+                    "pmid_mesh_json": "mesh_kg/mesh_annotations.json",
+                },
+                extra_summary={
+                    "params": count_parameters(trainer.brain_encoder),
+                    "peak_vram": float(max(trainer.history["peak_vram_mb"] or [0.0])),
+                    "training_time_per_epoch": float(np.mean(trainer.history["epoch_time_sec"])),
+                    "preprocessing_type": "difumo_coefficients",
+                    "graph_type": args.graph_type if args.model in {"gat", "gcn", "sage"} else "none",
+                },
+            )
+            network_metrics = run_difumo_network_labeling(
+                trainer=trainer,
+                args=args,
+                data=data,
+                edge_index=edge_index,
+                edge_attr=edge_attr,
+                extra_node_feats=extra,
+                out_dir=run_dir,
+                device=device,
+                resource_dir=getattr(args, "eval_resource_dir", None),
+            )
+            semantic_summary.update(
+                {
+                    "network_accuracy": network_metrics.get("accuracy"),
+                    "network_top_2_accuracy": network_metrics.get("top_2_accuracy"),
+                    "network_macro_auc": network_metrics.get("macro_auc"),
+                }
+            )
+            with (run_dir / "main_comparison_summary_row.json").open("w") as f:
+                json.dump(semantic_summary, f, indent=2)
+            pd.DataFrame([semantic_summary]).to_csv(run_dir / "main_comparison_summary_row.csv", index=False)
+        except Exception as exc:
+            print(f"WARNING: semantic evaluation suite failed: {exc}", flush=True)
+
     log_step("Writing final manifests and comparison rows")
     comparison_row = append_comparison_row(args, test_metrics, graph_info, trainer)
     manifest = {
@@ -1415,6 +1577,7 @@ def main() -> None:
         "coefficient_cache": str(Path(args.coeff_cache_file)),
         "test_metrics": test_metrics,
         "comparison_row_payload": comparison_row,
+        "semantic_summary": semantic_summary,
     }
     with (run_dir / "artifacts_manifest.json").open("w") as f:
         json.dump(manifest, f, indent=2)
