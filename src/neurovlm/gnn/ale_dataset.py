@@ -434,7 +434,7 @@ class ALEVolumeDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict:
         return {
-            "volume": self.volumes[idx].unsqueeze(0).float(),
+            "volume": self.volumes[idx].unsqueeze(0),
             "text": self.text_embeddings[idx].float(),
             "paper_idx": torch.tensor(idx, dtype=torch.long),
         }

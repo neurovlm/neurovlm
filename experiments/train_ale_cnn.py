@@ -283,6 +283,7 @@ class ALETrainer:
                 brain = self.brain_encoder(volume)
                 text_emb = self.text_proj(text)
         else:
+            volume = volume.float()
             brain = self.brain_encoder(volume)
             text_emb = self.text_proj(text)
         return brain, text_emb
