@@ -354,12 +354,17 @@ def build_or_load_ale_cache(
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     if cache_path.exists() and not force_rebuild:
         print(f"Loading packed ALE cache: {cache_path}", flush=True)
-        payload = torch.load(cache_path, map_location="cpu", weights_only=False)
-        if payload.get("version") == 1 and payload.get("config", {}).get("cache_key") == config.cache_key():
+        try:
+            payload = torch.load(cache_path, map_location="cpu", weights_only=False)
+        except Exception as exc:
+            print(f"Cache load failed ({exc}); rebuilding.", flush=True)
+            payload = None
+        if payload is not None and payload.get("version") == 1 and payload.get("config", {}).get("cache_key") == config.cache_key():
             shape = tuple(payload["volumes"].shape)
             print(f"Loaded packed ALE cache: volumes={shape}", flush=True)
             return payload
-        print("ALE cache config changed; rebuilding packed cache.")
+        if payload is not None:
+            print("ALE cache config changed; rebuilding packed cache.")
 
     if config.mode == "difumo_compatible":
         volumes, pmids, meta = _build_difumo_compatible_volumes(config)
@@ -380,7 +385,7 @@ def build_or_load_ale_cache(
             "n_volumes": int(volumes.shape[0]),
             "pmids_digest": _pmids_digest(pmids),
         },
-        "covariates": covariates,
+        "covariates": covariates.to_dict(orient="list") if covariates is not None else None,
     }
     torch.save(payload, cache_path)
     print(f"Saved packed ALE cache: {cache_path}", flush=True)
@@ -421,7 +426,7 @@ class ALEVolumeDataset(Dataset):
             pmids=np.asarray(cache_payload["pmids"]).astype(str),
             text_embeddings=text,
             text_pmids=text_pmids,
-            covariates=cache_payload.get("covariates"),
+            covariates=pd.DataFrame(cache_payload["covariates"]) if isinstance(cache_payload.get("covariates"), dict) else cache_payload.get("covariates"),
         )
         print(
             f"Aligned ALE/text dataset: n={len(ds):,}, input_shape={ds.input_shape}",
