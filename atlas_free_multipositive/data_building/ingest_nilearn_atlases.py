@@ -66,16 +66,89 @@ def _labels(atlas: Any) -> list[str]:
         labels = atlas.get("labels")
     if labels is None:
         return []
-    return [str(x.decode() if isinstance(x, bytes) else x) for x in labels]
+
+    def clean(value: Any) -> str:
+        if isinstance(value, bytes):
+            value = value.decode()
+        return str(value).strip()
+
+    # DiFuMo can return a pandas DataFrame with label metadata.
+    columns = getattr(labels, "columns", None)
+    if columns is not None:
+        preferred = (
+            "difumo_names",
+            "name",
+            "names",
+            "label",
+            "labels",
+            "component",
+            "network",
+            "yeo_networks7",
+            "yeo_networks17",
+        )
+        for key in preferred:
+            if key in columns:
+                return [clean(x) for x in labels[key].tolist()]
+        readable = [key for key in columns if not str(key).lower().endswith(("x", "y", "z", "id", "index"))]
+        if readable:
+            return [
+                " ".join(clean(row[key]) for key in readable if clean(row[key]))
+                for _, row in labels.iterrows()
+            ]
+
+    # DiFuMo returns a numpy recarray rather than a plain list of strings.
+    # Prefer human-readable columns when present, and avoid IDs/coordinates.
+    dtype_names = getattr(labels, "dtype", None)
+    dtype_names = getattr(dtype_names, "names", None)
+    if dtype_names:
+        preferred = (
+            "difumo_names",
+            "name",
+            "names",
+            "label",
+            "labels",
+            "component",
+            "network",
+            "yeo_networks7",
+            "yeo_networks17",
+        )
+        for key in preferred:
+            if key in dtype_names:
+                return [clean(row[key]) for row in labels]
+        readable = [key for key in dtype_names if not key.lower().endswith(("x", "y", "z", "id", "index"))]
+        if readable:
+            return [" ".join(clean(row[key]) for key in readable if clean(row[key])) for row in labels]
+
+    return [clean(x) for x in labels]
 
 
 def _maps_path(atlas: Any) -> str | None:
+    keys = (
+        "maps",
+        "map",
+        "filename",
+        # BASC legacy return keys.
+        "scale007",
+        "scale012",
+        "scale020",
+        "scale036",
+        "scale064",
+        "scale122",
+        "scale197",
+        "scale325",
+        "scale444",
+        # Craddock legacy return keys.
+        "scorr_mean",
+        "tcorr_mean",
+        "scorr_2level",
+        "tcorr_2level",
+    )
     if isinstance(atlas, dict):
-        for key in ("maps", "map", "filename"):
+        for key in keys:
             path = _first_existing_path(atlas.get(key))
             if path:
                 return path
-    for key in ("maps", "map", "filename"):
+    for key in keys:
         path = _first_existing_path(getattr(atlas, key, None))
         if path:
             return path
@@ -119,6 +192,30 @@ def fetch_atlas(name: str):
         return datasets.fetch_atlas_aal(version="SPM12")
     if name == "smith_2009":
         return datasets.fetch_atlas_smith_2009(dimension=10, resting=True)
+    if name in {"difumo", "difumo_64"}:
+        try:
+            return datasets.fetch_atlas_difumo(dimension=64, resolution_mm=2, legacy_format=False)
+        except TypeError as exc:
+            if "legacy_format" not in str(exc):
+                raise
+            return datasets.fetch_atlas_difumo(dimension=64, resolution_mm=2)
+    if name == "difumo_128":
+        try:
+            return datasets.fetch_atlas_difumo(dimension=128, resolution_mm=2, legacy_format=False)
+        except TypeError as exc:
+            if "legacy_format" not in str(exc):
+                raise
+            return datasets.fetch_atlas_difumo(dimension=128, resolution_mm=2)
+    if name == "msdl":
+        return datasets.fetch_atlas_msdl()
+    if name in {"basc", "basc_064"}:
+        return datasets.fetch_atlas_basc_multiscale_2015(resolution=64, version="sym")
+    if name == "basc_122":
+        return datasets.fetch_atlas_basc_multiscale_2015(resolution=122, version="sym")
+    if name in {"craddock", "craddock_spatial"}:
+        return datasets.fetch_atlas_craddock_2012(homogeneity="spatial", grp_mean=True)
+    if name == "craddock_temporal":
+        return datasets.fetch_atlas_craddock_2012(homogeneity="temporal", grp_mean=True)
     raise ValueError(f"Unknown atlas: {name}")
 
 
@@ -126,9 +223,13 @@ def infer_map_kind(name: str, img) -> str:
     if img.ndim == 4 and img.shape[3] == 1:
         return "network_map" if "yeo" in name.lower() else "atlas_region"
     if img.ndim == 4:
-        if "smith" in name.lower():
+        if any(key in name.lower() for key in ("smith", "difumo", "msdl")):
             return "network_map"
+        if any(key in name.lower() for key in ("craddock",)):
+            return "probabilistic_atlas_region"
         return "probabilistic_atlas_region"
+    if any(key in name.lower() for key in ("basc", "craddock")):
+        return "network_map"
     return "atlas_region"
 
 
@@ -142,6 +243,10 @@ def _positive_for_label(label_name: str, atlas_name: str, map_type: str) -> tupl
         or "network" in display.lower()
         or "yeo" in atlas_key
         or "smith" in atlas_key
+        or "difumo" in atlas_key
+        or "msdl" in atlas_key
+        or "basc" in atlas_key
+        or "craddock" in atlas_key
     )
     source = "nilearn_network_label" if is_network else "nilearn_atlas_label"
     category = "network" if source == "nilearn_network_label" else "anatomical_region"
