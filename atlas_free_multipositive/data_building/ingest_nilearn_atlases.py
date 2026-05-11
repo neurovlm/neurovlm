@@ -23,8 +23,8 @@ except ImportError:  # pragma: no cover
 
 from atlas_free_multipositive.data_building.definitions import (
     POSITIVE_WEIGHTS,
-    fallback_region_definition,
-    network_definition,
+    atlas_label_definition,
+    display_atlas_label,
     slugify,
     text_pair,
 )
@@ -54,6 +54,12 @@ def _first_existing_path(value: Any) -> str | None:
     return None
 
 
+def _atlas_value(atlas: Any, key: str) -> Any:
+    if isinstance(atlas, dict):
+        return atlas.get(key)
+    return getattr(atlas, key, None)
+
+
 def _labels(atlas: Any) -> list[str]:
     labels = getattr(atlas, "labels", None)
     if labels is None and isinstance(atlas, dict):
@@ -76,28 +82,49 @@ def _maps_path(atlas: Any) -> str | None:
     return None
 
 
+def _maps_img(atlas: Any):
+    maps = _atlas_value(atlas, "maps")
+    if isinstance(maps, nib.spatialimages.SpatialImage):
+        return maps
+    filename = _atlas_value(atlas, "filename")
+    if isinstance(filename, nib.spatialimages.SpatialImage):
+        return filename
+    path = _maps_path(atlas)
+    if path is None:
+        return None
+    return nib.load(path)
+
+
 def fetch_atlas(name: str):
     from nilearn import datasets
 
     name = name.lower()
     if name == "yeo_2011":
-        return datasets.fetch_atlas_yeo_2011()
+        return datasets.fetch_atlas_yeo_2011(n_networks=7, thickness="thick")
+    if name == "yeo_2011_17":
+        return datasets.fetch_atlas_yeo_2011(n_networks=17, thickness="thick")
     if name == "schaefer_2018":
         return datasets.fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=2)
+    if name == "schaefer_2018_200":
+        return datasets.fetch_atlas_schaefer_2018(n_rois=200, yeo_networks=7, resolution_mm=2)
     if name == "harvard_oxford_cortical":
         return datasets.fetch_atlas_harvard_oxford("cort-maxprob-thr25-2mm")
     if name == "harvard_oxford_subcortical":
         return datasets.fetch_atlas_harvard_oxford("sub-maxprob-thr25-2mm")
-    if name == "juelich":
+    if name in {"juelich", "juelich_maxprob"}:
         return datasets.fetch_atlas_juelich("maxprob-thr25-2mm")
+    if name in {"juelich_probabilistic", "juelich_prob"}:
+        return datasets.fetch_atlas_juelich("prob-2mm")
     if name == "aal":
         return datasets.fetch_atlas_aal(version="SPM12")
     if name == "smith_2009":
-        return datasets.fetch_atlas_smith_2009()
+        return datasets.fetch_atlas_smith_2009(dimension=10, resting=True)
     raise ValueError(f"Unknown atlas: {name}")
 
 
 def infer_map_kind(name: str, img) -> str:
+    if img.ndim == 4 and img.shape[3] == 1:
+        return "network_map" if "yeo" in name.lower() else "atlas_region"
     if img.ndim == 4:
         if "smith" in name.lower():
             return "network_map"
@@ -106,17 +133,22 @@ def infer_map_kind(name: str, img) -> str:
 
 
 def _positive_for_label(label_name: str, atlas_name: str, map_type: str) -> tuple[dict, bool]:
-    definition = network_definition(label_name)
-    fallback = False
-    if definition is None:
-        definition = fallback_region_definition(label_name)
-        fallback = True
-    source = "nilearn_network_label" if map_type in {"network_map", "ica_component"} or "network" in label_name.lower() else "nilearn_atlas_label"
+    display = display_atlas_label(label_name, atlas_name)
+    definition, fallback = atlas_label_definition(label_name, atlas_name)
+    atlas_key = atlas_name.lower()
+    is_network = (
+        map_type in {"network_map", "ica_component"}
+        or "network" in label_name.lower()
+        or "network" in display.lower()
+        or "yeo" in atlas_key
+        or "smith" in atlas_key
+    )
+    source = "nilearn_network_label" if is_network else "nilearn_atlas_label"
     category = "network" if source == "nilearn_network_label" else "anatomical_region"
     return (
         {
-            "text": text_pair(label_name, definition),
-            "term": label_name,
+            "text": text_pair(display, definition),
+            "term": display,
             "category": category,
             "source": source,
             "weight": POSITIVE_WEIGHTS[source],
@@ -167,6 +199,8 @@ def _row(
 
 
 def _iter_3d_components(data: np.ndarray, labels: list[str], atlas_name: str, map_type: str) -> Iterable[tuple[int, str, np.ndarray, bool]]:
+    if data.ndim == 4 and data.shape[3] == 1:
+        data = data[..., 0]
     if data.ndim == 4:
         n = data.shape[3]
         for i in range(n):
@@ -180,6 +214,52 @@ def _iter_3d_components(data: np.ndarray, labels: list[str], atlas_name: str, ma
             if str(label).strip().lower() in {"background", "0"}:
                 continue
             yield label_id, label, (data == label_id).astype(np.float32), True
+
+
+def _custom_atlas_rows(custom_cfg: list[dict[str, Any]], paths: dict[str, Any], dataset_cfg: dict[str, Any]) -> list[dict]:
+    """Ingest optional user-provided priority-3 atlases from local NIfTI files."""
+
+    out_dir = Path(paths.get("map_cache_dir", "atlas_free_multipositive/cache/maps")) / "custom"
+    target_img = load_target_mni152_2mm()
+    rows: list[dict] = []
+    preprocessing_config = {
+        "target_space": "MNI152_2mm",
+        "target_resolution_mm": dataset_cfg.get("target_resolution_mm", 2.0),
+        "source": "custom_nifti_atlas",
+    }
+    for spec in custom_cfg or []:
+        atlas_name = str(spec.get("name", "custom_atlas"))
+        path = Path(spec.get("path", ""))
+        if not path.exists():
+            print(f"Skipping custom atlas {atlas_name}: missing path {path}")
+            continue
+        labels = spec.get("labels") or []
+        map_type = spec.get("map_type", "probabilistic_atlas_region")
+        img = nib.load(str(path))
+        data = np.asarray(img.get_fdata())
+        for label_id, label_name, component, is_binary in _iter_3d_components(data, labels, atlas_name, map_type):
+            component_img = nib.Nifti1Image(component, img.affine, img.header)
+            resampled = resample_to_target(component_img, target_img, binary=is_binary, clamp_nonnegative=not is_binary)
+            label_slug = slugify(label_name)
+            map_id = f"custom_{slugify(atlas_name)}_{label_id}_{label_slug}"
+            out_path = out_dir / slugify(atlas_name) / f"{map_id}.nii.gz"
+            save_nifti(resampled, out_path)
+            positive, fallback = _positive_for_label(label_name, atlas_name, map_type)
+            row = _row(
+                map_id=map_id,
+                atlas_name=atlas_name,
+                map_type=map_type,
+                nifti_path=out_path,
+                label_name=label_name,
+                label_id=label_id,
+                positive=positive,
+                definition_fallback=fallback,
+                preprocessing_config=preprocessing_config,
+            )
+            row["source"] = f"custom_atlas:{atlas_name}"
+            row["negative_sampling_groups"]["source"] = "custom_atlas"
+            rows.append(row)
+    return rows
 
 
 def build_nilearn_rows(atlas_names: list[str], paths: dict[str, Any], dataset_cfg: dict[str, Any]) -> list[dict]:
@@ -196,11 +276,10 @@ def build_nilearn_rows(atlas_names: list[str], paths: dict[str, Any], dataset_cf
     for atlas_name in atlas_names:
         try:
             atlas = fetch_atlas(atlas_name)
-            path = _maps_path(atlas)
-            if path is None:
+            img = _maps_img(atlas)
+            if img is None:
                 print(f"Skipping {atlas_name}: no maps path")
                 continue
-            img = nib.load(path)
         except Exception as exc:
             print(f"Skipping {atlas_name}: {exc}")
             continue
@@ -228,6 +307,7 @@ def build_nilearn_rows(atlas_names: list[str], paths: dict[str, Any], dataset_cf
                     preprocessing_config=preprocessing_config,
                 )
             )
+    rows.extend(_custom_atlas_rows(dataset_cfg.get("custom_nifti_atlases", []), paths, dataset_cfg))
     return rows
 
 
@@ -248,4 +328,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

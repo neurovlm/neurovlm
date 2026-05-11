@@ -1,0 +1,46 @@
+train_jsonl: atlas_free_multipositive/cache/unified_jsonl/splits/train.jsonl
+val_jsonl: atlas_free_multipositive/cache/unified_jsonl/splits/val.jsonl
+text_embedding_cache: atlas_free_multipositive/cache/text_embeddings/specter_text_cache.pt
+autoencoder_checkpoint: atlas_free_multipositive/outputs/runs/sparse_autoencoder/checkpoints/best_generation_top5_dice.pt
+output_dir: atlas_free_multipositive/outputs/runs/text_to_brain_random
+checkpoint_dir: atlas_free_multipositive/outputs/runs/text_to_brain_random/checkpoints
+
+device: auto
+seed: 42
+target_shape: [36, 45, 38]
+batch_size: 4
+num_workers: 0
+epochs: 5
+lr: 0.0001
+weight_decay: 0.0001
+positive_texts_per_map: 1
+text_projection_init: random  # random | pretrained_text_infonce
+prediction_activation: sigmoid
+max_train_batches:
+max_val_batches: 50
+
+freeze:
+  specter: true
+  cnn_encoder: true
+  cnn_decoder: true
+  text_projection: false
+
+weighted_recon:
+  type: mse
+  alpha: 10.0
+  gamma: 1.0
+  normalize_target: true
+
+latent_alignment:
+  enabled: true
+  type: cosine
+  weight: 1.0
+  detach_brain_z: true
+
+loss:
+  lambda_recon: 1.0
+  lambda_latent: 1.0
+  lambda_dice: 0.5
+  lambda_topk: 0.5
+  lambda_corr: 0.25
+

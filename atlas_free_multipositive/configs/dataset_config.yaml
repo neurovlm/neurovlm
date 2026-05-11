@@ -11,13 +11,30 @@ nilearn_atlases:
   - schaefer_2018
   - harvard_oxford_cortical
   - harvard_oxford_subcortical
-  - juelich
+  - juelich_probabilistic
   - aal
   - smith_2009
+
+# Optional priority-3 atlases that are not fetched reliably through Nilearn.
+# Add local volumetric NIfTI files here after downloading/curating them.
+# Supported map_type values include:
+#   atlas_region, anatomical_mask, probabilistic_atlas_region, network_map, ica_component
+custom_nifti_atlases:
+  # - name: brainnetome
+  #   path: atlas_free_multipositive/external_atlases/brainnetome.nii.gz
+  #   map_type: atlas_region
+  #   labels: []
+  # - name: glasser_hcp_mmp
+  #   path: atlas_free_multipositive/external_atlases/glasser_hcp_mmp_volumetric.nii.gz
+  #   map_type: atlas_region
+  #   labels: []
+  # - name: hcp_task_maps
+  #   path: atlas_free_multipositive/external_atlases/hcp_task_maps_4d.nii.gz
+  #   map_type: network_map
+  #   labels: []
 
 pubmed:
   ale_cache_mode: packed_tensor
   save_tensor_rows_from_cache: false
   normalize_volumes: none
   clamp_nonnegative: true
-

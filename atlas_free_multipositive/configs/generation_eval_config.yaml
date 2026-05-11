@@ -1,0 +1,30 @@
+prediction_tensor: atlas_free_multipositive/outputs/eval/generated_maps.pt
+target_tensor: atlas_free_multipositive/outputs/eval/true_maps.pt
+output_dir: atlas_free_multipositive/outputs/eval/generation
+
+metrics:
+  voxel:
+    - mse
+    - voxel_auroc
+    - spatial_corr
+  topk_dice:
+    - 0.01
+    - 0.05
+    - 0.10
+  peak_recall_mm:
+    - 10
+    - 15
+    - 20
+  semantic:
+    - mesh_recall@10
+    - semantic_recall@50
+    - network_mrr
+    - nearest_true_ale_rank
+
+checkpoint_selection_weights:
+  mesh_recall_at_10: 0.30
+  semantic_recall_at_50: 0.20
+  network_mrr: 0.15
+  generation_top5_dice: 0.20
+  generation_semantic_mesh_recall_at_10: 0.15
+

@@ -17,7 +17,11 @@ if str(SRC) not in sys.path:
 from atlas_free_multipositive.training.collators import MultiPositiveCollator
 from atlas_free_multipositive.training.datasets import UnifiedMapTextDataset
 from atlas_free_multipositive.training.losses import multi_positive_infonce
-from atlas_free_multipositive.training.model_wrappers import TextProjectionHead, build_brain_encoder
+from atlas_free_multipositive.training.model_wrappers import (
+    build_brain_encoder,
+    build_text_projection,
+    load_text_projection_checkpoint,
+)
 
 
 def main() -> None:
@@ -27,12 +31,16 @@ def main() -> None:
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--steps", type=int, default=5)
     p.add_argument("--device", default="cpu")
+    p.add_argument("--text-proj-init", choices=["random", "pretrained_text_infonce"], default="random")
+    p.add_argument("--text-proj-checkpoint", default=None, help="Optional Stage 2 text-to-brain projection checkpoint.")
     args = p.parse_args()
 
     ds = UnifiedMapTextDataset(args.jsonl)
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=True, collate_fn=MultiPositiveCollator(positives_per_map=2))
     brain = build_brain_encoder().to(args.device)
-    text_proj = TextProjectionHead().to(args.device)
+    text_proj = build_text_projection(args.text_proj_init, device=args.device)
+    if args.text_proj_checkpoint:
+        load_text_projection_checkpoint(text_proj, args.text_proj_checkpoint)
     opt = torch.optim.AdamW([*brain.parameters(), *text_proj.parameters()], lr=1e-4)
 
     emb_cache = torch.load(args.text_embeddings, map_location="cpu", weights_only=False) if args.text_embeddings else {}
@@ -58,4 +66,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
