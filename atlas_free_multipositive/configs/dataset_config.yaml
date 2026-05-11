@@ -14,6 +14,18 @@ nilearn_atlases:
   - juelich_probabilistic
   - aal
   - smith_2009
+  - difumo_64
+  - msdl
+  - basc_064
+  - craddock_spatial
+
+# Other supported Nilearn variants you can add after the defaults are stable:
+#   - yeo_2011_17
+#   - schaefer_2018_200
+#   - juelich_maxprob
+#   - difumo_128
+#   - basc_122
+#   - craddock_temporal
 
 # Optional priority-3 atlases that are not fetched reliably through Nilearn.
 # Add local volumetric NIfTI files here after downloading/curating them.

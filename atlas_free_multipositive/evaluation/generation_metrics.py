@@ -41,7 +41,13 @@ def voxel_auroc(pred: torch.Tensor, target: torch.Tensor, *, threshold: float | 
 
 
 @torch.no_grad()
-def generation_metrics(pred: torch.Tensor, target: torch.Tensor, *, mask: torch.Tensor | None = None) -> dict[str, float]:
+def generation_metrics(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    mask: torch.Tensor | None = None,
+    include_voxel_auroc: bool = True,
+) -> dict[str, float]:
     pred = normalize_positive(pred, mask)
     target = normalize_positive(target, mask)
     out = {
@@ -51,9 +57,9 @@ def generation_metrics(pred: torch.Tensor, target: torch.Tensor, *, mask: torch.
         "top5_dice": float(hard_topk_dice(pred, target, k_percent=0.05, mask=mask).mean().item()),
         "top10_dice": float(hard_topk_dice(pred, target, k_percent=0.10, mask=mask).mean().item()),
     }
-    try:
-        out["voxel_auroc"] = voxel_auroc(pred, target, mask=mask)
-    except Exception:
-        out["voxel_auroc"] = float("nan")
+    if include_voxel_auroc:
+        try:
+            out["voxel_auroc"] = voxel_auroc(pred, target, mask=mask)
+        except Exception:
+            out["voxel_auroc"] = float("nan")
     return out
-

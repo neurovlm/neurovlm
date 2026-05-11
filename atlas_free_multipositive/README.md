@@ -18,6 +18,12 @@ The configured Nilearn atlas ingestion now includes:
 - `juelich_probabilistic`: probabilistic cytoarchitectonic maps when available through Nilearn.
 - `aal`: anatomical masks, skipped gracefully if the local/downloaded Nilearn files are incomplete.
 - `smith_2009`: resting-state ICA/network maps when available through Nilearn.
+- `difumo_64`: DiFuMo 64-dimensional functional modes.
+- `msdl`: MSDL probabilistic functional network maps.
+- `basc_064`: BASC symmetric scale-064 functional parcellation masks.
+- `craddock_spatial`: Craddock spatial-homogeneity group-mean parcellation maps.
+
+Additional supported Nilearn variants can be enabled in `configs/dataset_config.yaml`, including `yeo_2011_17`, `schaefer_2018_200`, `juelich_maxprob`, `difumo_128`, `basc_122`, and `craddock_temporal`.
 
 Priority-3 atlases such as Brainnetome, Glasser/HCP-MMP volumetric derivatives, and HCP task maps can be added as local NIfTI files under `custom_nifti_atlases` in `configs/dataset_config.yaml`.
 
