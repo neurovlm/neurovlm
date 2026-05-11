@@ -1,0 +1,16 @@
+repo_root: ../
+
+cache_dir: atlas_free_multipositive/cache
+map_cache_dir: atlas_free_multipositive/cache/maps
+tensor_cache_dir: atlas_free_multipositive/cache/tensors
+text_embedding_cache_dir: atlas_free_multipositive/cache/text_embeddings
+unified_jsonl_dir: atlas_free_multipositive/cache/unified_jsonl
+outputs_dir: atlas_free_multipositive/outputs
+
+existing_ale_cache: atlas_free_multipositive/data/ale_caches/atlas_free_4mm_fwhm9_crop_float16.pt
+pubmed_mesh_annotations: experiments/data/mesh_kg/mesh_annotations.json
+pubmed_mesh_nodes: experiments/data/mesh_kg/mesh_kg_nodes.parquet
+pubmed_mesh_definitions: experiments/data/unified_kg/kg_mesh_definitions_checkpoint.parquet
+pubmed_summaries: artifacts/neuro_summaries/neuro_summaries.parquet
+
+use_neurovlm_hf_loaders: true

@@ -1,0 +1,23 @@
+space: MNI152_2mm
+target_resolution_mm: 2.0
+summary_max_words: 220
+include_pubmed_title: true
+include_pubmed_summary: true
+include_cognitive_atlas_exact_matches: false
+skip_examples_with_no_positive_texts: true
+
+nilearn_atlases:
+  - yeo_2011
+  - schaefer_2018
+  - harvard_oxford_cortical
+  - harvard_oxford_subcortical
+  - juelich
+  - aal
+  - smith_2009
+
+pubmed:
+  ale_cache_mode: packed_tensor
+  save_tensor_rows_from_cache: false
+  normalize_volumes: none
+  clamp_nonnegative: true
+
