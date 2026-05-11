@@ -7,9 +7,9 @@ checkpoint_dir: atlas_free_multipositive/outputs/runs/joint_generation_contrasti
 device: auto
 seed: 42
 target_shape: [36, 45, 38]
-batch_size: 4
+batch_size: 64
 num_workers: 0
-epochs: 3
+epochs: 50
 lr: 0.0001
 weight_decay: 0.0001
 positive_texts_per_map: 2
@@ -21,8 +21,8 @@ max_train_batches:
 
 model:
   latent_dim: 384
-  base_channels: 8
-  num_blocks: 2
+  base_channels: 48
+  num_blocks: 4
 
 loss:
   lambda_contrastive: 1.0

@@ -6,19 +6,19 @@ checkpoint_dir: atlas_free_multipositive/outputs/runs/sparse_autoencoder/checkpo
 device: auto
 seed: 42
 target_shape: [36, 45, 38]
-batch_size: 8
+batch_size: 64
 num_workers: 0
-epochs: 5
-lr: 0.0001
+epochs: 100
+lr: 0.0003
 weight_decay: 0.0001
 max_train_batches:
-max_val_batches: 50
+max_val_batches:
 prediction_activation: sigmoid
 
 model:
   latent_dim: 384
-  base_channels: 8
-  num_blocks: 2
+  base_channels: 48
+  num_blocks: 4
 
 weighted_recon:
   type: mse
@@ -31,4 +31,3 @@ loss:
   lambda_dice: 0.5
   lambda_topk: 0.5
   lambda_corr: 0.25
-
