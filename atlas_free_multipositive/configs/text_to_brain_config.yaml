@@ -9,7 +9,10 @@ device: auto
 seed: 42
 target_shape: [36, 45, 38]
 batch_size: 256
-num_workers: 0
+num_workers: 8
+pin_memory: true
+persistent_workers: true
+prefetch_factor: 4
 epochs: 100
 lr: 0.0001
 weight_decay: 0.0001
@@ -18,6 +21,14 @@ text_projection_init: random  # random | pretrained_text_infonce
 prediction_activation: sigmoid
 max_train_batches:
 max_val_batches:
+amp: true
+cudnn_benchmark: true
+val_interval: 5
+compute_train_metrics: true
+train_metric_batches: 8
+val_metric_batches: 16
+metrics_device: cuda
+include_voxel_auroc: false
 
 freeze:
   specter: true
