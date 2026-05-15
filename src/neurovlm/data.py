@@ -51,7 +51,11 @@ from neurovlm.retrieval_resources import (
     _load_latent_ngram,
     _load_ngram,
     _load_kg_mesh_dataset,
+    _load_mesh_kg_nodes,
+    _load_mesh_kg_descriptors,
+    _load_kg_mesh_brain_rankable_dataset,
     _load_latent_kg_mesh,
+    _load_latent_kg_mesh_brain_rankable,
     _load_llm_neuro_terms_dataset,
     _load_latent_llm_neuro_terms,
 )
@@ -371,6 +375,14 @@ def load_dataset(name: str):
             return pd.DataFrame({"term": labels})
         case "kg_mesh" | "mesh_kg" | "pubmed_mesh":
             return _load_kg_mesh_dataset()
+        case "mesh_kg_nodes" | "kg_mesh_nodes":
+            return _load_mesh_kg_nodes()
+        case "mesh_descriptors" | "mesh_kg_descriptors":
+            return _load_mesh_kg_descriptors()
+        case "kg_mesh_brain_rankable" | "pubmed_mesh_brain_rankable":
+            return _load_kg_mesh_brain_rankable_dataset(include_molecular=False)
+        case "kg_mesh_brain_rankable_plus_molecular" | "pubmed_mesh_brain_rankable_plus_molecular":
+            return _load_kg_mesh_brain_rankable_dataset(include_molecular=True)
         case "llm_neuro_terms" | "llm_terms" | "llm_extracted_neuro_terms":
             return _load_llm_neuro_terms_dataset()
         case _:
@@ -378,7 +390,8 @@ def load_dataset(name: str):
                            "neurowiki_graph", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks",
                            "networks_canonical", "network_test_set_labels", "pubmed_mesh_annotations",
                            "neurovault_text", "neurovault_images", "neurovault_meta", "ngrams", "kg_mesh",
-                           "llm_neuro_terms"]
+                           "mesh_kg_nodes", "mesh_descriptors", "kg_mesh_brain_rankable",
+                           "kg_mesh_brain_rankable_plus_molecular", "llm_neuro_terms"]
             raise ValueError(f"{name} not in {valid_names}")
 
 
@@ -436,13 +449,18 @@ def load_latent(name: str):
             payload = _load_latent_ngram()
         case "kg_mesh" | "mesh_kg" | "pubmed_mesh":
             payload = _load_latent_kg_mesh()
+        case "kg_mesh_brain_rankable" | "pubmed_mesh_brain_rankable":
+            payload = _load_latent_kg_mesh_brain_rankable(include_molecular=False)
+        case "kg_mesh_brain_rankable_plus_molecular" | "pubmed_mesh_brain_rankable_plus_molecular":
+            payload = _load_latent_kg_mesh_brain_rankable(include_molecular=True)
         case "llm_neuro_terms" | "llm_terms" | "llm_extracted_neuro_terms":
             payload = _load_latent_llm_neuro_terms()
         case _:
             valid_names = ["pubmed_text", "pubmed_summaries", "pubmed_images", "wiki", "neurowiki", "cogatlas",
                            "cogatlas_task", "cogatlas_disorder", "networks_text",
                            "networks_neuro", "neurovault_images", "neurovault_text", "ngrams",
-                           "kg_mesh", "llm_neuro_terms"]
+                           "kg_mesh", "kg_mesh_brain_rankable", "kg_mesh_brain_rankable_plus_molecular",
+                           "llm_neuro_terms"]
             raise ValueError(f"{name} not in {valid_names}")
     return _without_grad(payload)
 

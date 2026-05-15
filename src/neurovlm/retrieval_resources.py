@@ -64,7 +64,11 @@ __all__ = [
     "_load_latent_ngram",
     "_load_ngram",
     "_load_kg_mesh_dataset",
+    "_load_mesh_kg_nodes",
+    "_load_mesh_kg_descriptors",
+    "_load_kg_mesh_brain_rankable_dataset",
     "_load_latent_kg_mesh",
+    "_load_latent_kg_mesh_brain_rankable",
     "_load_llm_neuro_terms_dataset",
     "_load_latent_llm_neuro_terms",
 ]
@@ -707,7 +711,7 @@ def _load_network_test_set_labels() -> pd.DataFrame:
 def _load_pubmed_mesh_annotations() -> dict:
     """Load PubMed PMID-to-MeSH gold annotations from HuggingFace."""
     annotations_path = _download_from_hf(
-        "neurovlm/embedded_text",
+        "neurovlm/mesh_kg",
         "mesh_annotations.json"
     )
     with open(annotations_path, "r") as f:
@@ -792,6 +796,58 @@ def _load_kg_mesh_dataset() -> pd.DataFrame:
 
 
 @lru_cache(maxsize=1)
+def _load_mesh_kg_nodes() -> pd.DataFrame:
+    """Load MeSH KG node metadata, including node_type, from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/mesh_kg",
+        "mesh_kg_nodes.parquet"
+    )
+    return pd.read_parquet(parquet_path)
+
+
+@lru_cache(maxsize=1)
+def _load_mesh_kg_descriptors() -> pd.DataFrame:
+    """Load MeSH descriptor metadata from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/mesh_kg",
+        "mesh_descriptors.parquet"
+    )
+    return pd.read_parquet(parquet_path)
+
+
+def _normalize_mesh_term(text: str) -> str:
+    text = str(text or "").lower().split("/")[0]
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in text).split())
+
+
+def _brain_rankable_mesh_terms(include_molecular: bool = False) -> set[str]:
+    allowed = {
+        "disorder",
+        "anatomical_region",
+        "biological_process",
+        "cognitive_construct",
+    }
+    if include_molecular:
+        allowed.add("molecular")
+    nodes = _load_mesh_kg_nodes()
+    node_type_col = "node_type" if "node_type" in nodes.columns else None
+    name_col = "name" if "name" in nodes.columns else "term"
+    if node_type_col is None or name_col not in nodes.columns:
+        raise ValueError("mesh_kg_nodes.parquet must include name and node_type columns.")
+    keep = nodes[nodes[node_type_col].isin(allowed)]
+    return {_normalize_mesh_term(x) for x in keep[name_col].dropna().astype(str)}
+
+
+@lru_cache(maxsize=2)
+def _load_kg_mesh_brain_rankable_dataset(include_molecular: bool = False) -> pd.DataFrame:
+    """Load KG-MeSH terms filtered to brain-rankable node types."""
+    df = _load_kg_mesh_dataset().copy()
+    allowed_terms = _brain_rankable_mesh_terms(include_molecular=include_molecular)
+    keep = df["term"].map(_normalize_mesh_term).isin(allowed_terms)
+    return df.loc[keep].reset_index(drop=True)
+
+
+@lru_cache(maxsize=1)
 def _load_latent_kg_mesh() -> Tuple[torch.Tensor, np.ndarray]:
     """Load KG-MeSH SPECTER2 embeddings from HuggingFace."""
     latent_path = _download_from_hf(
@@ -806,6 +862,15 @@ def _load_latent_kg_mesh() -> Tuple[torch.Tensor, np.ndarray]:
     latent = latent_payload["latent"]
     terms  = np.asarray(latent_payload["term"])
     return latent, terms
+
+
+@lru_cache(maxsize=2)
+def _load_latent_kg_mesh_brain_rankable(include_molecular: bool = False) -> Tuple[torch.Tensor, np.ndarray]:
+    """Load KG-MeSH embeddings filtered to brain-rankable node types."""
+    latent, terms = _load_latent_kg_mesh()
+    allowed_terms = _brain_rankable_mesh_terms(include_molecular=include_molecular)
+    mask = np.asarray([_normalize_mesh_term(term) in allowed_terms for term in terms], dtype=bool)
+    return latent[mask], terms[mask]
 
 
 @lru_cache(maxsize=1)

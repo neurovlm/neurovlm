@@ -1,5 +1,6 @@
 """Performance metrics"""
 from dataclasses import dataclass
+from functools import lru_cache
 from os import PathLike
 import tempfile
 from typing import Optional
@@ -339,6 +340,46 @@ def _load_fsaverage_spheres(density: str = "41k") -> tuple[np.ndarray, np.ndarra
     return points_lh, points_rh
 
 
+def _fit_spin_permutations(density: str, n_perm: int, random_state):
+    """Fit BrainSpace spin permutations for one fsaverage configuration."""
+    from brainspace.null_models import SpinPermutations
+
+    points_lh, points_rh = _load_fsaverage_spheres(density=density)
+    spinner = SpinPermutations(n_rep=n_perm, random_state=random_state)
+    spinner.fit(points_lh, points_rh=points_rh)
+    return spinner
+
+
+@lru_cache(maxsize=8)
+def _cached_spin_permutations(density: str, n_perm: int, random_state: int):
+    """Return cached spin permutations for deterministic spin-test settings."""
+    return _fit_spin_permutations(density=density, n_perm=n_perm, random_state=random_state)
+
+
+def _get_spin_permutations(density: str, n_perm: int, random_state):
+    """Return fitted spin permutations, caching deterministic configurations."""
+    if random_state is None:
+        return _fit_spin_permutations(density=density, n_perm=n_perm, random_state=random_state)
+    if isinstance(random_state, np.integer):
+        random_state = int(random_state)
+    if not isinstance(random_state, int):
+        return _fit_spin_permutations(density=density, n_perm=n_perm, random_state=random_state)
+    return _cached_spin_permutations(density=density, n_perm=int(n_perm), random_state=random_state)
+
+
+def precompute_spin_permutations(
+    density: str = "41k",
+    n_perm: int = 1000,
+    random_state: int = 0,
+):
+    """Precompute and cache deterministic BrainSpace spin permutations.
+
+    This is an optional performance helper. It does not change metric values;
+    it moves the expensive spin-index fitting step outside per-sample loops.
+    """
+    return _get_spin_permutations(density=density, n_perm=n_perm, random_state=random_state)
+
+
 def mni152_to_fsaverage_arrays(
     nifti_img,
     density: str = "41k",
@@ -393,8 +434,6 @@ def nct_dice_spin_test_surface(
     ``brainspace.null_models.SpinPermutations``, recompute Dice for each
     rotation, then calculate the permutation p-value.
     """
-    from brainspace.null_models import SpinPermutations
-
     pred_lh = np.asarray(pred_lh).ravel()
     pred_rh = np.asarray(pred_rh).ravel()
     true_lh = np.asarray(true_lh).ravel()
@@ -404,9 +443,7 @@ def nct_dice_spin_test_surface(
     true = np.concatenate([true_lh, true_rh])
     observed = dice_percentile(pred, true, pct=pct)
 
-    points_lh, points_rh = _load_fsaverage_spheres(density=density)
-    spinner = SpinPermutations(n_rep=n_perm, random_state=random_state)
-    spinner.fit(points_lh, points_rh=points_rh)
+    spinner = _get_spin_permutations(density=density, n_perm=n_perm, random_state=random_state)
     rand_lh, rand_rh = spinner.randomize(pred_lh, pred_rh)
 
     null = np.asarray([
