@@ -25,6 +25,8 @@ from neurovlm.retrieval_resources import (
     _load_networks,
     _load_networks_labels,
     _load_networks_canonical,
+    _load_network_test_set_labels,
+    _load_pubmed_mesh_annotations,
     _load_latent_text,
     _load_latent_neuro_summaries,
     _load_latent_neuro,
@@ -321,6 +323,8 @@ def load_dataset(name: str):
     - "cogatlas_graph": how cogatlas terms are related
     - "llm_neuro_terms": novel LLM-extracted neuroscience terms filtered against CogAtlas and MeSH
     - "networks": dict that contains atlas and network name keys, and .nii.gz keys.
+    - "network_test_set_labels": labeled network rows with mapped terms and short/long definitions
+    - "pubmed_mesh_annotations": dict mapping PMID strings to MeSH gold terms
     - "publications_neurovault": neurovault-linked publication metadata (titles, abstracts, dois)
     - "neurovault_text": publication data for each neurovault image
     - "neurovault_images": tensor containing neurovault images
@@ -352,6 +356,10 @@ def load_dataset(name: str):
             return _load_networks()
         case "networks_canonical":
             return _load_networks_canonical()
+        case "network_test_set_labels" | "networks_test_labels":
+            return _load_network_test_set_labels()
+        case "pubmed_mesh_annotations" | "mesh_annotations":
+            return _load_pubmed_mesh_annotations()
         case "neurovault_text":
             return _load_publications_neurovault_dataframe()
         case "neurovault_images_meta":
@@ -368,8 +376,9 @@ def load_dataset(name: str):
         case _:
             valid_names = ["pubmed_text", "pubmed_summaries", "pubmed_coordinates", "pubmed_images", "wiki", "neurowiki",
                            "neurowiki_graph", "cogatlas", "cogatlas_task", "cogatlas_disorder", "networks",
-                           "networks_canonical", "neurovault_text", "neurovault_images", "neurovault_meta",
-                           "ngrams", "kg_mesh", "llm_neuro_terms"]
+                           "networks_canonical", "network_test_set_labels", "pubmed_mesh_annotations",
+                           "neurovault_text", "neurovault_images", "neurovault_meta", "ngrams", "kg_mesh",
+                           "llm_neuro_terms"]
             raise ValueError(f"{name} not in {valid_names}")
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import Tuple
-import gzip, pickle
+import gzip, json, pickle
 
 import numpy as np
 import pandas as pd
@@ -50,6 +50,8 @@ __all__ = [
     "_load_autoencoder",
     "_load_masker",
     "_load_networks",
+    "_load_network_test_set_labels",
+    "_load_pubmed_mesh_annotations",
     "_proj_head_image_infonce",
     "_proj_head_text_mse",
     "_proj_head_text_infonce",
@@ -689,6 +691,27 @@ def _load_networks_canonical() -> pd.DataFrame:
         "network_text.parquet"
     )
     return pd.read_parquet(networks_path)
+
+
+@lru_cache(maxsize=1)
+def _load_network_test_set_labels() -> pd.DataFrame:
+    """Load labeled network evaluation rows from HuggingFace."""
+    labels_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "network_test_set_labels.csv"
+    )
+    return pd.read_csv(labels_path)
+
+
+@lru_cache(maxsize=1)
+def _load_pubmed_mesh_annotations() -> dict:
+    """Load PubMed PMID-to-MeSH gold annotations from HuggingFace."""
+    annotations_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "mesh_annotations.json"
+    )
+    with open(annotations_path, "r") as f:
+        return json.load(f)
 
 
 @lru_cache(maxsize=1)
