@@ -5,3 +5,10 @@
 *.pt
 *.parquet
 *.pkl.gz
+experiments/data/mesh_kg/desc2026.xml
+*.json
+*.jsonl
+*.csv
+*.nii.gz
+*.pyc
+__pycache__/

@@ -35,6 +35,12 @@ license-files = ["LICENSE"]
 metrics = [
   "scikit-learn",
   "scikit-image",
+  "nltk",
+  "rouge-score",
+]
+nct = [
+  "neuromaps",
+  "brainspace",
 ]
 coords = [
   "nimare",
@@ -60,6 +66,11 @@ llm = [
   "ollama",
   "accelerate"
 ]
+gnn = [
+  "torch_geometric",
+  "torch_scatter",
+  "torch_sparse",
+]
 docs = [
   "sphinx>=7.2,<9",
   "sphinx-book-theme>=1.1,<2",
@@ -71,6 +82,8 @@ docs = [
 full = [
   "scikit-learn",
   "scikit-image",
+  "nltk",
+  "rouge-score",
   "nimare",
   "requests",
   "beautifulsoup4",
@@ -80,7 +93,9 @@ full = [
   "seaborn",
   "ipython",
   "ollama",
-  "accelerate"
+  "accelerate",
+  "neuromaps",
+  "brainspace"
 ]
 
 [tool.hatch.build.targets.wheel]
