@@ -2,6 +2,7 @@
 *.pt
 *.parquet
 *.pkl.gz
+<<<<<<< Updated upstream
 *.pt
 *.parquet
 *.pkl.gz
@@ -12,3 +13,12 @@ experiments/data/mesh_kg/desc2026.xml
 *.nii.gz
 *.pyc
 __pycache__/
+=======
+*.csv
+*.nii.gz
+*.json
+*.jsonl
+*.xml
+*.pyc
+*.gitignore
+>>>>>>> Stashed changes
