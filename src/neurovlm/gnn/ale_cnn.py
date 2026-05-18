@@ -349,11 +349,6 @@ class ALE3DCNNDecoder(nn.Module):
             raise ValueError("output_shape must be a 3D (D, H, W) tuple")
         if num_blocks < 1:
             raise ValueError("num_blocks must be >= 1")
-        if num_blocks > 4:
-            raise ValueError(
-                "num_blocks > 4 is intentionally unsupported for this lightweight decoder"
-            )
-
         self.output_shape = tuple(int(v) for v in output_shape)
         self.latent_dim = latent_dim
         self.out_channels = out_channels

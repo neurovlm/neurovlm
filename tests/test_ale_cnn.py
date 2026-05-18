@@ -50,6 +50,20 @@ def test_ale_3dcnn_decoder_exact_output_shape():
     assert out.shape == (2, 1, 13, 17, 19)
 
 
+def test_ale_3dcnn_decoder_supports_five_blocks():
+    model = ALE3DCNNDecoder(
+        output_shape=(13, 17, 19),
+        latent_dim=384,
+        base_channels=4,
+        num_blocks=5,
+    )
+    z = torch.randn(2, 384)
+
+    out = model(z)
+
+    assert out.shape == (2, 1, 13, 17, 19)
+
+
 def test_ale_3dcnn_autoencoder_backward():
     model = ALE3DCNNAutoEncoder(
         output_shape=(13, 17, 19),
