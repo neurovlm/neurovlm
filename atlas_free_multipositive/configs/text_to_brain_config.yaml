@@ -2,8 +2,8 @@ train_jsonl: atlas_free_multipositive/cache/unified_jsonl/splits/train.jsonl
 val_jsonl: atlas_free_multipositive/cache/unified_jsonl/splits/val.jsonl
 text_embedding_cache: atlas_free_multipositive/cache/text_embeddings/specter_text_cache.pt
 autoencoder_checkpoint: atlas_free_multipositive/outputs/runs/sparse_autoencoder/checkpoints/best_generation_top5_dice.pt
-output_dir: atlas_free_multipositive/outputs/runs/text_to_brain_random
-checkpoint_dir: atlas_free_multipositive/outputs/runs/text_to_brain_random/checkpoints
+output_dir: atlas_free_multipositive/outputs/runs/text_to_brain_pretrained_infonce
+checkpoint_dir: atlas_free_multipositive/outputs/runs/text_to_brain_pretrained_infonce/checkpoints
 
 device: auto
 seed: 42
@@ -17,7 +17,7 @@ epochs: 100
 lr: 0.0001
 weight_decay: 0.0001
 positive_texts_per_map: 1
-text_projection_init: random  # random | pretrained_text_infonce
+text_projection_init: pretrained_text_infonce  # random | pretrained_text_infonce
 prediction_activation: sigmoid
 max_train_batches:
 max_val_batches:
@@ -35,6 +35,16 @@ freeze:
   cnn_encoder: true
   cnn_decoder: true
   text_projection: false
+
+model:
+  latent_dim: 384
+  base_channels: 48
+  num_blocks: 4
+  encoder_arch: resnet
+  blocks_per_stage: 2
+  use_dilation: false
+  multi_scale: true
+  global_context: attention
 
 weighted_recon:
   type: mse

@@ -2,6 +2,9 @@ train_jsonl: atlas_free_multipositive/cache/unified_jsonl/splits/train.jsonl
 val_jsonl: atlas_free_multipositive/cache/unified_jsonl/splits/val.jsonl
 output_dir: atlas_free_multipositive/outputs/runs/sparse_autoencoder
 checkpoint_dir: atlas_free_multipositive/outputs/runs/sparse_autoencoder/checkpoints
+# Set this to the previous strong checkpoint when available, for example:
+# /content/drive/MyDrive/neurovlm/runs_ale_3dcnn_autoencoder_pretrain/autoencoder_atlas_free_20260510_194641/checkpoints/best_cnn_autoencoder.pt
+init_checkpoint:
 
 device: auto
 seed: 42
@@ -31,6 +34,11 @@ model:
   latent_dim: 384
   base_channels: 48
   num_blocks: 4
+  encoder_arch: resnet
+  blocks_per_stage: 2
+  use_dilation: false
+  multi_scale: true
+  global_context: attention
 
 weighted_recon:
   type: mse

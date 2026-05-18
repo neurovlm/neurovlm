@@ -8,8 +8,11 @@ from neurovlm.metrics import (
     compute_metrics,
     dice,
     dice_top_k,
+    normalized_k_values,
+    normalized_recall_curve_auc,
     recall_at_k,
     recall_curve,
+    retrieval_metrics,
     bernoulli_bce,
     bits_per_pixel,
     compute_ae_performance,
@@ -129,6 +132,25 @@ class TestRecallCurve:
         expected_len = len(range(0, n, step))
         assert len(t_to_i) == expected_len
         assert len(i_to_t) == expected_len
+
+    def test_normalized_k_values(self):
+        vals = normalized_k_values(4)
+
+        assert torch.allclose(vals, torch.tensor([0.25, 0.5, 0.75, 1.0]))
+
+    def test_normalized_recall_curve_auc_is_mean_full_curve(self):
+        curve = torch.tensor([0.25, 0.5, 0.75, 1.0])
+
+        assert normalized_recall_curve_auc(curve) == pytest.approx(0.625)
+
+    def test_retrieval_metrics_reports_paper_style_auc_aliases(self):
+        latent = torch.eye(4)
+
+        metrics = retrieval_metrics(latent, latent)
+
+        assert metrics["paper_recall_curve_auc"] == pytest.approx(1.0)
+        assert metrics["normalized_k_recall_curve_auc"] == pytest.approx(1.0)
+        assert metrics["recall@1"] == pytest.approx(1.0)
 
 
 class TestBernoulliBCE:

@@ -105,6 +105,29 @@ def dice_top_k(y_true: np.ndarray, y_prob: np.ndarray, k=None):
     return (2*(y_hat & y_true).sum()) / (y_hat.sum() + y_true.sum() + 1e-8)
 
 # Recall metrics
+@torch.no_grad()
+def normalized_k_values(n: int, *, device: torch.device | None = None) -> torch.Tensor:
+    """Return normalized full-curve k values ``[1/n, ..., n/n]``."""
+
+    if n < 1:
+        raise ValueError("n must be >= 1")
+    return torch.arange(1, n + 1, device=device).float() / float(n)
+
+
+@torch.no_grad()
+def normalized_recall_curve_auc(curve: torch.Tensor) -> float:
+    """Area under recall(k) vs normalized k = k/n.
+
+    Recall curves are saved at every integer k, so the normalized-k samples are
+    uniformly spaced by 1/n. The right-endpoint Riemann area is therefore the
+    mean of the full recall curve. This is the paper-style AUC, not recall@K.
+    """
+
+    if curve.numel() == 0:
+        raise ValueError("curve must contain at least one point")
+    return float(curve.float().mean().item())
+
+
 def recall_at_k(cos_sim: torch.Tensor, k: int) -> float:
     """
     Parameters
@@ -165,7 +188,10 @@ def retrieval_metrics(
         out[f"random_recall@{k}"] = min(float(k) / n, 1.0)
 
     curve, _ = recall_curve(q, t)
-    out["auc"] = float(curve.mean().item())
+    auc = normalized_recall_curve_auc(curve)
+    out["auc"] = auc
+    out["paper_recall_curve_auc"] = auc
+    out["normalized_k_recall_curve_auc"] = auc
     return out
 
 

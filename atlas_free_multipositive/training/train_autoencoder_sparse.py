@@ -64,6 +64,24 @@ def loss_config_from_dict(cfg: dict[str, Any]) -> GenerationLossConfig:
     )
 
 
+def load_partial_autoencoder_init(model, checkpoint_path: str | Path) -> dict[str, int]:
+    """Load shape-compatible weights from a previous autoencoder checkpoint."""
+
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    state = payload.get("model") or payload.get("autoencoder") or payload.get("state_dict")
+    if state is None:
+        raise KeyError("Checkpoint must contain 'model', 'autoencoder', or 'state_dict'")
+    current = model.state_dict()
+    compatible = {
+        key: value
+        for key, value in state.items()
+        if key in current and tuple(value.shape) == tuple(current[key].shape)
+    }
+    current.update(compatible)
+    model.load_state_dict(current)
+    return {"loaded_tensors": len(compatible), "checkpoint_tensors": len(state)}
+
+
 def run_epoch(
     model,
     loader,
@@ -142,7 +160,17 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         latent_dim=int(model_cfg.get("latent_dim", 384)),
         base_channels=int(model_cfg.get("base_channels", 8)),
         num_blocks=int(model_cfg.get("num_blocks", 2)),
+        encoder_arch=str(model_cfg.get("encoder_arch", "plain")),
+        blocks_per_stage=int(model_cfg.get("blocks_per_stage", 2)),
+        use_dilation=bool(model_cfg.get("use_dilation", False)),
+        multi_scale=bool(model_cfg.get("multi_scale", False)),
+        global_context=str(model_cfg.get("global_context", "none")),
     ).to(device)
+    init_checkpoint = cfg.get("init_checkpoint")
+    init_summary = None
+    if init_checkpoint:
+        init_summary = load_partial_autoencoder_init(model, init_checkpoint)
+        print({"autoencoder_init_checkpoint": init_checkpoint, **init_summary})
     if bool(cfg.get("compile_model", False)) and hasattr(torch, "compile"):
         model = torch.compile(model)
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(cfg.get("lr", 1e-4)), weight_decay=float(cfg.get("weight_decay", 1e-4)))
@@ -192,7 +220,14 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         val_metrics = dict(last_val_metrics)
         row = {"epoch": epoch, **{f"train_{k}": v for k, v in train_metrics.items()}, **{f"val_{k}": v for k, v in val_metrics.items()}}
         history.append(row)
-        payload = {"model": model.state_dict(), "config": cfg, "history": history, "epoch": epoch, "target_shape": target_shape}
+        payload = {
+            "model": model.state_dict(),
+            "config": cfg,
+            "history": history,
+            "epoch": epoch,
+            "target_shape": target_shape,
+            "init_summary": init_summary,
+        }
         ckpt.save_last(payload)
         if val_metrics:
             ckpt.maybe_save_best("generation_top5_dice", val_metrics.get("top5_dice", 0.0), payload)

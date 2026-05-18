@@ -52,7 +52,17 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     device = torch.device("cuda" if device_name == "auto" and torch.cuda.is_available() else "cpu" if device_name == "auto" else device_name)
     target_shape = _target_shape(cfg)
     model_cfg = cfg.get("model", {})
-    autoencoder = build_cnn_autoencoder(target_shape, latent_dim=int(model_cfg.get("latent_dim", 384)), base_channels=int(model_cfg.get("base_channels", 8)), num_blocks=int(model_cfg.get("num_blocks", 2))).to(device)
+    autoencoder = build_cnn_autoencoder(
+        target_shape,
+        latent_dim=int(model_cfg.get("latent_dim", 384)),
+        base_channels=int(model_cfg.get("base_channels", 8)),
+        num_blocks=int(model_cfg.get("num_blocks", 2)),
+        encoder_arch=str(model_cfg.get("encoder_arch", "plain")),
+        blocks_per_stage=int(model_cfg.get("blocks_per_stage", 2)),
+        use_dilation=bool(model_cfg.get("use_dilation", False)),
+        multi_scale=bool(model_cfg.get("multi_scale", False)),
+        global_context=str(model_cfg.get("global_context", "none")),
+    ).to(device)
     load_autoencoder_checkpoint(autoencoder, cfg["autoencoder_checkpoint"])
     text_projector = build_text_projection(cfg.get("text_projection_init", "random"), device=device)
     if cfg.get("text_projection_checkpoint"):

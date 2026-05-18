@@ -47,13 +47,53 @@ def build_text_projection(init: str = "random", *, device: str | torch.device = 
     raise ValueError("init must be 'random' or 'pretrained_text_infonce'")
 
 
-def build_brain_encoder(out_dim: int = 384):
-    from neurovlm.gnn.ale_cnn import ALE3DCNNEncoder
+def build_brain_encoder(
+    out_dim: int = 384,
+    *,
+    encoder_arch: str = "plain",
+    base_channels: int = 8,
+    num_blocks: int = 2,
+    blocks_per_stage: int = 2,
+    dropout: float = 0.1,
+    use_dilation: bool = False,
+    multi_scale: bool = False,
+    global_context: str = "none",
+):
+    from neurovlm.gnn.ale_cnn import ALE3DCNNEncoder, ALEResNet3DEncoder
 
-    return ALE3DCNNEncoder(base_channels=8, num_blocks=2, out_dim=out_dim, dropout=0.1)
+    if encoder_arch == "plain":
+        return ALE3DCNNEncoder(
+            base_channels=base_channels,
+            num_blocks=num_blocks,
+            out_dim=out_dim,
+            dropout=dropout,
+        )
+    if encoder_arch == "resnet":
+        return ALEResNet3DEncoder(
+            base_channels=base_channels,
+            num_stages=num_blocks,
+            blocks_per_stage=blocks_per_stage,
+            out_dim=out_dim,
+            dropout=dropout,
+            use_dilation=use_dilation,
+            multi_scale=multi_scale,
+            global_context=global_context,
+        )
+    raise ValueError("encoder_arch must be 'plain' or 'resnet'")
 
 
-def build_cnn_autoencoder(output_shape: tuple[int, int, int], *, latent_dim: int = 384, base_channels: int = 8, num_blocks: int = 2):
+def build_cnn_autoencoder(
+    output_shape: tuple[int, int, int],
+    *,
+    latent_dim: int = 384,
+    base_channels: int = 8,
+    num_blocks: int = 2,
+    encoder_arch: str = "plain",
+    blocks_per_stage: int = 2,
+    use_dilation: bool = False,
+    multi_scale: bool = False,
+    global_context: str = "none",
+):
     from neurovlm.gnn.ale_cnn import ALE3DCNNAutoEncoder
 
     return ALE3DCNNAutoEncoder(
@@ -62,6 +102,11 @@ def build_cnn_autoencoder(output_shape: tuple[int, int, int], *, latent_dim: int
         num_blocks=num_blocks,
         latent_dim=latent_dim,
         dropout=0.1,
+        encoder_arch=encoder_arch,
+        blocks_per_stage=blocks_per_stage,
+        use_dilation=use_dilation,
+        multi_scale=multi_scale,
+        global_context=global_context,
     )
 
 

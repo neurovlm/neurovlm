@@ -24,7 +24,7 @@ import torch.nn.functional as F
 from nilearn.image import resample_img
 from tqdm import tqdm
 
-from neurovlm.metrics import retrieval_ranks
+from neurovlm.metrics import normalized_recall_curve_auc, retrieval_ranks
 
 
 DEFAULT_NETWORK_LABEL_DEFINITIONS: dict[str, tuple[str, str]] = {
@@ -230,8 +230,10 @@ def exact_pmid_retrieval_metrics(similarity: torch.Tensor, ks: Sequence[int] = (
     sim = similarity.float()
     ranks = retrieval_ranks(sim).float()
     n = float(sim.shape[0])
+    auc = float(_recall_curve_auc_from_ranks(ranks, int(n)))
     out: dict[str, float] = {
-        "paper_recall_curve_auc": float(_recall_curve_auc_from_ranks(ranks, int(n))),
+        "paper_recall_curve_auc": auc,
+        "normalized_k_recall_curve_auc": auc,
         "mrr": float((1.0 / ranks).mean().item()),
         "median_rank": float(ranks.median().item()),
         "mean_rank": float(ranks.mean().item()),
@@ -245,7 +247,7 @@ def exact_pmid_retrieval_metrics(similarity: torch.Tensor, ks: Sequence[int] = (
 def _recall_curve_auc_from_ranks(ranks: torch.Tensor, n: int) -> float:
     counts = torch.bincount((ranks.long() - 1), minlength=n)
     curve = counts.cumsum(0).float() / float(n)
-    return float(curve.mean().item())
+    return normalized_recall_curve_auc(curve)
 
 
 def exact_recall_curve(similarity: torch.Tensor) -> torch.Tensor:
@@ -1128,11 +1130,13 @@ def evaluate_semantic_neighbor_retrieval(
     sim = F.normalize(brain_embeddings.float(), dim=1, eps=1e-8) @ F.normalize(text_embeddings.float(), dim=1, eps=1e-8).T
     scores = sim.detach().cpu().numpy()
     metrics = multi_positive_ranking_metrics(scores, positives, ks=(10, 50), ndcg_k=10)
+    semantic_auc = _multi_positive_recall_auc(scores, positives)
     metrics = {
         "semantic_recall@10": metrics["recall@10"],
         "semantic_recall@50": metrics["recall@50"],
         "semantic_mrr": metrics["mrr"],
-        "semantic_paper_style_recall_curve_auc": _multi_positive_recall_auc(scores, positives),
+        "semantic_paper_style_recall_curve_auc": semantic_auc,
+        "semantic_normalized_k_recall_curve_auc": semantic_auc,
         "n_text_neighbors": int(n_neighbors),
         "n_queries": metrics["n_queries"],
     }

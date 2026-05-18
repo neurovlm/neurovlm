@@ -34,17 +34,23 @@ import torch.nn.functional as F
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from neurovlm.gnn.ale_cnn import ALE3DCNNEncoder, ALEFlatMLPEncoder, count_parameters
+from neurovlm.gnn.ale_cnn import ALE3DCNNEncoder, ALEFlatMLPEncoder, ALEResNet3DEncoder, count_parameters
 from neurovlm.gnn.ale_dataset import ALEPreprocessConfig, ALEVolumeDataset, build_or_load_ale_cache
 from neurovlm.gnn.model import TextProjHead
 from neurovlm.loss import InfoNCELoss
-from neurovlm.metrics import bidirectional_retrieval_metrics, recall_curve, retrieval_ranks
+from neurovlm.metrics import (
+    bidirectional_retrieval_metrics,
+    normalized_k_values,
+    normalized_recall_curve_auc,
+    recall_curve,
+    retrieval_ranks,
+)
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train ALE 3D CNN on NeuroVLM PubMed pairs.")
     p.add_argument("--mode", choices=["difumo_compatible", "atlas_free"], default="atlas_free")
-    p.add_argument("--model", choices=["ale_3dcnn", "ale_flat_mlp"], default="ale_3dcnn")
+    p.add_argument("--model", choices=["ale_3dcnn", "ale_3dcnn_resnet", "ale_flat_mlp"], default="ale_3dcnn")
     p.add_argument("--epochs", type=int, default=50)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--batch-size-auto", action="store_true")
@@ -68,10 +74,14 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--base-channels", type=int, default=16)
     p.add_argument("--num-blocks", type=int, default=3)
+    p.add_argument("--blocks-per-stage", type=int, default=2)
     p.add_argument("--out-dim", type=int, default=384)
     p.add_argument("--dropout", type=float, default=0.1)
     p.add_argument("--norm", choices=["group", "batch", "instance", "none"], default="group")
     p.add_argument("--pooling", choices=["max", "stride"], default="max")
+    p.add_argument("--use-dilation", action="store_true")
+    p.add_argument("--multi-scale", action="store_true")
+    p.add_argument("--global-context", choices=["none", "se", "attention"], default="none")
     p.add_argument("--mlp-hidden-dim", type=int, default=1024)
 
     p.add_argument("--kernel-fwhm-mm", type=float, default=9.0)
@@ -90,7 +100,9 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--max-papers", type=int, default=None, help="Smoke-test subset size.")
 
-    p.add_argument("--text-proj-init", choices=["random", "pretrained_infonce"], default="random")
+    p.add_argument("--encoder-init", choices=["random", "autoencoder_pretrained"], default="random")
+    p.add_argument("--autoencoder-checkpoint", default=None)
+    p.add_argument("--text-proj-init", choices=["random", "pretrained_infonce"], default="pretrained_infonce")
     p.add_argument("--freeze-text-proj", action="store_true")
     p.add_argument("--device", choices=["auto", "cpu", "cuda", "mps"], default="auto")
     p.add_argument("--amp", dest="amp", action="store_true", default=True)
@@ -237,6 +249,25 @@ def build_cache_only(args: argparse.Namespace) -> None:
     print(f"  metadata  : {run_dir / 'cache_metadata.json'}")
 
 
+def _load_encoder_from_autoencoder_checkpoint(brain_encoder: nn.Module, checkpoint_path: str | None) -> None:
+    if not checkpoint_path:
+        raise ValueError("--encoder-init autoencoder_pretrained requires --autoencoder-checkpoint")
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    state = (
+        payload.get("encoder")
+        or payload.get("brain_encoder")
+        or payload.get("model", {})
+    )
+    if state and any(k.startswith("encoder.") for k in state):
+        state = {k.removeprefix("encoder."): v for k, v in state.items() if k.startswith("encoder.")}
+    if not state:
+        raise KeyError(
+            "Autoencoder checkpoint must contain 'encoder', 'brain_encoder', "
+            "or a 'model' state_dict with encoder.* keys"
+        )
+    brain_encoder.load_state_dict(state, strict=True)
+
+
 def build_model(args: argparse.Namespace, input_shape: tuple[int, ...]):
     print("Building ALE model ...", flush=True)
     if args.batch_size_auto:
@@ -252,12 +283,28 @@ def build_model(args: argparse.Namespace, input_shape: tuple[int, ...]):
             norm=args.norm,
             pooling=args.pooling,
         )
+    elif args.model == "ale_3dcnn_resnet":
+        brain_encoder = ALEResNet3DEncoder(
+            base_channels=args.base_channels,
+            num_stages=args.num_blocks,
+            blocks_per_stage=args.blocks_per_stage,
+            out_dim=args.out_dim,
+            dropout=args.dropout,
+            norm=args.norm,
+            use_dilation=args.use_dilation,
+            multi_scale=args.multi_scale,
+            global_context=args.global_context,
+        )
     else:
         brain_encoder = ALEFlatMLPEncoder(
             hidden_dim=args.mlp_hidden_dim,
             out_dim=args.out_dim,
             dropout=args.dropout,
         )
+    if args.encoder_init == "autoencoder_pretrained":
+        if args.model == "ale_flat_mlp":
+            raise ValueError("autoencoder_pretrained is only valid for CNN models")
+        _load_encoder_from_autoencoder_checkpoint(brain_encoder, args.autoencoder_checkpoint)
 
     if args.text_proj_init == "pretrained_infonce":
         if args.out_dim != 384:
@@ -518,8 +565,9 @@ class ALETrainer:
         # raw SPECTER vectors.
         brain, text = self.collect_embeddings(ds)
         metrics = bidirectional_retrieval_metrics(text, brain)
-        metrics["paper_recall_curve_auc"] = metrics["mean_auc"]
-        metrics["full_recall_curve_auc_k1_to_N"] = metrics["mean_auc"]
+        metrics["paper_recall_curve_auc"] = metrics["mean_normalized_k_recall_curve_auc"]
+        metrics["normalized_k_recall_curve_auc"] = metrics["mean_normalized_k_recall_curve_auc"]
+        metrics["full_recall_curve_auc_k1_to_N"] = metrics["paper_recall_curve_auc"]
         metrics["random_recall@10"] = metrics["mean_random_recall@10"]
         loss = self.loss_fn(brain, text)
         metrics["loss"] = float(loss.item())
@@ -556,13 +604,15 @@ class ALETrainer:
 def recall_curve_frame(text_emb: torch.Tensor, brain_emb: torch.Tensor) -> pd.DataFrame:
     t2i, i2t = recall_curve(text_emb, brain_emb)
     n = len(t2i)
+    normalized_k = normalized_k_values(n).cpu().numpy()
     return pd.DataFrame(
         {
             "k": np.arange(1, n + 1),
+            "normalized_k": normalized_k,
             "t2i_recall": t2i.cpu().numpy(),
             "i2t_recall": i2t.cpu().numpy(),
             "mean_recall": ((t2i + i2t) / 2).cpu().numpy(),
-            "random_recall": np.arange(1, n + 1) / float(n),
+            "random_recall": normalized_k,
         }
     )
 
@@ -572,13 +622,18 @@ def recall_curve_payload(text_emb: torch.Tensor, brain_emb: torch.Tensor) -> dic
     """Return paper-style full recall curves as JSON-serializable arrays."""
     t2i, i2t = recall_curve(text_emb, brain_emb)
     n = len(t2i)
+    mean_curve = (t2i + i2t) / 2
+    normalized_k = normalized_k_values(n)
+    auc = normalized_recall_curve_auc(mean_curve)
     return {
         "k_values": list(range(1, n + 1)),
+        "normalized_k_values": normalized_k.cpu().tolist(),
         "text_to_brain_recall_curve": t2i.cpu().tolist(),
         "brain_to_text_recall_curve": i2t.cpu().tolist(),
-        "mean_recall_curve": ((t2i + i2t) / 2).cpu().tolist(),
-        "random_recall_curve": (torch.arange(1, n + 1).float() / float(n)).tolist(),
-        "paper_recall_curve_auc": float(((t2i + i2t) / 2).mean().item()),
+        "mean_recall_curve": mean_curve.cpu().tolist(),
+        "random_recall_curve": normalized_k.cpu().tolist(),
+        "paper_recall_curve_auc": auc,
+        "normalized_k_recall_curve_auc": auc,
     }
 
 
@@ -638,6 +693,18 @@ def save_plots(run_dir: Path, history: dict, curve_df: pd.DataFrame, diag_df: Op
     ax.legend()
     fig.tight_layout()
     fig.savefig(run_dir / "recall_curve.png", dpi=160)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    x = curve_df["normalized_k"] if "normalized_k" in curve_df else curve_df["k"] / float(curve_df["k"].max())
+    ax.plot(x, curve_df["mean_recall"], label="model")
+    ax.plot(x, curve_df["random_recall"], linestyle="--", label="random")
+    ax.set_xlabel("normalized k (k / n)")
+    ax.set_ylabel("recall")
+    ax.set_title("Paper-Style Recall Curve")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(run_dir / "recall_curve_normalized_k.png", dpi=160)
     plt.close(fig)
 
     if diag_df is None:
@@ -731,6 +798,12 @@ def append_comparison_row(args, payload, metrics, trainer, input_shape) -> dict:
         "atlas_free": "yes" if args.mode == "atlas_free" else "no",
         "input_shape": str(tuple([1, *input_shape])),
         "number_of_parameters": count_parameters(trainer.brain_encoder),
+        "encoder_init": args.encoder_init,
+        "autoencoder_checkpoint": args.autoencoder_checkpoint or "",
+        "blocks_per_stage": args.blocks_per_stage,
+        "use_dilation": args.use_dilation,
+        "multi_scale": args.multi_scale,
+        "global_context": args.global_context,
         "training_time_per_epoch": float(np.mean(trainer.history["epoch_time_sec"])),
         "peak_vram": float(max(trainer.history["peak_vram_mb"] or [0.0])),
         "paper_recall_curve_auc": metrics["paper_recall_curve_auc"],
@@ -824,10 +897,16 @@ def main() -> None:
                 "model": args.model,
                 "base_channels": args.base_channels,
                 "num_blocks": args.num_blocks,
+                "blocks_per_stage": args.blocks_per_stage,
                 "out_dim": args.out_dim,
                 "dropout": args.dropout,
                 "norm": args.norm,
                 "pooling": args.pooling,
+                "use_dilation": args.use_dilation,
+                "multi_scale": args.multi_scale,
+                "global_context": args.global_context,
+                "encoder_init": args.encoder_init,
+                "autoencoder_checkpoint": args.autoencoder_checkpoint,
                 "input_shape": ds.input_shape,
                 "parameters": count_parameters(brain_encoder),
             },

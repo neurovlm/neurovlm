@@ -1,7 +1,7 @@
 train_jsonl: atlas_free_multipositive/cache/unified_jsonl/splits/train.jsonl
 text_embedding_cache: atlas_free_multipositive/cache/text_embeddings/specter_text_cache.pt
 autoencoder_checkpoint: atlas_free_multipositive/outputs/runs/sparse_autoencoder/checkpoints/best_generation_top5_dice.pt
-text_projection_checkpoint: atlas_free_multipositive/outputs/runs/text_to_brain_random/checkpoints/best_generation_top5_dice.pt
+text_projection_checkpoint: atlas_free_multipositive/outputs/runs/text_to_brain_pretrained_infonce/checkpoints/best_generation_top5_dice.pt
 checkpoint_dir: atlas_free_multipositive/outputs/runs/joint_generation_contrastive/checkpoints
 
 device: auto
@@ -14,7 +14,7 @@ lr: 0.0001
 weight_decay: 0.0001
 positive_texts_per_map: 2
 temperature: 0.07
-text_projection_init: random
+text_projection_init: pretrained_text_infonce
 freeze_encoder: false
 freeze_decoder: true
 max_train_batches:
@@ -23,9 +23,13 @@ model:
   latent_dim: 384
   base_channels: 48
   num_blocks: 4
+  encoder_arch: resnet
+  blocks_per_stage: 2
+  use_dilation: false
+  multi_scale: true
+  global_context: attention
 
 loss:
   lambda_contrastive: 1.0
   lambda_generation: 0.25
   lambda_latent: 0.25
-

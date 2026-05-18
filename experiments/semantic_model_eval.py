@@ -44,6 +44,7 @@ from neurovlm.semantic_evaluation import (
     mesh_node_type_lookup_from_dataframe,
     preprocess_network_maps,
 )
+from neurovlm.metrics import normalized_k_values
 
 
 def _jsonable(value: Any) -> Any:
@@ -139,20 +140,36 @@ def run_embedding_semantic_evaluations(
     sim = brain @ text.T
     exact_b2p = exact_pmid_retrieval_metrics(sim)
     exact_p2b = exact_pmid_retrieval_metrics(sim.T)
+    n_eval = int(len(pmids))
+    k_values = np.arange(1, n_eval + 1)
+    normalized_k = normalized_k_values(n_eval).cpu().numpy()
+    brain_to_paper_curve = exact_recall_curve(sim).cpu().numpy()
+    paper_to_brain_curve = exact_recall_curve(sim.T).cpu().numpy()
+    mean_curve = (brain_to_paper_curve + paper_to_brain_curve) / 2.0
     exact_payload = {
-        "n_test": int(len(pmids)),
+        "n_test": n_eval,
+        "k_values": k_values.tolist(),
+        "normalized_k_values": normalized_k.tolist(),
+        "brain_to_paper_recall_curve": brain_to_paper_curve.tolist(),
+        "paper_to_brain_recall_curve": paper_to_brain_curve.tolist(),
+        "mean_recall_curve": mean_curve.tolist(),
+        "random_recall_curve": normalized_k.tolist(),
+        "paper_recall_curve_auc": float((exact_b2p["paper_recall_curve_auc"] + exact_p2b["paper_recall_curve_auc"]) / 2.0),
+        "normalized_k_recall_curve_auc": float((exact_b2p["paper_recall_curve_auc"] + exact_p2b["paper_recall_curve_auc"]) / 2.0),
         "brain_to_paper": exact_b2p,
         "paper_to_brain": exact_p2b,
-        "interpretation": "exact_pmid_retrieval is a strict diagnostic, not the main success metric.",
+        "interpretation": "exact_pmid_retrieval is a strict diagnostic. paper_recall_curve_auc is area under recall(k) vs normalized k = k/n, not fixed recall@K.",
     }
     with (out_path / "exact_pmid_retrieval_metrics.json").open("w") as f:
         json.dump(_jsonable(exact_payload), f, indent=2)
     pd.DataFrame(
         {
-            "k": np.arange(1, len(pmids) + 1),
-            "brain_to_paper_recall_curve": exact_recall_curve(sim).cpu().numpy(),
-            "paper_to_brain_recall_curve": exact_recall_curve(sim.T).cpu().numpy(),
-            "random_recall_curve": np.arange(1, len(pmids) + 1) / float(len(pmids)),
+            "k": k_values,
+            "normalized_k": normalized_k,
+            "brain_to_paper_recall_curve": brain_to_paper_curve,
+            "paper_to_brain_recall_curve": paper_to_brain_curve,
+            "mean_recall_curve": mean_curve,
+            "random_recall_curve": normalized_k,
         }
     ).to_csv(out_path / "exact_pmid_retrieval_curves.csv", index=False)
 

@@ -141,6 +141,11 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         latent_dim=int(model_cfg.get("latent_dim", 384)),
         base_channels=int(model_cfg.get("base_channels", 8)),
         num_blocks=int(model_cfg.get("num_blocks", 2)),
+        encoder_arch=str(model_cfg.get("encoder_arch", "plain")),
+        blocks_per_stage=int(model_cfg.get("blocks_per_stage", 2)),
+        use_dilation=bool(model_cfg.get("use_dilation", False)),
+        multi_scale=bool(model_cfg.get("multi_scale", False)),
+        global_context=str(model_cfg.get("global_context", "none")),
     ).to(device)
     load_autoencoder_checkpoint(autoencoder, cfg["autoencoder_checkpoint"])
     autoencoder.eval()
