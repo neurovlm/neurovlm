@@ -2,6 +2,9 @@
 *.pt
 *.parquet
 *.pkl.gz
-*.pt
-*.parquet
-*.pkl.gz
+*.csv
+*.nii.gz
+*.json
+*.jsonl
+*.xml
+*.pyc
