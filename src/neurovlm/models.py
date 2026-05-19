@@ -389,7 +389,20 @@ def load_model(name: str):
             return NeuroAutoEncoder.from_pretrained()
         case "specter":
             return Specter()
+        case "neuro_qformer":
+            from neurovlm.retrieval_resources import _load_neuro_qformer
+            return _load_neuro_qformer()
+        case "neuro_adapter":
+            from neurovlm.retrieval_resources import _load_neuro_adapter
+            return _load_neuro_adapter()
         case _:
-            valid_names = ["proj_head_text_infonce", "proj_head_image_infonce", "proj_head_text_mse",
-                           "autoencoder", "specter"]
+            valid_names = [
+                "proj_head_text_infonce",
+                "proj_head_image_infonce",
+                "proj_head_text_mse",
+                "autoencoder",
+                "specter",
+                "neuro_qformer",
+                "neuro_adapter",
+            ]
             raise ValueError(f"{name} not in {valid_names}")
