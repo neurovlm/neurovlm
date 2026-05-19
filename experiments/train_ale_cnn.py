@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size-auto", action="store_true")
     p.add_argument(
         "--batch-size-candidates",
-        default="4096,3072,2048,1536,1024,768,512,384,256,192,128,96,64,32,16,8,4",
+        default="2048,1536,1024,768,512,384,256,192,128,96,64,32,16,8,4",
         help=(
             "Comma-separated microbatch sizes to try when --batch-size-auto is set. "
             "The trainer starts from the largest value and falls back only after "
