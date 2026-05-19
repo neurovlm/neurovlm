@@ -17,7 +17,12 @@ from neurovlm.metrics import (
     bits_per_pixel,
     compute_ae_performance,
 )
-from neurovlm.semantic_evaluation import multi_positive_ranking_metrics
+from neurovlm.semantic_evaluation import (
+    align_network_term_ground_truth,
+    build_network_label_corpus,
+    build_network_term_corpus_from_label_table,
+    multi_positive_ranking_metrics,
+)
 
 
 class TestDice:
@@ -169,6 +174,65 @@ class TestRecallCurve:
         assert metrics["recall@1"] == pytest.approx(0.5)
         assert metrics["paper_recall_curve_auc"] == pytest.approx(0.75)
         assert metrics["normalized_k_recall_curve_auc"] == pytest.approx(0.75)
+
+    def test_network_label_corpus_makes_canonical_labels_explicit_networks(self):
+        import pandas as pd
+
+        labels = pd.DataFrame(
+            [
+                {
+                    "network_key": "attention",
+                    "network_name": "Attention",
+                    "short_definition": "Dorsal attention network.",
+                }
+            ]
+        )
+
+        corpus = build_network_label_corpus(labels)
+
+        assert corpus.loc[0, "text"].startswith("Attention network [SEP]")
+
+    def test_network_term_corpus_makes_network_name_terms_explicit_networks(self):
+        import pandas as pd
+
+        labels = pd.DataFrame(
+            [
+                {
+                    "network_name": "Attention",
+                    "cognitive_terms": "Selective attention",
+                    "region_terms": "Frontal eye fields",
+                }
+            ]
+        )
+
+        corpus = build_network_term_corpus_from_label_table(labels)
+        text_by_term = dict(zip(corpus["term"], corpus["text"]))
+
+        assert text_by_term["Attention network"].startswith("Attention network")
+        assert text_by_term["Selective attention"].startswith("Selective attention")
+
+    def test_network_term_truth_matches_explicit_network_name_terms(self):
+        import pandas as pd
+
+        labels = pd.DataFrame(
+            [
+                {
+                    "raw_network_label": "DorsAttn",
+                    "network_key": "attention",
+                    "network_name": "Attention",
+                    "cognitive_terms": "",
+                    "region_terms": "",
+                }
+            ]
+        )
+        term_corpus = pd.DataFrame(
+            [{"term": "Attention network", "normalized_term": "attention network"}]
+        )
+        records = [{"network_label": "DorsAttn", "atlas": "test"}]
+
+        truth = align_network_term_ground_truth(records, labels, term_corpus)
+
+        assert truth.loc[0, "true_network_terms"] == ["Attention network"]
 
 
 class TestBernoulliBCE:

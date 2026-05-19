@@ -1079,6 +1079,7 @@ def main() -> None:
     if getattr(args, "semantic_eval", False):
         try:
             from experiments.semantic_model_eval import (
+                _add_macro_retrieval_normalized_k_auc,
                 run_ale_network_labeling,
                 run_embedding_semantic_evaluations,
             )
@@ -1125,6 +1126,7 @@ def main() -> None:
                 }
             )
             semantic_summary.update({key: value for key, value in network_metrics.items() if key.startswith("network_term_")})
+            _add_macro_retrieval_normalized_k_auc(semantic_summary)
             with (run_dir / "main_comparison_summary_row.json").open("w") as f:
                 json.dump(semantic_summary, f, indent=2)
             pd.DataFrame([semantic_summary]).to_csv(run_dir / "main_comparison_summary_row.csv", index=False)

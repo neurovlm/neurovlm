@@ -89,6 +89,17 @@ def normalize_network_term(term: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def network_label_text(term: Any) -> str:
+    """Phrase a canonical network-name term as an explicit network label."""
+
+    text = str(term).strip()
+    if not text:
+        return text
+    if "network" in normalize_network_term(text).split():
+        return text
+    return f"{text} network"
+
+
 def split_network_term_cell(value: Any) -> list[str]:
     """Split semicolon-separated network term cells while preserving display text."""
 
@@ -415,7 +426,7 @@ def load_network_label_table(path: str | Path | None = None) -> pd.DataFrame:
 
 
 def build_network_label_corpus(labels_df: pd.DataFrame) -> pd.DataFrame:
-    """Build candidate label texts as ``term [SEP] definition``."""
+    """Build candidate label texts as explicit ``network label [SEP] definition``."""
 
     if {"network_key", "network_name"}.issubset(labels_df.columns):
         rows = []
@@ -426,12 +437,14 @@ def build_network_label_corpus(labels_df: pd.DataFrame) -> pd.DataFrame:
             first = grp.iloc[0]
             name = str(first.get("network_name", key))
             definition = str(first.get("long_definition") or first.get("short_definition") or DEFAULT_NETWORK_LABEL_DEFINITIONS.get(key, (name, ""))[1])
-            rows.append({"network_key": key, "network_name": name, "definition": definition, "text": f"{name} [SEP] {definition}"})
+            text_name = network_label_text(name)
+            rows.append({"network_key": key, "network_name": name, "definition": definition, "text": f"{text_name} [SEP] {definition}"})
         return pd.DataFrame(rows)
 
     rows = []
     for key, (name, definition) in DEFAULT_NETWORK_LABEL_DEFINITIONS.items():
-        rows.append({"network_key": key, "network_name": name, "definition": definition, "text": f"{name} [SEP] {definition}"})
+        text_name = network_label_text(name)
+        rows.append({"network_key": key, "network_name": name, "definition": definition, "text": f"{text_name} [SEP] {definition}"})
     return pd.DataFrame(rows)
 
 
@@ -480,9 +493,18 @@ def load_network_term_corpus(path: str | Path | None = None) -> pd.DataFrame | N
     if "definition" not in corpus.columns:
         corpus["definition"] = ""
     corpus["definition"] = corpus["definition"].fillna("").astype(str)
+    source_columns = (
+        corpus["source_columns"].fillna("").astype(str)
+        if "source_columns" in corpus.columns
+        else pd.Series([""] * len(corpus), index=corpus.index)
+    )
+    display_terms = [
+        network_label_text(term) if "network_name" in source else str(term)
+        for term, source in zip(corpus["term"].astype(str), source_columns)
+    ]
     corpus["text"] = [
-        f"{term} [SEP] {definition}" if definition else str(term)
-        for term, definition in zip(corpus["term"].astype(str), corpus["definition"].astype(str))
+        f"{term_text} [SEP] {definition}" if definition else term_text
+        for term_text, definition in zip(display_terms, corpus["definition"].astype(str))
     ]
     corpus = corpus.drop_duplicates("normalized_term", keep="first").reset_index(drop=True)
     return corpus
@@ -501,22 +523,25 @@ def build_network_term_corpus_from_label_table(
             if column not in labels_df.columns:
                 continue
             for term in split_network_term_cell(row.get(column)):
-                norm = normalize_network_term(term)
+                display_term = network_label_text(term) if column == "network_name" else term
+                norm = normalize_network_term(display_term)
                 if not norm:
                     continue
                 entry = rows_by_norm.setdefault(
                     norm,
                     {
-                        "term": term,
+                        "term": display_term,
                         "normalized_term": norm,
                         "source_columns": set(),
                         "definition": "",
                     },
                 )
                 entry["source_columns"].add(column)
+                if column == "network_name" and not entry["definition"]:
+                    entry["definition"] = str(row.get("long_definition") or row.get("short_definition") or "")
     rows = []
     for norm, entry in sorted(rows_by_norm.items(), key=lambda item: item[1]["term"].lower()):
-        definition = definitions.get(entry["term"], "") or definitions.get(norm, "")
+        definition = definitions.get(entry["term"], "") or definitions.get(norm, "") or entry["definition"]
         rows.append(
             {
                 "term": entry["term"],
@@ -596,10 +621,15 @@ def align_network_term_ground_truth(
         seen: set[str] = set()
         for column in NETWORK_TERM_COLUMNS:
             for term in split_network_term_cell(hit.get(column)):
-                norm = normalize_network_term(term)
-                if norm and norm in corpus_norms and norm not in seen:
-                    terms.append(term)
-                    seen.add(norm)
+                candidate_terms = [term]
+                if column == "network_name":
+                    candidate_terms.append(network_label_text(term))
+                for candidate_term in candidate_terms:
+                    norm = normalize_network_term(candidate_term)
+                    if norm and norm in corpus_norms and norm not in seen:
+                        terms.append(candidate_term)
+                        seen.add(norm)
+                        break
         base["true_network_terms"] = terms
         rows.append(base)
     return pd.DataFrame(rows)
