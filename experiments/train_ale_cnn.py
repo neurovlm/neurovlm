@@ -157,13 +157,14 @@ def cosine_warmup(step: int, warmup_steps: int, total_steps: int) -> float:
 
 
 def make_loader(ds, args: argparse.Namespace, shuffle: bool) -> DataLoader:
+    num_workers = int(args.num_workers)
     return DataLoader(
         ds,
         batch_size=args.batch_size,
         shuffle=shuffle,
-        num_workers=args.num_workers,
+        num_workers=num_workers,
         pin_memory=args.pin_memory,
-        persistent_workers=args.num_workers > 0,
+        persistent_workers=num_workers > 0,
     )
 
 
