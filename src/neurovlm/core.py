@@ -983,8 +983,9 @@ class NeuroVLM:
             text_emb = self._encode_text(X)
             if project:
                 self._ensure_projection_heads()
+                text_emb = _l2_normalize(text_emb.to(self.device))
                 with torch.no_grad():
-                    text_emb = self._proj_head_text_infonce(text_emb.to(self.device))
+                    text_emb = self._proj_head_text_infonce(text_emb)
                 return _l2_normalize(text_emb), "shared"
             return _l2_normalize(text_emb.to(self.device)), "raw_text"
 
@@ -1007,8 +1008,9 @@ class NeuroVLM:
         if dim == TEXT_EMBED_DIM:
             if project:
                 self._ensure_projection_heads()
+                tensor = _l2_normalize(tensor.to(self.device))
                 with torch.no_grad():
-                    tensor = self._proj_head_text_infonce(tensor.to(self.device))
+                    tensor = self._proj_head_text_infonce(tensor)
                 return _l2_normalize(tensor), "shared"
             return _l2_normalize(tensor.to(self.device)), "raw_text"
 
