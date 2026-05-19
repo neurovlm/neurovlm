@@ -24,6 +24,7 @@ from huggingface_hub import hf_hub_download
 
 from neurovlm.models import Specter, ProjHead, NeuroAutoEncoder
 from neurovlm.io import load_model
+from neurovlm.qformer import NeuroQFormer
 
 __all__ = [
     "_load_pubmed_dataframe",
@@ -50,6 +51,8 @@ __all__ = [
     "_proj_head_image_infonce",
     "_proj_head_text_mse",
     "_proj_head_text_infonce",
+    "_load_neuro_qformer",
+    "_load_neuro_adapter",
     "_load_images_neurovault_dataframe",
     "_load_publications_neurovault_dataframe",
     "_load_latent_neurovault_images",
@@ -57,6 +60,10 @@ __all__ = [
     "_load_neurovault_images",
     "_load_pubmed_images",
 ]
+
+NEURO_QWEN_REPO_ID = "neurovlm/NeuroQwen3-0.6B"
+NEURO_QFORMER_REPO_ID = "neurovlm/NeuroQformer"
+NEURO_ADAPTER_REPO_ID = "neurovlm/NeuroAdapter"
 
 
 def _download_from_hf(repo_id: str, filename: str, repo_type: str = "dataset") -> str:
@@ -102,7 +109,6 @@ def _download_from_hf(repo_id: str, filename: str, repo_type: str = "dataset") -
     )
 
 
-@lru_cache(maxsize=1)
 def _load_pubmed_dataframe() -> pd.DataFrame:
     """Load the publications DataFrame from HuggingFace."""
     parquet_path = _download_from_hf(
@@ -116,7 +122,6 @@ def _load_pubmed_dataframe() -> pd.DataFrame:
         return pd.read_parquet(parquet_path, engine="fastparquet")
 
 
-@lru_cache(maxsize=1)
 def _load_pubmed_coordinates() -> pd.DataFrame:
     """Load the x, y, z coordinates DataFrame from HuggingFace."""
     parquet_path = _download_from_hf(
@@ -130,7 +135,6 @@ def _load_pubmed_coordinates() -> pd.DataFrame:
         return pd.read_parquet(parquet_path, engine="fastparquet")
 
 
-@lru_cache(maxsize=1)
 def _load_neuro_wiki() -> pd.DataFrame:
     """Load the NeuroWiki DataFrame from HuggingFace."""
     parquet_path = _download_from_hf(
@@ -143,7 +147,6 @@ def _load_neuro_wiki() -> pd.DataFrame:
         print(f"pyarrow failed: {exc}, trying fastparquet...")
         return pd.read_parquet(parquet_path, engine="fastparquet")
 
-@lru_cache(maxsize=1)
 def _load_neuro_wiki_graph() -> pd.DataFrame:
     """Load the NeuroWiki graph DataFrame from HuggingFace."""
     parquet_path = _download_from_hf(
@@ -157,7 +160,6 @@ def _load_neuro_wiki_graph() -> pd.DataFrame:
         return pd.read_parquet(parquet_path, engine="fastparquet")
 
 
-@lru_cache(maxsize=1)
 def _load_latent_neuro() -> Tuple[torch.Tensor, np.ndarray]:
     """Load the Neuro brain map embedding from HuggingFace."""
     latent_path = _download_from_hf(
@@ -175,7 +177,6 @@ def _load_latent_neuro() -> Tuple[torch.Tensor, np.ndarray]:
     return latent, latent_pmid
 
 
-@lru_cache(maxsize=1)
 def _load_cogatlas_dataset() -> pd.DataFrame:
     """Load the CogAtlas DataFrame from HuggingFace."""
     parquet_path = _download_from_hf(
@@ -365,13 +366,11 @@ def _load_threshold_analysis_text_cache():
     return cache
 
 
-@lru_cache(maxsize=1)
 def _load_specter() -> Specter:
     """Construct and cache a Specter encoder."""
     return Specter()
 
 
-@lru_cache(maxsize=1)
 def _load_latent_text() -> Tuple[torch.Tensor, np.ndarray]:
     """Load unit-normalized latent text embeddings from HuggingFace."""
     latent_path = _download_from_hf(
@@ -389,7 +388,6 @@ def _load_latent_text() -> Tuple[torch.Tensor, np.ndarray]:
     return latent, latent_pmid
 
 
-@lru_cache(maxsize=1)
 def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
     """Load unit-normalized latent wiki embeddings from HuggingFace."""
     latent_path = _download_from_hf(
@@ -407,7 +405,6 @@ def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
     return latent, latent_id
 
 
-@lru_cache(maxsize=1)
 def _load_latent_cogatlas() -> Tuple[torch.Tensor, np.ndarray]:
     """Load unit-normalized latent cognitive atlas embeddings from HuggingFace."""
     latent_path = _download_from_hf(
@@ -425,7 +422,6 @@ def _load_latent_cogatlas() -> Tuple[torch.Tensor, np.ndarray]:
     return latent, latent_terms
 
 
-@lru_cache(maxsize=1)
 def _load_latent_cogatlas_disorder() -> Tuple[torch.Tensor, np.ndarray]:
     """Load unit-normalized latent cognitive atlas disorder embeddings from HuggingFace."""
     latent_path = _download_from_hf(
@@ -443,7 +439,6 @@ def _load_latent_cogatlas_disorder() -> Tuple[torch.Tensor, np.ndarray]:
     return latent, latent_terms
 
 
-@lru_cache(maxsize=1)
 def _load_latent_cogatlas_task() -> Tuple[torch.Tensor, np.ndarray]:
     """Load unit-normalized latent cognitive atlas task embeddings from HuggingFace."""
     latent_path = _download_from_hf(
@@ -461,7 +456,6 @@ def _load_latent_cogatlas_task() -> Tuple[torch.Tensor, np.ndarray]:
     return latent, latent_terms
 
 
-@lru_cache(maxsize=1)
 def _load_images_neurovault_dataframe() -> pd.DataFrame:
     """Load NeuroVault image metadata from HuggingFace."""
     parquet_path = _download_from_hf(
@@ -475,7 +469,6 @@ def _load_images_neurovault_dataframe() -> pd.DataFrame:
         return pd.read_parquet(parquet_path, engine="fastparquet")
 
 
-@lru_cache(maxsize=1)
 def _load_publications_neurovault_dataframe() -> pd.DataFrame:
     """Load NeuroVault publication metadata from HuggingFace."""
     parquet_path = _download_from_hf(
@@ -489,7 +482,6 @@ def _load_publications_neurovault_dataframe() -> pd.DataFrame:
         return pd.read_parquet(parquet_path, engine="fastparquet")
 
 
-@lru_cache(maxsize=1)
 def _load_latent_neurovault_images() -> torch.Tensor:
     """Load NeuroVault image latent tensor from HuggingFace on CPU."""
     latent_path = _download_from_hf(
@@ -506,7 +498,6 @@ def _load_latent_neurovault_images() -> torch.Tensor:
     return latent.cpu()
 
 
-@lru_cache(maxsize=1)
 def _load_latent_neurovault_text() -> torch.Tensor:
     """Load NeuroVault text latent tensor from HuggingFace on CPU."""
     latent_path = _download_from_hf(
@@ -523,7 +514,6 @@ def _load_latent_neurovault_text() -> torch.Tensor:
     return latent.cpu()
 
 
-@lru_cache(maxsize=1)
 def _load_neurovault_images() -> torch.Tensor:
     """Load NeuroVault image tensor from HuggingFace on CPU."""
     image_path = _download_from_hf(
@@ -540,7 +530,6 @@ def _load_neurovault_images() -> torch.Tensor:
     return images.cpu()
 
 
-@lru_cache(maxsize=1)
 def _load_pubmed_images() -> torch.Tensor:
     """Load PubMed image tensor from HuggingFace on CPU."""
     image_path = _download_from_hf(
@@ -554,7 +543,6 @@ def _load_pubmed_images() -> torch.Tensor:
     ).values()
     return images, pmids
 
-@lru_cache(maxsize=1)
 def _load_latent_networks_canonical_text() -> dict:
     """Load latent network atlases."""
     latent_path = _download_from_hf(
@@ -569,7 +557,6 @@ def _load_latent_networks_canonical_text() -> dict:
 
     return latents
 
-@lru_cache(maxsize=1)
 def _load_latent_networks_neuro() -> dict:
     """Load latent network atlases."""
     latent_path = _download_from_hf(
@@ -585,7 +572,6 @@ def _load_latent_networks_neuro() -> dict:
     return latents
 
 
-@lru_cache(maxsize=1)
 def _load_autoencoder() -> torch.nn.Module:
     """Load and return the text encoder model from HuggingFace."""
     model_path = _download_from_hf(
@@ -597,7 +583,6 @@ def _load_autoencoder() -> torch.nn.Module:
     return autoencoder
 
 
-@lru_cache(maxsize=1)
 def _load_masker() -> nib.Nifti1Image:
     """Load mask from HuggingFace."""
     mask_path = _download_from_hf(
@@ -611,7 +596,6 @@ def _load_masker() -> nib.Nifti1Image:
     return masker
 
 
-@lru_cache(maxsize=1)
 def _load_networks() -> dict:
     """Load network atlases from HuggingFace."""
     networks_path = _download_from_hf(
@@ -624,7 +608,6 @@ def _load_networks() -> dict:
     return networks
 
 
-@lru_cache(maxsize=1)
 def _load_networks_labels() -> dict:
     """Load network atlases from HuggingFace."""
     networks_path = _download_from_hf(
@@ -634,7 +617,6 @@ def _load_networks_labels() -> dict:
     return pd.read_parquet(networks_path)
 
 
-@lru_cache(maxsize=1)
 def _load_networks_canonical() -> pd.DataFrame:
     """Load names and descriptions of common networks."""
     networks_path = _download_from_hf(
@@ -644,7 +626,6 @@ def _load_networks_canonical() -> pd.DataFrame:
     return pd.read_parquet(networks_path)
 
 
-@lru_cache(maxsize=1)
 def _proj_head_image_infonce() -> torch.nn.Module:
     """Load and return the image projection head from HuggingFace."""
     model_path = _download_from_hf(
@@ -656,7 +637,6 @@ def _proj_head_image_infonce() -> torch.nn.Module:
     return proj_head
 
 
-@lru_cache(maxsize=1)
 def _proj_head_text_mse() -> torch.nn.Module:
     """Load and return the MSE projection head from HuggingFace."""
     model_path = _download_from_hf(
@@ -668,7 +648,6 @@ def _proj_head_text_mse() -> torch.nn.Module:
     return proj_head
 
 
-@lru_cache(maxsize=1)
 def _proj_head_text_infonce() -> torch.nn.Module:
     """Load and return the text projection head from HuggingFace."""
     model_path = _download_from_hf(
@@ -680,7 +659,42 @@ def _proj_head_text_infonce() -> torch.nn.Module:
     return proj_head
 
 
-@lru_cache(maxsize=1)
+def _load_neuro_qformer(
+    *,
+    device: str | torch.device = "cpu",
+    projection_temp: float | None = None,
+    use_canonical_projection: bool | None = None,
+) -> NeuroQFormer:
+    """Load the packaged NeuroQFormer from HuggingFace.
+
+    The package contains the QFormer, frozen image projection head, and frozen
+    canonical projection banks in a single ``NeuroQformer.pt`` state payload.
+    """
+    model_path = _download_from_hf(
+        NEURO_QFORMER_REPO_ID,
+        "NeuroQformer.pt",
+        repo_type="model",
+    )
+    payload = torch.load(model_path, weights_only=False, map_location="cpu")
+    model = NeuroQFormer.from_state_dict_payload(payload, map_location=device).eval()
+    if projection_temp is not None:
+        model.projection_temp = projection_temp
+    if use_canonical_projection is not None:
+        model.use_canonical_projection = use_canonical_projection
+    return model
+
+
+def _load_neuro_adapter(*, device: str | torch.device = "cpu") -> torch.nn.Module:
+    """Load the packaged text-to-anatomical-map adapter from HuggingFace."""
+    model_path = _download_from_hf(
+        NEURO_ADAPTER_REPO_ID,
+        "NeuroAdapter.pt",
+        repo_type="model",
+    )
+    adapter = torch.load(model_path, weights_only=False, map_location=device)
+    return adapter.eval() if hasattr(adapter, "eval") else adapter
+
+
 def _load_latent_ngram() -> Tuple[torch.Tensor, np.ndarray]:
     """Load the Neuro brain map embedding from HuggingFace."""
     latent_path = _download_from_hf(
@@ -694,7 +708,6 @@ def _load_latent_ngram() -> Tuple[torch.Tensor, np.ndarray]:
     )
     return latent
 
-@lru_cache(maxsize=1)
 def _load_ngram() -> Tuple[torch.Tensor, np.ndarray]:
     """Load the Neuro brain map embedding from HuggingFace."""
     labels_path = _download_from_hf(
