@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Tuple
-import gzip, pickle
+import gzip, json, pickle
 
 import numpy as np
 import pandas as pd
@@ -62,6 +62,8 @@ __all__ = [
 ]
 
 NEURO_QWEN_REPO_ID = "neurovlm/NeuroQwen3-0.6B"
+NEURO_AUTOENCODER_REPO_ID = "neurovlm/NeuroAutoEncoder"
+PROJECTION_HEADS_REPO_ID = "neurovlm/ProjectionHeads"
 NEURO_QFORMER_REPO_ID = "neurovlm/NeuroQformer"
 NEURO_ADAPTER_REPO_ID = "neurovlm/NeuroAdapter"
 
@@ -575,7 +577,7 @@ def _load_latent_networks_neuro() -> dict:
 def _load_autoencoder() -> torch.nn.Module:
     """Load and return the text encoder model from HuggingFace."""
     model_path = _download_from_hf(
-        "neurovlm/encoder_and_proj_head",
+        NEURO_AUTOENCODER_REPO_ID,
         "autoencoder.safetensors",
         repo_type="model"
     )
@@ -586,7 +588,7 @@ def _load_autoencoder() -> torch.nn.Module:
 def _load_masker() -> nib.Nifti1Image:
     """Load mask from HuggingFace."""
     mask_path = _download_from_hf(
-        "neurovlm/encoder_and_proj_head",
+        NEURO_AUTOENCODER_REPO_ID,
         "mask.npz",
         repo_type="model"
     )
@@ -629,7 +631,7 @@ def _load_networks_canonical() -> pd.DataFrame:
 def _proj_head_image_infonce() -> torch.nn.Module:
     """Load and return the image projection head from HuggingFace."""
     model_path = _download_from_hf(
-        "neurovlm/encoder_and_proj_head",
+        PROJECTION_HEADS_REPO_ID,
         "proj_head_image_infonce.safetensors",
         repo_type="model"
     )
@@ -640,7 +642,7 @@ def _proj_head_image_infonce() -> torch.nn.Module:
 def _proj_head_text_mse() -> torch.nn.Module:
     """Load and return the MSE projection head from HuggingFace."""
     model_path = _download_from_hf(
-        "neurovlm/encoder_and_proj_head",
+        PROJECTION_HEADS_REPO_ID,
         "proj_head_text_mse.safetensors",
         repo_type="model"
     )
@@ -651,7 +653,7 @@ def _proj_head_text_mse() -> torch.nn.Module:
 def _proj_head_text_infonce() -> torch.nn.Module:
     """Load and return the text projection head from HuggingFace."""
     model_path = _download_from_hf(
-        "neurovlm/encoder_and_proj_head",
+        PROJECTION_HEADS_REPO_ID,
         "proj_head_text_infonce.safetensors",
         repo_type="model"
     )
@@ -662,23 +664,35 @@ def _proj_head_text_infonce() -> torch.nn.Module:
 def _load_neuro_qformer(
     *,
     device: str | torch.device = "cpu",
-    projection_temp: float | None = None,
+    projection_temp: float | None = 0.05,
+    canonical_basis: str | None = "all",
     use_canonical_projection: bool | None = None,
 ) -> NeuroQFormer:
     """Load the packaged NeuroQFormer from HuggingFace.
 
     The package contains the QFormer, frozen image projection head, and frozen
-    canonical projection banks in a single ``NeuroQformer.pt`` state payload.
+    canonical projection banks as ``model.safetensors`` plus ``config.json``.
     """
     model_path = _download_from_hf(
         NEURO_QFORMER_REPO_ID,
-        "NeuroQformer.pt",
+        "model.safetensors",
         repo_type="model",
     )
-    payload = torch.load(model_path, weights_only=False, map_location="cpu")
+    config_path = _download_from_hf(
+        NEURO_QFORMER_REPO_ID,
+        "config.json",
+        repo_type="model",
+    )
+    with open(config_path, encoding="utf-8") as f:
+        repo_config = json.load(f)
+    payload = {
+        "state_dict": load_safetensors(model_path, device="cpu"),
+        "config": repo_config.get("qformer", {}),
+        "canonical_metadata": repo_config.get("canonical_metadata", {}),
+    }
     model = NeuroQFormer.from_state_dict_payload(payload, map_location=device).eval()
-    if projection_temp is not None:
-        model.projection_temp = projection_temp
+    model.projection_temp = projection_temp
+    model.canonical_basis = canonical_basis
     if use_canonical_projection is not None:
         model.use_canonical_projection = use_canonical_projection
     return model
@@ -688,11 +702,26 @@ def _load_neuro_adapter(*, device: str | torch.device = "cpu") -> torch.nn.Modul
     """Load the packaged text-to-anatomical-map adapter from HuggingFace."""
     model_path = _download_from_hf(
         NEURO_ADAPTER_REPO_ID,
-        "NeuroAdapter.pt",
+        "model.safetensors",
         repo_type="model",
     )
-    adapter = torch.load(model_path, weights_only=False, map_location=device)
-    return adapter.eval() if hasattr(adapter, "eval") else adapter
+    config_path = _download_from_hf(
+        NEURO_ADAPTER_REPO_ID,
+        "config.json",
+        repo_type="model",
+    )
+    with open(config_path, encoding="utf-8") as f:
+        repo_config = json.load(f)
+
+    from neurovlm.adapter import InterleavedDecoderAdapter
+
+    adapter = InterleavedDecoderAdapter(
+        _load_autoencoder(),
+        _proj_head_text_mse(),
+        **repo_config.get("adapter", {}),
+    )
+    adapter.load_state_dict(load_safetensors(model_path, device="cpu"), strict=True)
+    return adapter.to(device).eval()
 
 
 def _load_latent_ngram() -> Tuple[torch.Tensor, np.ndarray]:

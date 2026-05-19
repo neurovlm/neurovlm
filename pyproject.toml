@@ -15,7 +15,9 @@ dependencies = [
   "safetensors",
   "adapters",
   "transformers",
-  "pyarrow"
+  "pyarrow",
+  "accelerate>=1.12.0",
+  "datasets>=4.8.4",
 ]
 authors = [
   { name="Ryan Hammonds", email="ryanphammonds@gmail.com" },

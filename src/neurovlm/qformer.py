@@ -78,6 +78,8 @@ def _canonical_basis_name(basis: str | None) -> str:
         "networks": "network",
         "regions": "region",
         "functions": "function",
+        "cognition": "function",
+        "cognitive": "function",
     }.get(basis, basis)
 
 
@@ -90,14 +92,16 @@ class CanonicalProjection(nn.Module):
         self,
         canonical_banks: dict[str, torch.Tensor] | None = None,
         *,
-        projection_temp: float = 0.05,
+        projection_temp: float | None = 0.05,
         enabled: bool = True,
         semantic_dim: int = 384,
+        default_basis: str | None = "all",
     ):
         super().__init__()
-        self.projection_temp = float(projection_temp)
+        self.projection_temp = None if projection_temp is None else float(projection_temp)
         self.enabled = bool(enabled)
         self.semantic_dim = int(semantic_dim)
+        self.default_basis = _canonical_basis_name(default_basis)
 
         canonical_banks = canonical_banks or {}
         for name in self.bank_names:
@@ -113,8 +117,8 @@ class CanonicalProjection(nn.Module):
                 )
             self.register_buffer(f"{name}_bank", F.normalize(bank, dim=1), persistent=True)
 
-    def get_bank(self, basis: str | None = "all") -> torch.Tensor:
-        basis = _canonical_basis_name(basis)
+    def get_bank(self, basis: str | None = None) -> torch.Tensor:
+        basis = self.default_basis if basis is None else _canonical_basis_name(basis)
         if basis not in self.bank_names:
             valid = ", ".join(self.bank_names)
             raise ValueError(f"Unknown canonical basis {basis!r}; valid options: {valid}")
@@ -127,7 +131,7 @@ class CanonicalProjection(nn.Module):
         self,
         x: torch.Tensor,
         *,
-        basis: str | None = "all",
+        basis: str | None = None,
         temperature: float | None = None,
         enabled: bool | None = None,
         return_weights: bool = False,
@@ -137,8 +141,12 @@ class CanonicalProjection(nn.Module):
         if not enabled:
             return (x, None) if return_weights else x
 
+        temperature = self.projection_temp if temperature is None else temperature
+        if temperature is None:
+            return (x, None) if return_weights else x
+
         bank = self.get_bank(basis).to(device=x.device, dtype=torch.float32)
-        temperature = self.projection_temp if temperature is None else float(temperature)
+        temperature = float(temperature)
         logits = x @ bank.T
         weights = torch.softmax(logits / temperature, dim=-1)
         z = F.normalize(weights @ bank, dim=1)
@@ -170,14 +178,12 @@ class NeuroQFormer(nn.Module):
         num_heads: int = 8,
         num_layers: int = 6,
         dropout: float = 0.05,
-        raw_image_input_mode: str = "raw",
-        projection_temp: float = 0.05,
+        projection_temp: float | None = 0.05,
+        canonical_basis: str | None = "all",
         use_canonical_projection: bool = True,
         freeze_projection: bool = True,
     ):
         super().__init__()
-        if raw_image_input_mode not in {"raw", "projected", "zero"}:
-            raise ValueError("raw_image_input_mode must be 'raw', 'projected', or 'zero'")
 
         self.qformer = qformer or QFormer(
             image_dim=image_dim,
@@ -195,8 +201,8 @@ class NeuroQFormer(nn.Module):
             projection_temp=projection_temp,
             enabled=use_canonical_projection,
             semantic_dim=semantic_dim,
+            default_basis=canonical_basis,
         )
-        self.raw_image_input_mode = raw_image_input_mode
 
         if freeze_projection:
             for module in (self.proj_head_image, self.canonical_projection):
@@ -204,12 +210,20 @@ class NeuroQFormer(nn.Module):
                     param.requires_grad = False
 
     @property
-    def projection_temp(self) -> float:
+    def projection_temp(self) -> float | None:
         return self.canonical_projection.projection_temp
 
     @projection_temp.setter
-    def projection_temp(self, value: float) -> None:
-        self.canonical_projection.projection_temp = float(value)
+    def projection_temp(self, value: float | None) -> None:
+        self.canonical_projection.projection_temp = None if value is None else float(value)
+
+    @property
+    def canonical_basis(self) -> str:
+        return self.canonical_projection.default_basis
+
+    @canonical_basis.setter
+    def canonical_basis(self, value: str | None) -> None:
+        self.canonical_projection.default_basis = _canonical_basis_name(value)
 
     @property
     def use_canonical_projection(self) -> bool:
@@ -223,7 +237,7 @@ class NeuroQFormer(nn.Module):
         self,
         raw_images: torch.Tensor,
         *,
-        basis: str | None = "all",
+        basis: str | None = None,
         projection_temp: float | None = None,
         use_canonical_projection: bool | None = None,
         return_weights: bool = False,
@@ -242,10 +256,9 @@ class NeuroQFormer(nn.Module):
         raw_images: torch.Tensor,
         semantic_images: torch.Tensor | None = None,
         *,
-        basis: str | None = "all",
+        basis: str | None = None,
         projection_temp: float | None = None,
         use_canonical_projection: bool | None = None,
-        raw_image_input_mode: str | None = None,
         return_semantic: bool = False,
     ):
         raw_images = torch.as_tensor(raw_images)
@@ -264,17 +277,7 @@ class NeuroQFormer(nn.Module):
             if semantic_images.ndim == 1:
                 semantic_images = semantic_images.reshape(1, -1)
 
-        mode = self.raw_image_input_mode if raw_image_input_mode is None else raw_image_input_mode
-        if mode == "raw":
-            raw_input = raw_images
-        elif mode == "projected":
-            raw_input = semantic_images
-        elif mode == "zero":
-            raw_input = torch.zeros_like(raw_images)
-        else:
-            raise ValueError("raw_image_input_mode must be 'raw', 'projected', or 'zero'")
-
-        tokens = self.qformer(raw_input, semantic_images)
+        tokens = self.qformer(raw_images, semantic_images)
         if return_semantic:
             return tokens, semantic_images
         return tokens
@@ -312,8 +315,8 @@ class NeuroQFormer(nn.Module):
             num_heads=config.get("num_heads", 8),
             num_layers=config.get("num_layers", 6),
             dropout=config.get("dropout", 0.05),
-            raw_image_input_mode=config.get("raw_image_input_mode", "raw"),
             projection_temp=config.get("projection_temp", 0.05),
+            canonical_basis=config.get("canonical_basis", "all"),
             use_canonical_projection=config.get("use_canonical_projection", True),
         )
         model.load_state_dict(state, strict=True)
