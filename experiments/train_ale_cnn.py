@@ -55,6 +55,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--batch-size-auto", action="store_true")
     p.add_argument(
+        "--batch-size-candidates",
+        default="4096,3072,2048,1536,1024,768,512,384,256,192,128,96,64,32,16,8,4",
+        help=(
+            "Comma-separated microbatch sizes to try when --batch-size-auto is set. "
+            "The trainer starts from the largest value and falls back only after "
+            "an actual preflight OOM."
+        ),
+    )
+    p.add_argument(
         "--grad-accum-steps",
         type=int,
         default=1,
@@ -156,6 +165,20 @@ def make_loader(ds, args: argparse.Namespace, shuffle: bool) -> DataLoader:
         pin_memory=args.pin_memory,
         persistent_workers=args.num_workers > 0,
     )
+
+
+def parse_batch_size_candidates(raw: str, n_examples: int) -> list[int]:
+    values: list[int] = []
+    for item in str(raw).replace(";", ",").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        value = int(item)
+        if value <= 0:
+            raise ValueError(f"Batch-size candidates must be positive, got {value}")
+        values.append(min(value, int(n_examples)))
+    values = sorted(set(values), reverse=True)
+    return [value for value in values if value > 0]
 
 
 def build_dataset(args: argparse.Namespace):
@@ -270,10 +293,6 @@ def _load_encoder_from_autoencoder_checkpoint(brain_encoder: nn.Module, checkpoi
 
 def build_model(args: argparse.Namespace, input_shape: tuple[int, ...]):
     print("Building ALE model ...", flush=True)
-    if args.batch_size_auto:
-        voxels = int(np.prod(input_shape))
-        args.batch_size = 8 if voxels > 150_000 else 16 if voxels > 75_000 else 32
-
     if args.model == "ale_3dcnn":
         brain_encoder = ALE3DCNNEncoder(
             base_channels=args.base_channels,
@@ -354,6 +373,7 @@ class ALETrainer:
         self.best_state: Optional[dict] = None
         self.best_score = -float("inf")
         self._printed_contrastive_sanity = False
+        self.preflight_peak_vram_mb = 0.0
         self.history: dict[str, list] = {
             "train_loss": [],
             "epoch_time_sec": [],
@@ -446,6 +466,75 @@ class ALETrainer:
             flush=True,
         )
         self._printed_contrastive_sanity = True
+
+    def preflight_batch_size(self, train_ds) -> None:
+        """Select the largest real contrastive batch that fits on this device."""
+
+        if not self.args.batch_size_auto:
+            return
+        candidates = parse_batch_size_candidates(self.args.batch_size_candidates, len(train_ds))
+        if not candidates:
+            raise ValueError("--batch-size-auto needs at least one positive --batch-size-candidates value")
+        if self.device.type != "cuda":
+            self.args.batch_size = min(self.args.batch_size, len(train_ds))
+            print(
+                f"Batch-size auto-preflight is CUDA-only; using batch_size={self.args.batch_size}.",
+                flush=True,
+            )
+            return
+
+        print(
+            "Preflighting contrastive batch size on CUDA "
+            f"(largest first): {','.join(str(v) for v in candidates)}",
+            flush=True,
+        )
+        self.brain_encoder.train()
+        self.text_proj.train()
+        self.optimizer.zero_grad(set_to_none=True)
+        last_oom = None
+        for candidate in candidates:
+            loader = DataLoader(
+                train_ds,
+                batch_size=candidate,
+                shuffle=True,
+                num_workers=0,
+                pin_memory=self.args.pin_memory,
+            )
+            try:
+                if self.device.type == "cuda":
+                    torch.cuda.empty_cache()
+                    torch.cuda.reset_peak_memory_stats(self.device)
+                batch = next(iter(loader))
+                brain, text = self._forward(batch)
+                loss = self.loss_fn(brain, text)
+                loss.backward()
+                self.optimizer.zero_grad(set_to_none=True)
+                if self.device.type == "cuda":
+                    torch.cuda.synchronize(self.device)
+                    self.preflight_peak_vram_mb = torch.cuda.max_memory_allocated(self.device) / 1024**2
+                    torch.cuda.empty_cache()
+                self.args.batch_size = int(candidate)
+                setattr(self.args, "selected_batch_size", int(candidate))
+                setattr(self.args, "preflight_peak_vram_mb", float(self.preflight_peak_vram_mb))
+                print(
+                    f"Selected contrastive batch_size={candidate} "
+                    f"(preflight peak VRAM {self.preflight_peak_vram_mb:.0f}MB).",
+                    flush=True,
+                )
+                return
+            except RuntimeError as exc:
+                self.optimizer.zero_grad(set_to_none=True)
+                if self.device.type == "cuda":
+                    torch.cuda.empty_cache()
+                message = str(exc).lower()
+                if "out of memory" not in message and "cuda error" not in message:
+                    raise
+                last_oom = exc
+                print(f"  batch_size={candidate} did not fit; trying smaller.", flush=True)
+                continue
+        raise RuntimeError(
+            "No --batch-size-candidates value fit during CUDA preflight."
+        ) from last_oom
 
     def fit(self, train_ds, val_ds) -> None:
         loader = make_loader(train_ds, self.args, shuffle=True)
@@ -804,6 +893,10 @@ def append_comparison_row(args, payload, metrics, trainer, input_shape) -> dict:
         "use_dilation": args.use_dilation,
         "multi_scale": args.multi_scale,
         "global_context": args.global_context,
+        "batch_size": args.batch_size,
+        "batch_size_auto": args.batch_size_auto,
+        "batch_size_candidates": args.batch_size_candidates,
+        "preflight_peak_vram_mb": float(getattr(args, "preflight_peak_vram_mb", 0.0)),
         "training_time_per_epoch": float(np.mean(trainer.history["epoch_time_sec"])),
         "peak_vram": float(max(trainer.history["peak_vram_mb"] or [0.0])),
         "paper_recall_curve_auc": metrics["paper_recall_curve_auc"],
@@ -921,9 +1014,14 @@ def main() -> None:
     print("\n== Model ==")
     print(f"  {args.model} brain params={count_parameters(brain_encoder):,}")
     print(f"  text params={count_parameters(text_proj):,} train_text={not args.freeze_text_proj}")
-    print(f"  device={device} amp={args.amp and device.type == 'cuda'} batch={args.batch_size}")
+    batch_label = "auto" if args.batch_size_auto else str(args.batch_size)
+    print(f"  device={device} amp={args.amp and device.type == 'cuda'} batch={batch_label}")
 
     trainer = ALETrainer(brain_encoder, text_proj, args, device)
+    trainer.preflight_batch_size(train_ds)
+    with (run_dir / "config.json").open("w") as f:
+        json.dump(vars(args), f, indent=2)
+    print(f"  selected batch_size={args.batch_size}", flush=True)
     trainer.fit(train_ds, val_ds)
     trainer.restore_best()
 

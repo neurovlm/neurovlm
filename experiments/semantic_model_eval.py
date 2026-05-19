@@ -61,6 +61,36 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+RETRIEVAL_NORMALIZED_K_AUC_KEYS = (
+    "exact_pmid_normalized_k_recall_curve_auc",
+    "mesh_normalized_k_recall_curve_auc",
+    "semantic_normalized_k_recall_curve_auc",
+    "network_term_normalized_k_recall_curve_auc",
+)
+
+
+def _add_macro_retrieval_normalized_k_auc(summary: dict[str, Any]) -> dict[str, Any]:
+    values: list[float] = []
+    components: list[str] = []
+    for key in RETRIEVAL_NORMALIZED_K_AUC_KEYS:
+        value = summary.get(key)
+        if value is None:
+            continue
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(numeric):
+            values.append(numeric)
+            components.append(key)
+    if values:
+        macro_auc = float(np.mean(values))
+        summary["macro_retrieval_normalized_k_recall_curve_auc"] = macro_auc
+        summary["macro_normalized_k_recall_curve_auc"] = macro_auc
+        summary["macro_retrieval_normalized_k_auc_components"] = components
+    return summary
+
+
 def _resource_candidates(resource_dir: str | Path | None, relative: str) -> list[Path]:
     candidates: list[Path] = []
     if resource_dir is not None:
@@ -243,6 +273,9 @@ def run_embedding_semantic_evaluations(
         "model": model_name,
         "n_test_pmids": int(len(pmids)),
         "exact_pmid_paper_recall_curve_auc": exact_b2p["paper_recall_curve_auc"],
+        "exact_pmid_normalized_k_recall_curve_auc": exact_b2p["normalized_k_recall_curve_auc"],
+        "exact_pmid_mean_paper_recall_curve_auc": exact_payload["paper_recall_curve_auc"],
+        "exact_pmid_mean_normalized_k_recall_curve_auc": exact_payload["normalized_k_recall_curve_auc"],
         "exact_pmid_recall@1": exact_b2p["recall@1"],
         "exact_pmid_recall@5": exact_b2p["recall@5"],
         "exact_pmid_recall@10": exact_b2p["recall@10"],
@@ -253,6 +286,8 @@ def run_embedding_semantic_evaluations(
     if mesh_metrics and not mesh_metrics.get("skipped"):
         summary.update(
             {
+                "mesh_paper_recall_curve_auc": mesh_metrics.get("paper_recall_curve_auc"),
+                "mesh_normalized_k_recall_curve_auc": mesh_metrics.get("normalized_k_recall_curve_auc"),
                 "mesh_recall@5": mesh_metrics.get("recall@5"),
                 "mesh_recall@10": mesh_metrics.get("recall@10"),
                 "mesh_map": mesh_metrics.get("map"),
@@ -264,6 +299,7 @@ def run_embedding_semantic_evaluations(
         summary.update(semantic_metrics)
     if extra_summary:
         summary.update(extra_summary)
+    _add_macro_retrieval_normalized_k_auc(summary)
 
     pd.DataFrame([summary]).to_csv(out_path / "main_comparison_summary_row.csv", index=False)
     with (out_path / "main_comparison_summary_row.json").open("w") as f:
@@ -366,6 +402,8 @@ def run_network_labeling_from_embeddings(
         metrics.update({f"term_{key}": value for key, value in term_metrics.items()})
         summary_updates.update(
             {
+                "network_term_paper_recall_curve_auc": term_metrics.get("paper_recall_curve_auc"),
+                "network_term_normalized_k_recall_curve_auc": term_metrics.get("normalized_k_recall_curve_auc"),
                 "network_term_recall@5": term_metrics.get("recall@5"),
                 "network_term_recall@10": term_metrics.get("recall@10"),
                 "network_term_recall@20": term_metrics.get("recall@20"),
@@ -386,6 +424,14 @@ def run_network_labeling_from_embeddings(
     if summary_path.exists():
         summary = json.loads(summary_path.read_text())
         summary.update(summary_updates)
+        _add_macro_retrieval_normalized_k_auc(summary)
+        for key in [
+            "macro_retrieval_normalized_k_recall_curve_auc",
+            "macro_normalized_k_recall_curve_auc",
+            "macro_retrieval_normalized_k_auc_components",
+        ]:
+            if key in summary:
+                summary_updates[key] = summary[key]
         summary_path.write_text(json.dumps(_jsonable(summary), indent=2))
         pd.DataFrame([summary]).to_csv(Path(out_dir) / "main_comparison_summary_row.csv", index=False)
     metrics.update(summary_updates)

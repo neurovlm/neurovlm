@@ -953,6 +953,8 @@ def multi_positive_ranking_metrics(
     valid = [i for i, positives in enumerate(true_indices) if positives]
     if not valid:
         return {f"recall@{k}": math.nan for k in ks} | {
+            "paper_recall_curve_auc": math.nan,
+            "normalized_k_recall_curve_auc": math.nan,
             "map": math.nan,
             "mrr": math.nan,
             f"ndcg@{ndcg_k}": math.nan,
@@ -998,9 +1000,12 @@ def multi_positive_ranking_metrics(
         idcg = sum(1.0 / math.log2(rank + 1) for rank in range(1, ideal_hits + 1))
         ndcgs.append(dcg / idcg if idcg else 0.0)
 
+    recall_curve_auc = _multi_positive_recall_auc(scores[valid], [true_indices[i] for i in valid])
     out = {f"recall@{k}": float(np.mean(hits_at[k])) for k in ks}
     out.update(
         {
+            "paper_recall_curve_auc": recall_curve_auc,
+            "normalized_k_recall_curve_auc": recall_curve_auc,
             "map": float(np.mean(aps)),
             "mrr": float(np.mean(reciprocal_ranks)),
             f"ndcg@{ndcg_k}": float(np.mean(ndcgs)),
@@ -1130,7 +1135,7 @@ def evaluate_semantic_neighbor_retrieval(
     sim = F.normalize(brain_embeddings.float(), dim=1, eps=1e-8) @ F.normalize(text_embeddings.float(), dim=1, eps=1e-8).T
     scores = sim.detach().cpu().numpy()
     metrics = multi_positive_ranking_metrics(scores, positives, ks=(10, 50), ndcg_k=10)
-    semantic_auc = _multi_positive_recall_auc(scores, positives)
+    semantic_auc = metrics["normalized_k_recall_curve_auc"]
     metrics = {
         "semantic_recall@10": metrics["recall@10"],
         "semantic_recall@50": metrics["recall@50"],
@@ -1167,11 +1172,17 @@ def _multi_positive_recall_auc(scores: np.ndarray, positives: Sequence[set[int]]
     order = np.argsort(-scores, axis=1)
     best_ranks = []
     for i, pos in enumerate(positives):
+        if not pos:
+            continue
         ranks_by_candidate = np.empty(scores.shape[1], dtype=np.int64)
         ranks_by_candidate[order[i]] = np.arange(1, scores.shape[1] + 1)
         best_ranks.append(min(int(ranks_by_candidate[j]) for j in pos))
+    if not best_ranks:
+        return math.nan
     ranks = torch.as_tensor(best_ranks, dtype=torch.long)
-    return _recall_curve_auc_from_ranks(ranks.float(), scores.shape[1])
+    counts = torch.bincount(ranks - 1, minlength=scores.shape[1])
+    curve = counts.cumsum(0).float() / float(len(best_ranks))
+    return normalized_recall_curve_auc(curve)
 
 
 def find_default_mesh_json() -> Path | None:

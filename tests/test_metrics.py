@@ -17,6 +17,7 @@ from neurovlm.metrics import (
     bits_per_pixel,
     compute_ae_performance,
 )
+from neurovlm.semantic_evaluation import multi_positive_ranking_metrics
 
 
 class TestDice:
@@ -151,6 +152,23 @@ class TestRecallCurve:
         assert metrics["paper_recall_curve_auc"] == pytest.approx(1.0)
         assert metrics["normalized_k_recall_curve_auc"] == pytest.approx(1.0)
         assert metrics["recall@1"] == pytest.approx(1.0)
+
+    def test_multi_positive_metrics_report_normalized_k_auc(self):
+        scores = np.array(
+            [
+                [1.0, 0.2, 0.1, 0.0],
+                [0.9, 0.8, 0.7, 0.1],
+            ]
+        )
+        positives = [{0}, {2}]
+
+        metrics = multi_positive_ranking_metrics(scores, positives, ks=(1, 2, 3, 4))
+
+        # Best positive ranks are 1 and 3, so recall(k) over k=1..4 is
+        # [0.5, 0.5, 1.0, 1.0]. The normalized-k AUC is the mean of that curve.
+        assert metrics["recall@1"] == pytest.approx(0.5)
+        assert metrics["paper_recall_curve_auc"] == pytest.approx(0.75)
+        assert metrics["normalized_k_recall_curve_auc"] == pytest.approx(0.75)
 
 
 class TestBernoulliBCE:
