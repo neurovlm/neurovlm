@@ -58,6 +58,9 @@ from neurovlm.retrieval_resources import (
     _load_latent_kg_mesh_brain_rankable,
     _load_llm_neuro_terms_dataset,
     _load_latent_llm_neuro_terms,
+    _load_neuro_qformer,
+    _load_neuro_adapter,
+    _load_specter
 )
 
 
@@ -70,7 +73,11 @@ REPO_DATASETS = {
 }
 
 REPO_MODELS = {
-    "encoder_and_proj_head": "neurovlm/encoder_and_proj_head",
+    "NeuroQwen3-0.6B": "neurovlm/NeuroQwen3-0.6B",
+    "NeuroAutoEncoder": "neurovlm/NeuroAutoEncoder",
+    "ProjectionHeads": "neurovlm/ProjectionHeads",
+    "NeuroQformer": "neurovlm/NeuroQformer",
+    "NeuroAdapter": "neurovlm/NeuroAdapter",
 }
 
 # SPECTER2 model and adapter repos (downloaded separately from neurovlm repos)
@@ -94,7 +101,8 @@ def fetch_data(
         Available keys: "neuro_image_papers", "neuro_wiki", "cognitive_atlas", "embedded_text"
     models : list of str, optional
         List of model repository keys to download. If None, downloads all models.
-        Available keys: "encoder_and_proj_head"
+        Available keys: "NeuroQwen3-0.6B", "NeuroAutoEncoder", "ProjectionHeads",
+        "NeuroQformer", "NeuroAdapter"
     cache_dir : str, optional
         Custom cache directory. If None, uses Hugging Face default cache.
 
@@ -112,7 +120,7 @@ def fetch_data(
     >>> cache_dir = fetch_data(datasets=["neuro_image_papers", "cognitive_atlas"])
 
     >>> # Fetch only models
-    >>> cache_dir = fetch_data(datasets=[], models=["encoder_and_proj_head"])
+    >>> cache_dir = fetch_data(datasets=[], models=["NeuroAutoEncoder", "ProjectionHeads"])
     """
     # Use default datasets/models if not specified
     if datasets is None:
@@ -260,6 +268,8 @@ def preload_all_data(cache_dir: Optional[str] = None, verbose: bool = True) -> N
         ("Image projection head", _proj_head_image_infonce),
         ("Text MSE projection head", _proj_head_text_mse),
         ("Text projection head", _proj_head_text_infonce),
+        ("NeuroQformer", _load_neuro_qformer),
+        ("NeuroAdapter", _load_neuro_adapter),
         ("SPECTER model", _load_specter),
     ]
 

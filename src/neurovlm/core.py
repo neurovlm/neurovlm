@@ -668,6 +668,23 @@ class _QueryBuilder:
         """Run text/brain query against the brain target space."""
         return self.parent.to_brain(self.payload, head=head, project=project, dataset=dataset)
 
+    def generate_brain(
+        self,
+        project: bool = True,
+    ) -> BrainSearchResult:
+        """Generate brain maps from text with the MSE decoder path."""
+        if self.source != "text":
+            raise ValueError("generate_brain is only available for text(...) queries.")
+        return self.parent.generate_brain(self.payload, project=project)
+
+    def retrieve_brain(
+        self,
+        project: bool = True,
+        dataset: Optional[Union[str, Sequence[str]]] = None,
+    ) -> BrainSearchResult:
+        """Retrieve brain maps with the contrastive InfoNCE path."""
+        return self.parent.retrieve_brain(self.payload, project=project, dataset=dataset)
+
     def to_text(
         self,
         head: Literal["mse", "infonce"] = "infonce",
@@ -677,6 +694,45 @@ class _QueryBuilder:
         if head != "infonce":
             raise ValueError("to_text only supports head='infonce'.")
         return self.parent.to_text(self.payload, datasets=datasets, project=True)
+
+    def retrieve_text(self, datasets: Optional[Sequence[str]] = None) -> TextSearchResult:
+        """Retrieve text with the contrastive InfoNCE path."""
+        return self.parent.retrieve_text(self.payload, datasets=datasets)
+
+    def generate_text(
+        self,
+        *,
+        basis: str | None = "network",
+        prefix_text: str | None = None,
+        max_new_tokens: int = 256,
+        num_beams: int = 3,
+        do_sample: bool = False,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        seed: int | None = 12345,
+        projection_temp: float | None = 0.05,
+        use_canonical_projection: bool | None = True,
+        repetition_penalty: float = 1.18,
+        no_repeat_ngram_size: int = 4,
+    ) -> str | list[str]:
+        """Generate text from a brain map with the QFormer/Qwen path."""
+        if self.source != "brain":
+            raise ValueError("generate_text is only available for brain(...) queries.")
+        return self.parent.generate_text(
+            self.payload,
+            basis=basis,
+            prefix_text=prefix_text,
+            max_new_tokens=max_new_tokens,
+            num_beams=num_beams,
+            do_sample=do_sample,
+            temperature=temperature,
+            top_p=top_p,
+            seed=seed,
+            projection_temp=projection_temp,
+            use_canonical_projection=use_canonical_projection,
+            repetition_penalty=repetition_penalty,
+            no_repeat_ngram_size=no_repeat_ngram_size,
+        )
 
 
 class NeuroVLM:
@@ -705,6 +761,10 @@ class NeuroVLM:
         self._specter = None
         self._autoencoder = None
         self._masker = None
+        self._neuro_qformer = None
+        self._neuro_qwen_model = None
+        self._neuro_qwen_tokenizer = None
+        self._neuro_qwen_token_norm: Optional[float] = None
 
         self._text_raw_embeddings: Dict[str, torch.Tensor] = {}
         self._text_shared_embeddings: Dict[str, torch.Tensor] = {}
@@ -802,6 +862,53 @@ class NeuroVLM:
         self.last_text_result = result
         self._last_result = result
         return result
+
+    def retrieve_text(
+        self,
+        X: Any,
+        datasets: Optional[Sequence[str]] = None,
+        project: bool = True,
+    ) -> TextSearchResult:
+        """Alias for contrastive text retrieval. Keeps ``to_text`` semantics explicit."""
+        return self.to_text(X, datasets=datasets, project=project)
+
+    def generate_text(
+        self,
+        X: Any,
+        *,
+        basis: str | None = "network",
+        prefix_text: str | None = None,
+        max_new_tokens: int = 256,
+        num_beams: int = 3,
+        do_sample: bool = False,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        seed: int | None = 12345,
+        projection_temp: float | None = 0.05,
+        use_canonical_projection: bool | None = True,
+        repetition_penalty: float = 1.18,
+        no_repeat_ngram_size: int = 4,
+    ) -> str | list[str]:
+        """Generate text for one or more brain maps with NeuroQFormer + NeuroQwen3.
+
+        This is intentionally separate from ``to_text``, which remains the
+        contrastive retrieval API.
+        """
+        return self._generate_brain_text(
+            X,
+            basis=basis,
+            prefix_text=prefix_text,
+            max_new_tokens=max_new_tokens,
+            num_beams=num_beams,
+            do_sample=do_sample,
+            temperature=temperature,
+            top_p=top_p,
+            seed=seed,
+            projection_temp=projection_temp,
+            use_canonical_projection=use_canonical_projection,
+            repetition_penalty=repetition_penalty,
+            no_repeat_ngram_size=no_repeat_ngram_size,
+        )
 
     def to_brain(
         self,
@@ -939,6 +1046,23 @@ class NeuroVLM:
         self._last_result = result
         return result
 
+    def generate_brain(
+        self,
+        X: Any,
+        project: bool = True,
+    ) -> BrainSearchResult:
+        """Alias for text-to-brain generation via ``to_brain(head='mse')``."""
+        return self.to_brain(X, head="mse", project=project)
+
+    def retrieve_brain(
+        self,
+        X: Any,
+        project: bool = True,
+        dataset: Optional[Union[str, Sequence[str]]] = None,
+    ) -> BrainSearchResult:
+        """Alias for contrastive brain retrieval via ``to_brain(head='infonce')``."""
+        return self.to_brain(X, head="infonce", project=project, dataset=dataset)
+
     def top_k(
         self,
         k: int = 5,
@@ -1027,8 +1151,9 @@ class NeuroVLM:
             text_emb = self._encode_text(X)
             if project:
                 self._ensure_projection_heads()
+                text_emb = _l2_normalize(text_emb.to(self.device))
                 with torch.no_grad():
-                    text_emb = self._proj_head_text_infonce(text_emb.to(self.device))
+                    text_emb = self._proj_head_text_infonce(text_emb)
                 return _l2_normalize(text_emb), "shared"
             return _l2_normalize(text_emb.to(self.device)), "raw_text"
 
@@ -1051,8 +1176,9 @@ class NeuroVLM:
         if dim == TEXT_EMBED_DIM:
             if project:
                 self._ensure_projection_heads()
+                tensor = _l2_normalize(tensor.to(self.device))
                 with torch.no_grad():
-                    tensor = self._proj_head_text_infonce(tensor.to(self.device))
+                    tensor = self._proj_head_text_infonce(tensor)
                 return _l2_normalize(tensor), "shared"
             return _l2_normalize(tensor.to(self.device)), "raw_text"
 
@@ -1683,6 +1809,199 @@ class NeuroVLM:
         """Lazy-load NIfTI masker."""
         if self._masker is None:
             self._masker = load_masker()
+
+    def _ensure_generative_text_model(
+        self,
+        *,
+        projection_temp: float | None = 0.05,
+        canonical_basis: str | None = "network",
+        use_canonical_projection: bool | None = True,
+    ) -> None:
+        """Lazy-load NeuroQFormer and NeuroQwen for brain-to-text generation."""
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from neurovlm.retrieval_resources import NEURO_QWEN_REPO_ID, _load_neuro_qformer
+
+        if self._neuro_qformer is None:
+            self._neuro_qformer = _load_neuro_qformer(
+                device=self.device,
+                projection_temp=projection_temp,
+                canonical_basis=canonical_basis,
+                use_canonical_projection=use_canonical_projection,
+            ).eval()
+        else:
+            self._neuro_qformer.projection_temp = projection_temp
+            self._neuro_qformer.canonical_basis = canonical_basis
+            if use_canonical_projection is not None:
+                self._neuro_qformer.use_canonical_projection = use_canonical_projection
+            self._neuro_qformer.to(self.device).eval()
+
+        if self._neuro_qwen_tokenizer is None:
+            self._neuro_qwen_tokenizer = AutoTokenizer.from_pretrained(NEURO_QWEN_REPO_ID, use_fast=True)
+            if self._neuro_qwen_tokenizer.pad_token_id is None:
+                self._neuro_qwen_tokenizer.pad_token = self._neuro_qwen_tokenizer.eos_token
+
+        if self._neuro_qwen_model is None:
+            dtype = torch.float32 if self.device.type == "cpu" else torch.bfloat16
+            self._neuro_qwen_model = AutoModelForCausalLM.from_pretrained(
+                NEURO_QWEN_REPO_ID,
+                torch_dtype=dtype,
+                device_map=None,
+            ).to(self.device).eval()
+            if getattr(self._neuro_qwen_model.config, "pad_token_id", None) is None:
+                self._neuro_qwen_model.config.pad_token_id = self._neuro_qwen_tokenizer.pad_token_id
+            with torch.no_grad():
+                self._neuro_qwen_token_norm = (
+                    self._neuro_qwen_model.get_input_embeddings()
+                    .weight.detach()
+                    .float()
+                    .norm(dim=1)
+                    .mean()
+                    .item()
+                )
+        elif self._neuro_qwen_token_norm is None:
+            with torch.no_grad():
+                self._neuro_qwen_token_norm = (
+                    self._neuro_qwen_model.get_input_embeddings()
+                    .weight.detach()
+                    .float()
+                    .norm(dim=1)
+                    .mean()
+                    .item()
+                )
+
+    @staticmethod
+    def _generation_prefix_for_basis(basis: str | None) -> str | None:
+        key = "all" if basis is None else str(basis).lower()
+        key = {
+            "networks": "network",
+            "regions": "region",
+            "functions": "function",
+            "cognition": "function",
+            "cognitive": "function",
+        }.get(key, key)
+        return {
+            "network": "[NETWORK]",
+            "region": "[REGION]",
+            "function": "[FUNCTION]",
+        }.get(key)
+
+    def _prepare_brain_latent_for_generation(self, X: Any) -> torch.Tensor:
+        """Prepare NIfTI, mask-space vectors, or latent vectors for QFormer generation."""
+        if self._is_text_payload(X):
+            raise TypeError("generate_text expects a brain image, flattened brain vector, or 384-d latent.")
+
+        if isinstance(X, nib.Nifti1Image):
+            return self._encode_brain_image(X).to(self.device)
+
+        tensor = self._coerce_numeric_query(X)
+        if tensor is None:
+            raise TypeError("generate_text expects a NIfTI image, tensor, numpy array, or numeric sequence.")
+
+        dim = int(tensor.shape[1])
+        if dim == LATENT_DIM:
+            return tensor.to(self.device)
+        if dim == BRAIN_FLAT_DIM:
+            return self._encode_brain_flat(tensor).to(self.device)
+        raise ValueError(f"Unsupported brain input dim {dim}. Expected {LATENT_DIM} or {BRAIN_FLAT_DIM}.")
+
+    def _match_generative_lm_token_norm(self, vis: torch.Tensor) -> torch.Tensor:
+        target_norm = torch.tensor(self._neuro_qwen_token_norm, device=vis.device, dtype=vis.dtype)
+        vis_norm = vis.float().norm(dim=-1, keepdim=True).clamp_min(1e-6).to(vis.dtype)
+        return vis * (target_norm / vis_norm)
+
+    @torch.no_grad()
+    def _generate_brain_text(
+        self,
+        X: Any,
+        *,
+        basis: str | None = "network",
+        prefix_text: str | None = None,
+        max_new_tokens: int = 256,
+        num_beams: int = 3,
+        do_sample: bool = False,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        seed: int | None = 12345,
+        projection_temp: float | None = 0.05,
+        use_canonical_projection: bool | None = True,
+        repetition_penalty: float = 1.18,
+        no_repeat_ngram_size: int = 4,
+    ) -> str | list[str]:
+        """Internal QFormer/Qwen generation path for brain inputs."""
+        self._ensure_generative_text_model(
+            projection_temp=projection_temp,
+            canonical_basis=basis,
+            use_canonical_projection=use_canonical_projection,
+        )
+        raw_latent = self._prepare_brain_latent_for_generation(X)
+        prefix_text = self._generation_prefix_for_basis(basis) if prefix_text is None else prefix_text
+
+        assert self._neuro_qformer is not None
+        assert self._neuro_qwen_model is not None
+        assert self._neuro_qwen_tokenizer is not None
+        model_dtype = next(self._neuro_qwen_model.parameters()).dtype
+
+        with torch.autocast(
+            device_type=self.device.type,
+            dtype=torch.bfloat16,
+            enabled=self.device.type == "cuda",
+        ):
+            vis = self._neuro_qformer(
+                raw_latent,
+                basis=basis,
+                projection_temp=projection_temp,
+                use_canonical_projection=use_canonical_projection,
+            )
+            vis = self._match_generative_lm_token_norm(vis).to(model_dtype)
+
+            inputs_embeds = vis
+            if prefix_text:
+                prefix_ids = self._neuro_qwen_tokenizer(
+                    prefix_text,
+                    add_special_tokens=False,
+                    return_tensors="pt",
+                )["input_ids"].to(self.device)
+                prefix_embeds = self._neuro_qwen_model.get_input_embeddings()(prefix_ids).to(model_dtype)
+                prefix_embeds = prefix_embeds.expand(vis.shape[0], -1, -1)
+                inputs_embeds = torch.cat([vis, prefix_embeds], dim=1)
+
+            attn = torch.ones(inputs_embeds.shape[:2], dtype=torch.long, device=self.device)
+            gen_kwargs = {
+                "inputs_embeds": inputs_embeds,
+                "attention_mask": attn,
+                "max_new_tokens": max_new_tokens,
+                "num_beams": num_beams,
+                "do_sample": do_sample,
+                "repetition_penalty": repetition_penalty,
+                "no_repeat_ngram_size": no_repeat_ngram_size,
+                "eos_token_id": self._neuro_qwen_tokenizer.eos_token_id,
+                "pad_token_id": self._neuro_qwen_tokenizer.pad_token_id
+                or self._neuro_qwen_tokenizer.eos_token_id,
+            }
+            if temperature is not None:
+                gen_kwargs["temperature"] = temperature
+            if top_p is not None:
+                gen_kwargs["top_p"] = top_p
+            if not do_sample:
+                gen_kwargs.setdefault("temperature", 1.0)
+                gen_kwargs.setdefault("top_p", 1.0)
+                gen_kwargs.setdefault("top_k", 50)
+
+            cuda_devices = [self.device.index or torch.cuda.current_device()] if self.device.type == "cuda" else []
+            with torch.random.fork_rng(devices=cuda_devices, enabled=seed is not None):
+                if seed is not None:
+                    torch.manual_seed(seed)
+                    if torch.cuda.is_available():
+                        torch.cuda.manual_seed_all(seed)
+                out_ids = self._neuro_qwen_model.generate(**gen_kwargs)
+
+        decoded = [
+            self._neuro_qwen_tokenizer.decode(row, skip_special_tokens=True).strip()
+            for row in out_ids
+        ]
+        if prefix_text:
+            decoded = [prefix_text + text for text in decoded]
+        return decoded[0] if len(decoded) == 1 else decoded
 
     def _encode_text(self, X: Any) -> torch.Tensor:
         """Encode raw text payload(s) into 768-d embeddings."""

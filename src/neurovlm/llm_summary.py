@@ -22,10 +22,23 @@ _MODEL = None
 _TOKENIZER = None
 _MODEL_NAME: str | None = None
 
+_MODEL_ALIASES = {
+    "NeuroQwen3-0.6B": "neurovlm/NeuroQwen3-0.6B",
+    "neuroqwen3-0.6b": "neurovlm/NeuroQwen3-0.6B",
+    "Qwen3-0.6B-pubmed-neuroimaging-dapt": "neurovlm/NeuroQwen3-0.6B",
+}
+
+
+def resolve_huggingface_model_name(model_name: str) -> str:
+    """Resolve NeuroVLM model aliases to HuggingFace repository IDs."""
+    return _MODEL_ALIASES.get(model_name, model_name)
+
 
 def load_huggingface_model(
     model_name: str = "Qwen/Qwen2.5-1.5B-Instruct",
     force_reload: bool = False,
+    dtype: str = "auto",
+    device: str = "auto",
 ):
     """Load the Hugging Face model and tokenizer.
 
@@ -57,6 +70,8 @@ def load_huggingface_model(
 
     global _MODEL, _TOKENIZER, _MODEL_NAME
 
+    model_name = resolve_huggingface_model_name(model_name)
+
     model_changed = _MODEL_NAME is not None and _MODEL_NAME != model_name
     should_reload = _MODEL is None or _TOKENIZER is None or force_reload or model_changed
 
@@ -84,9 +99,8 @@ def load_huggingface_model(
         print("Step 2/2: Loading model (this may take a while)...")
         _MODEL = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype="auto",
-            device_map="auto",
-            low_cpu_mem_usage=True,  # Optimize memory usage
+            torch_dtype=dtype,
+            device_map=device,
         )
 
         # Determine device
