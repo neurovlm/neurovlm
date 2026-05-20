@@ -124,6 +124,11 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--checkpoint-dir", default=None)
     p.add_argument("--run-dir", default=None)
+    p.add_argument(
+        "--resume-from",
+        default=None,
+        help="Resume contrastive training from a last_ale_cnn.pt checkpoint.",
+    )
     p.add_argument("--comparison-file", default="runs/ale_model_comparison.csv")
     p.add_argument("--save-plots", action="store_true", default=True)
     p.add_argument("--no-save-plots", dest="save_plots", action="store_false")
@@ -404,6 +409,32 @@ class ALETrainer:
                 flush=True,
             )
 
+    def _load_resume_payload(self) -> Optional[dict]:
+        resume_from = getattr(self.args, "resume_from", None)
+        if not resume_from:
+            return None
+        path = Path(resume_from)
+        if not path.exists():
+            raise FileNotFoundError(f"--resume-from checkpoint does not exist: {path}")
+        return torch.load(path, map_location=self.device, weights_only=False)
+
+    def load_resume_model_weights(self) -> None:
+        payload = self._load_resume_payload()
+        if not payload:
+            return
+        if "brain_encoder" not in payload or "text_proj" not in payload:
+            raise KeyError("--resume-from checkpoint must contain brain_encoder and text_proj")
+        self.brain_encoder.load_state_dict(payload["brain_encoder"], strict=True)
+        self.text_proj.load_state_dict(payload["text_proj"], strict=True)
+        self.history = payload.get("history", self.history)
+        self.best_state = payload.get("best_state", self.best_state)
+        self.best_score = float(payload.get("best_score", self.best_score))
+        print(
+            f"Loaded contrastive resume weights from {self.args.resume_from} "
+            f"(last completed epoch={payload.get('epoch', 'unknown')}).",
+            flush=True,
+        )
+
     def _forward(self, batch: dict) -> tuple[torch.Tensor, torch.Tensor]:
         volume = batch["volume"].to(self.device, non_blocking=self.args.pin_memory)
         text = batch["text"].to(self.device, non_blocking=self.args.pin_memory)
@@ -548,7 +579,28 @@ class ALETrainer:
         )
 
         bad_checks = 0
-        for epoch in range(self.args.epochs):
+        start_epoch = 0
+        resume_payload = self._load_resume_payload()
+        if resume_payload:
+            if "optimizer" in resume_payload:
+                self.optimizer.load_state_dict(resume_payload["optimizer"])
+            if "scheduler" in resume_payload and resume_payload["scheduler"] is not None:
+                self.scheduler.load_state_dict(resume_payload["scheduler"])
+            if "scaler" in resume_payload and resume_payload["scaler"] is not None:
+                self.scaler.load_state_dict(resume_payload["scaler"])
+            self.history = resume_payload.get("history", self.history)
+            self.best_state = resume_payload.get("best_state", self.best_state)
+            self.best_score = float(resume_payload.get("best_score", self.best_score))
+            bad_checks = int(resume_payload.get("bad_checks", 0))
+            start_epoch = int(resume_payload.get("epoch", -1)) + 1
+            print(
+                f"Resuming contrastive training at epoch {start_epoch}/{self.args.epochs}.",
+                flush=True,
+            )
+
+        last_completed_epoch = start_epoch - 1
+        for epoch in range(start_epoch, self.args.epochs):
+            should_stop = False
             if self.device.type == "cuda":
                 torch.cuda.reset_peak_memory_stats(self.device)
             start = time.perf_counter()
@@ -626,15 +678,19 @@ class ALETrainer:
                         and bad_checks >= self.args.early_stopping_patience
                     ):
                         print(f"Early stopping after {bad_checks} validation checks.")
-                        break
+                        should_stop = True
             else:
                 print(
                     f"Epoch {epoch:03d}/{self.args.epochs} "
                     f"loss={self.history['train_loss'][-1]:.4f} time={epoch_time:.1f}s"
                 )
+            last_completed_epoch = epoch
+            self.save_last(epoch=epoch, bad_checks=bad_checks)
+            if should_stop:
+                break
 
         self.save_best()
-        self.save_last()
+        self.save_last(epoch=last_completed_epoch, bad_checks=bad_checks)
 
     @torch.no_grad()
     def collect_embeddings(self, ds) -> tuple[torch.Tensor, torch.Tensor]:
@@ -676,7 +732,7 @@ class ALETrainer:
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(self.best_state, path)
 
-    def save_last(self) -> None:
+    def save_last(self, epoch: Optional[int] = None, bad_checks: int = 0) -> None:
         path = Path(self.args.checkpoint_dir) / "last_ale_cnn.pt"
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
@@ -684,6 +740,13 @@ class ALETrainer:
                 "brain_encoder": self.brain_encoder.state_dict(),
                 "text_proj": self.text_proj.state_dict(),
                 "history": self.history,
+                "best_state": self.best_state,
+                "best_score": self.best_score,
+                "bad_checks": bad_checks,
+                "epoch": epoch,
+                "optimizer": self.optimizer.state_dict(),
+                "scheduler": self.scheduler.state_dict() if self.scheduler is not None else None,
+                "scaler": self.scaler.state_dict(),
                 "config": vars(self.args),
             },
             path,
@@ -1019,6 +1082,7 @@ def main() -> None:
     print(f"  device={device} amp={args.amp and device.type == 'cuda'} batch={batch_label}")
 
     trainer = ALETrainer(brain_encoder, text_proj, args, device)
+    trainer.load_resume_model_weights()
     trainer.preflight_batch_size(train_ds)
     with (run_dir / "config.json").open("w") as f:
         json.dump(vars(args), f, indent=2)
