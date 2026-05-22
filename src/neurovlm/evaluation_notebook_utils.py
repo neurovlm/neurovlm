@@ -16,12 +16,15 @@ from tqdm.notebook import tqdm
 
 from neurovlm.data import load_dataset, load_latent
 from neurovlm.metrics import (
+    bertscore_single,
     dice_percentile,
     mni152_to_fsaverage_arrays,
     nct_dice_spin_test_surface,
+    nvlm_latent_similarity,
     normalized_k_values,
     normalized_recall_curve_auc,
     pearson_correlation,
+    semantic_similarity,
 )
 from neurovlm.semantic_evaluation import multi_positive_ranking_metrics
 
@@ -663,35 +666,6 @@ def finite_box_values(values: Iterable[float]) -> np.ndarray:
 def finite_sem(values: Iterable[float]) -> float:
     series = pd.Series(values).dropna()
     return float(series.std() / np.sqrt(max(series.count(), 1)))
-
-
-def semantic_similarity(st_model, st_util, generated: str, reference: str) -> float:
-    emb1 = st_model.encode(generated, convert_to_tensor=True)
-    emb2 = st_model.encode(reference, convert_to_tensor=True)
-    return float(st_util.cos_sim(emb1, emb2))
-
-
-def bertscore_single(bert_score_fn, generated: str, reference: str, model_type: str) -> tuple[float, float, float]:
-    p, r, f1 = bert_score_fn(
-        cands=[generated],
-        refs=[reference],
-        lang="en",
-        model_type=model_type,
-        verbose=False,
-    )
-    return float(p[0]), float(r[0]), float(f1[0])
-
-
-def nvlm_latent_similarity(nvlm, brain_query_emb: torch.Tensor, generated: str) -> float:
-    nvlm._ensure_projection_heads()
-    with torch.no_grad():
-        raw_emb = nvlm._encode_text(generated)
-        z_text = nvlm._proj_head_text_infonce(raw_emb.to(nvlm.device))
-        z_text = F.normalize(z_text, dim=-1).cpu()
-    z_brain = brain_query_emb.cpu()
-    if z_brain.dim() == 1:
-        z_brain = z_brain.unsqueeze(0)
-    return float(F.cosine_similarity(z_brain, z_text))
 
 
 def format_context_summary(table: pd.DataFrame) -> str:

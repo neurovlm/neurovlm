@@ -5,6 +5,7 @@ import pytest
 import torch
 
 from neurovlm.metrics import (
+    bertscore_single,
     bleu,
     compute_metrics,
     dice,
@@ -15,6 +16,7 @@ from neurovlm.metrics import (
     recall_curve,
     retrieval_metrics,
     rouge,
+    semantic_similarity,
     bernoulli_bce,
     bits_per_pixel,
     compute_ae_performance,
@@ -25,7 +27,8 @@ from neurovlm.semantic_evaluation import (
     build_network_term_corpus_from_label_table,
     multi_positive_ranking_metrics,
 )
-from neurovlm.evaluation_notebook_utils import as_latent_batch, exact_term_ranking_outputs
+from neurovlm.evaluation_notebook_utils import as_latent_batch
+from neurovlm.brain_to_text_metrics import exact_term_ranking_outputs
 
 
 class TestBleu:
@@ -115,6 +118,32 @@ class TestRouge:
             "attention and perception involve brain networks",
         )
         assert 0.0 < scores["rouge1"]["fmeasure"] < 1.0
+
+
+class TestB2TTextMetrics:
+    """Tests for B2T text metric wrappers in metrics.py."""
+
+    def test_bertscore_single_unpacks_scores(self):
+        def fake_bert_score(**kwargs):
+            return torch.tensor([0.1]), torch.tensor([0.2]), torch.tensor([0.3])
+
+        precision, recall, f1 = bertscore_single(fake_bert_score, "generated", "reference", "fake-model")
+
+        assert precision == pytest.approx(0.1)
+        assert recall == pytest.approx(0.2)
+        assert f1 == pytest.approx(0.3)
+
+    def test_semantic_similarity_delegates_to_encoder_and_cosine(self):
+        class FakeModel:
+            def encode(self, text, convert_to_tensor=True):
+                return torch.tensor([1.0, 0.0]) if text == "a" else torch.tensor([0.0, 1.0])
+
+        class FakeUtil:
+            @staticmethod
+            def cos_sim(a, b):
+                return torch.dot(a, b).reshape(1, 1)
+
+        assert semantic_similarity(FakeModel(), FakeUtil(), "a", "b") == pytest.approx(0.0)
 
 
 class TestPearsonCorrelation:

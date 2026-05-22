@@ -88,6 +88,46 @@ def rouge(reference: str, hypothesis: str) -> dict[str, dict[str, float]]:
     }
 
 
+def bertscore_single(
+    bert_score_fn,
+    generated: str,
+    reference: str,
+    model_type: str,
+) -> tuple[float, float, float]:
+    """Compute BERTScore precision, recall, and F1 for one generated string."""
+
+    p, r, f1 = bert_score_fn(
+        cands=[generated],
+        refs=[reference],
+        lang="en",
+        model_type=model_type,
+        verbose=False,
+    )
+    return float(p[0]), float(r[0]), float(f1[0])
+
+
+def semantic_similarity(st_model, st_util, generated: str, reference: str) -> float:
+    """Sentence-level cosine similarity for generated/reference text."""
+
+    emb1 = st_model.encode(generated, convert_to_tensor=True)
+    emb2 = st_model.encode(reference, convert_to_tensor=True)
+    return float(st_util.cos_sim(emb1, emb2))
+
+
+def nvlm_latent_similarity(nvlm, brain_query_emb: torch.Tensor, generated: str) -> float:
+    """Cosine similarity between a brain query and generated text in NeuroVLM space."""
+
+    nvlm._ensure_projection_heads()
+    with torch.no_grad():
+        raw_emb = nvlm._encode_text(generated)
+        z_text = nvlm._proj_head_text_infonce(raw_emb.to(nvlm.device))
+        z_text = F.normalize(z_text, dim=-1).cpu()
+    z_brain = brain_query_emb.cpu()
+    if z_brain.dim() == 1:
+        z_brain = z_brain.unsqueeze(0)
+    return float(F.cosine_similarity(z_brain, z_text))
+
+
 # ---------------------------------------------------------------------------
 # Brain image similarity / quality metrics
 # ---------------------------------------------------------------------------
