@@ -15,7 +15,7 @@ This script creates two artifacts:
 
 Example
 -------
-python scripts/prepare_neuro_summaries.py \
+python docs/data_preparation/scripts/prepare_neuro_summaries.py \
     --output-dir /tmp/neuro_summaries_artifacts \
     --device cuda \
     --batch-size 32
