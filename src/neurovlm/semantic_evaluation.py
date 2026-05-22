@@ -392,6 +392,11 @@ def encode_network_maps(
 def load_network_label_table(path: str | Path | None = None) -> pd.DataFrame:
     """Load the reusable network-label ground truth CSV."""
 
+    if path is None:
+        from neurovlm.data import load_dataset
+
+        return load_dataset("network_test_set_labels")
+
     module_repo_root = Path(__file__).resolve().parents[2]
     search_roots = [Path.cwd(), module_repo_root]
     search_roots.extend(Path.cwd().parents)
@@ -404,12 +409,6 @@ def load_network_label_table(path: str | Path | None = None) -> pd.DataFrame:
         else:
             candidates.extend(root / path_obj for root in search_roots)
 
-    relative_candidates = [
-        Path("docs/03_evaluation/network_test_set_labels.csv"),
-        Path("experiments/data/networks_labels/network_test_set_labels.csv"),
-    ]
-    candidates.extend(root / rel for root in search_roots for rel in relative_candidates)
-
     seen: set[Path] = set()
     for candidate in candidates:
         candidate = candidate.resolve()
@@ -420,7 +419,7 @@ def load_network_label_table(path: str | Path | None = None) -> pd.DataFrame:
             return pd.read_csv(candidate)
     searched = "\n".join(str(p) for p in sorted(seen))
     raise FileNotFoundError(
-        "Could not find network_test_set_labels.csv. Pass NETWORK_LABELS_CSV explicitly. "
+        "Could not find the explicit network label CSV path. With path=None, labels are loaded from Hugging Face. "
         f"Searched:\n{searched}"
     )
 
