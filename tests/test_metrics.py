@@ -25,6 +25,7 @@ from neurovlm.semantic_evaluation import (
     build_network_term_corpus_from_label_table,
     multi_positive_ranking_metrics,
 )
+from neurovlm.evaluation_notebook_utils import as_latent_batch, exact_term_ranking_outputs
 
 
 class TestBleu:
@@ -552,3 +553,31 @@ class TestComputeAEPerformance:
         assert roc_auc > 0.99
         # Percentage improvement should be positive
         assert np.mean(pct) > 0
+
+
+class TestEvaluationNotebookUtils:
+    """Tests for notebook helper utilities."""
+
+    def test_as_latent_batch_stacks_list_of_tensors(self):
+        latents = [torch.ones(4), torch.zeros(4)]
+
+        batch = as_latent_batch(latents)
+
+        assert batch.shape == (2, 4)
+        assert torch.allclose(batch[0], torch.ones(4))
+        assert torch.allclose(batch[1], torch.zeros(4))
+
+    def test_exact_term_curve_reaches_one_for_ranked_reachable_gold(self):
+        _, curve_rows, auc_row = exact_term_ranking_outputs(
+            dataset="networks",
+            sample="example",
+            gold_terms=["attention", "working memory"],
+            retrieved_terms=["attention", "visual", "working memory"],
+            term_eval_normalized_ks=(1.0,),
+            term_recall_curve_normalized_ks=(0.0, 1.0),
+            reachable_terms={"attention", "working memory", "visual"},
+        )
+
+        assert curve_rows[-1]["normalized_k"] == pytest.approx(1.0)
+        assert curve_rows[-1]["recall_at_normalized_k"] == pytest.approx(1.0)
+        assert auc_row["n_unreachable_gold_terms"] == 0

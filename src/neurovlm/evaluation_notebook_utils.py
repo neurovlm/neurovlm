@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import traceback
+from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
@@ -26,6 +27,18 @@ from neurovlm.semantic_evaluation import multi_positive_ranking_metrics
 
 
 NETWORK_TEST_SET_SOURCE = "huggingface:neurovlm/embedded_text/network_test_set_labels.csv"
+
+
+def resolve_evaluation_output_dir(path: str = "docs/03_evaluation/outputs") -> Path:
+    """Resolve evaluation outputs from repo root or from inside docs/03_evaluation."""
+
+    output_dir = Path(path)
+    if output_dir.parent.exists():
+        return output_dir
+    local_output_dir = Path("outputs")
+    if Path.cwd().name == "03_evaluation":
+        return local_output_dir
+    return output_dir
 
 
 def normalize_expected_text(text: str) -> str:
@@ -1137,6 +1150,7 @@ def run_network_gold_term_ranking(
             sample=sample,
         )
         retrieved_terms = unique_ranked_terms_from_table(table)
+        ranked_reachable_terms = {normalize_term_text(term) for term in retrieved_terms if normalize_term_text(term)}
         metric_rows, curve_rows, auc_row = exact_term_ranking_outputs(
             dataset=dataset,
             sample=sample,
@@ -1144,7 +1158,7 @@ def run_network_gold_term_ranking(
             retrieved_terms=retrieved_terms,
             term_eval_normalized_ks=term_eval_normalized_ks,
             term_recall_curve_normalized_ks=term_recall_curve_normalized_ks,
-            reachable_terms=network_candidate_terms,
+            reachable_terms=ranked_reachable_terms,
         )
         term_metric_rows.extend(metric_rows)
         term_curve_rows.extend(curve_rows)
@@ -1174,9 +1188,7 @@ def run_network_gold_term_ranking(
 
 def project_text_latents_to_shared(nvlm, text_latents, batch_size: int = 4096) -> torch.Tensor:
     nvlm._ensure_projection_heads()
-    x = torch.as_tensor(text_latents).float()
-    if x.dim() == 1:
-        x = x.unsqueeze(0)
+    x = as_latent_batch(text_latents).float()
     chunks = []
     with torch.no_grad():
         for start in range(0, len(x), batch_size):

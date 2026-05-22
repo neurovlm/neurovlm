@@ -180,6 +180,51 @@ the same concept region the model uses for retrieval — that is a good result.
 The consistency across datasets and modes (~0.30–0.36) indicates the model is
 reliably anchoring to the right brain concept regardless of output length.
 
+### Optional scale check for interpretability
+
+If you care about making `nvlm_sim` easy to interpret for readers, it is worth
+adding the NeuroVLM scale-check plot as a contextual diagnostic. This is not a
+separate success criterion; it is a sanity check that helps answer: **is a cosine
+value like 0.32 actually meaningful in this embedding space?**
+
+The notebook does this by comparing two distributions within each dataset/mode
+group:
+
+1. **Matched pairs** — each generated text is compared with the brain map that
+   originally produced it.
+2. **Random/off-diagonal pairs** — each generated text is compared with all other
+   brain maps in the same group.
+
+In code, `generated_text_pair_baseline(...)` re-embeds the generated texts with
+NeuroVLM's text encoder and projection head, projects the corresponding brain
+latents into the same shared space, then builds the full text-by-brain cosine
+similarity matrix. The diagonal of that matrix is the matched distribution. The
+off-diagonal entries are the random-pair baseline.
+
+The resulting histogram is useful because absolute cosine values in an InfoNCE
+space are not meant to be read like ordinary sentence-transformer scores. A value
+around 0.30 can be strong if matched pairs are clearly shifted above random pairs.
+If the matched and random distributions overlap heavily, then `nvlm_sim` is less
+interpretable on its own, even if the mean value looks reasonable.
+
+Use this plot when presenting results to make the scale intuitive:
+
+```python
+baseline_df = generated_text_pair_baseline(
+    nvlm=nvlm,
+    b2t_all=b2t_all,
+    networks_data=networks_data,
+    pubmed_eval=pubmed_eval,
+    neurovault_eval=neurovault_eval,
+)
+```
+
+The notebook saves this diagnostic as:
+
+```
+b2t_nvlm_sim_scale.png
+```
+
 ---
 
 ## 4. Generated-text normalized Recall@k AUC
