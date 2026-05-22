@@ -5,6 +5,7 @@ import pytest
 import torch
 
 from neurovlm.metrics import (
+    as_latent_batch,
     bertscore_single,
     bleu,
     compute_metrics,
@@ -27,7 +28,6 @@ from neurovlm.semantic_evaluation import (
     build_network_term_corpus_from_label_table,
     multi_positive_ranking_metrics,
 )
-from neurovlm.evaluation_notebook_utils import as_latent_batch
 from neurovlm.brain_to_text_metrics import exact_term_ranking_outputs
 
 
