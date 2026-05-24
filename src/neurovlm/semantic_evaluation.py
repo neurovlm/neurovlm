@@ -24,7 +24,7 @@ import torch.nn.functional as F
 from nilearn.image import resample_img
 from tqdm import tqdm
 
-from neurovlm.metrics import normalized_recall_curve_auc, retrieval_ranks
+from neurovlm.retrieval_metrics import normalized_recall_curve_auc, retrieval_ranks
 
 
 DEFAULT_NETWORK_LABEL_DEFINITIONS: dict[str, tuple[str, str]] = {

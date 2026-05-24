@@ -4,10 +4,11 @@ This document describes every metric used in `21_brain_to_text_metrics.ipynb` fo
 the Brain → Text direction. Each section covers what the metric measures, how it is
 computed, its numerical scale, and how to interpret scores in the context of this task.
 
-Metric primitives such as BERTScore, sentence semantic similarity, and NeuroVLM
-latent similarity live in `src/neurovlm/metrics.py`. Brain-to-text evaluation
-workflows, including generated-text retrieval, network gold-term ranking, and the
-NeuroVLM scale check, live in `src/neurovlm/brain_to_text_metrics.py`.
+Brain-to-text metric primitives such as BERTScore, sentence semantic similarity,
+and NeuroVLM latent similarity live with the brain-to-text workflows in
+`src/neurovlm/brain_to_text_metrics.py`. Shared retrieval-curve helpers live in
+`src/neurovlm/retrieval_metrics.py`, and `src/neurovlm/metrics.py` remains only as
+a backward-compatible import index for older code.
 
 ---
 

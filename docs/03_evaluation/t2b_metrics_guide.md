@@ -5,6 +5,11 @@ for the Text -> Brain direction. The local notebook uses the same metric logic; 
 Colab notebook is treated as the most up-to-date reference because it is configured
 for the full evaluation run.
 
+Text-to-brain metric primitives and workflows live in
+`src/neurovlm/text_to_brain_metrics.py`. Shared retrieval-curve helpers live in
+`src/neurovlm/retrieval_metrics.py`, and `src/neurovlm/metrics.py` remains only as
+a backward-compatible import index for older code.
+
 ---
 
 ## Overview

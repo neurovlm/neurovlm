@@ -13,15 +13,159 @@ import torch.nn.functional as F
 from tqdm.notebook import tqdm
 
 from neurovlm.data import load_dataset, load_latent
-from neurovlm.metrics import (
-    as_latent_batch,
-    bertscore_single,
-    nvlm_latent_similarity,
-    normalized_k_values,
-    normalized_recall_curve_auc,
-    semantic_similarity,
-)
+from neurovlm.metric_utils import as_latent_batch
+from neurovlm.retrieval_metrics import normalized_k_values, normalized_recall_curve_auc
 from neurovlm.semantic_evaluation import multi_positive_ranking_metrics
+
+
+def bleu(references: list[str], hypothesis: str, n: int = 4) -> float:
+    """Compute BLEU score for text generation evaluation.
+
+    Useful for evaluating text produced from brain activations against a set
+    of reference descriptions.
+
+    Parameters
+    ----------
+    references : list of str
+        One or more reference texts to compare against.
+    hypothesis : str
+        The generated/predicted text.
+    n : int, optional
+        Maximum n-gram order (1–4). Default is 4.
+
+    Returns
+    -------
+    score : float
+        Sentence-level BLEU score in [0, 1].
+
+    Notes
+    -----
+    Requires ``nltk`` (included in the ``metrics`` optional dependency group).
+    Uses ``SmoothingFunction.method1`` to avoid zero scores on short texts.
+    """
+    from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+
+    ref_tokens = [ref.lower().split() for ref in references]
+    hyp_tokens = hypothesis.lower().split()
+    weights = tuple(1.0 / n for _ in range(n))
+    smoother = SmoothingFunction().method1
+    return float(sentence_bleu(ref_tokens, hyp_tokens, weights=weights,
+                               smoothing_function=smoother))
+
+
+def rouge(reference: str, hypothesis: str) -> dict[str, dict[str, float]]:
+    """Compute ROUGE-1, ROUGE-2, and ROUGE-L scores for text generation.
+
+    Useful for evaluating text produced from brain activations against a
+    reference description.
+
+    Parameters
+    ----------
+    reference : str
+        The ground-truth reference text.
+    hypothesis : str
+        The generated/predicted text.
+
+    Returns
+    -------
+    scores : dict
+        Keys are ``'rouge1'``, ``'rouge2'``, ``'rougeL'``.  Each value is a
+        dict with ``'precision'``, ``'recall'``, and ``'fmeasure'`` floats.
+
+    Notes
+    -----
+    Requires ``rouge-score`` (included in the ``metrics`` optional dependency
+    group).  Stemming is enabled for robustness to inflectional variation.
+    """
+    from rouge_score import rouge_scorer
+
+    scorer = rouge_scorer.RougeScorer(
+        ['rouge1', 'rouge2', 'rougeL'], use_stemmer=True
+    )
+    raw = scorer.score(reference, hypothesis)
+    return {
+        key: {
+            'precision': val.precision,
+            'recall': val.recall,
+            'fmeasure': val.fmeasure,
+        }
+        for key, val in raw.items()
+    }
+
+
+def bertscore_single(
+    bert_score_fn,
+    generated: str,
+    reference: str,
+    model_type: str,
+) -> tuple[float, float, float]:
+    """Compute BERTScore precision, recall, and F1 for one generated string."""
+
+    p, r, f1 = bert_score_fn(
+        cands=[generated],
+        refs=[reference],
+        lang="en",
+        model_type=model_type,
+        verbose=False,
+    )
+    return float(p[0]), float(r[0]), float(f1[0])
+
+
+def semantic_similarity(st_model, st_util, generated: str, reference: str) -> float:
+    """Sentence-level cosine similarity for generated/reference text."""
+
+    emb1 = st_model.encode(generated, convert_to_tensor=True)
+    emb2 = st_model.encode(reference, convert_to_tensor=True)
+    return float(st_util.cos_sim(emb1, emb2))
+
+
+def nvlm_latent_similarity(nvlm, brain_query_emb: torch.Tensor, generated: str) -> float:
+    """Cosine similarity between a brain query and generated text in NeuroVLM space."""
+
+    nvlm._ensure_projection_heads()
+    with torch.no_grad():
+        raw_emb = nvlm._encode_text(generated)
+        raw_emb = F.normalize(raw_emb.to(nvlm.device), dim=1, eps=1e-8)
+        z_text = nvlm._proj_head_text_infonce(raw_emb)
+        z_text = F.normalize(z_text, dim=-1).cpu()
+    z_brain = brain_query_emb.cpu()
+    if z_brain.dim() == 1:
+        z_brain = z_brain.unsqueeze(0)
+    return float(F.cosine_similarity(z_brain, z_text))
+
+
+def token_f1(reference: str, hypothesis: str) -> float:
+    """Compute token-level F1 between a reference and hypothesis string.
+
+    Standard SQuAD-style metric: multi-set token overlap over lowercased
+    whitespace-split tokens.
+
+    Parameters
+    ----------
+    reference : str
+        Ground-truth text.
+    hypothesis : str
+        Generated/predicted text.
+
+    Returns
+    -------
+    f1 : float
+        Token F1 in [0, 1].  Returns 0.0 when either string is empty.
+    """
+    from collections import Counter
+
+    ref_tokens = reference.lower().split()
+    hyp_tokens = hypothesis.lower().split()
+    if not ref_tokens or not hyp_tokens:
+        return 0.0
+    ref_counts = Counter(ref_tokens)
+    hyp_counts = Counter(hyp_tokens)
+    common = sum((ref_counts & hyp_counts).values())
+    if common == 0:
+        return 0.0
+    precision = common / len(hyp_tokens)
+    recall = common / len(ref_tokens)
+    return 2 * precision * recall / (precision + recall)
 
 
 def format_context_summary(table: pd.DataFrame) -> str:
@@ -1021,6 +1165,9 @@ def predownload_hf_model(model_name: str, tokenizer_cls, model_cls) -> None:
     print("BERTScore model is cached.")
 
 __all__ = [
+    "token_f1",
+    "rouge",
+    "bleu",
     "add_network_label_accuracy",
     "auc_trapezoid",
     "bertscore_single",
