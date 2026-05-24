@@ -12,7 +12,7 @@ import torch
 import torch.nn.functional as F
 from tqdm.notebook import tqdm
 
-from neurovlm.data import load_dataset
+from neurovlm.data import load_dataset, load_latent
 from neurovlm.metrics import (
     as_latent_batch,
     bertscore_single,
