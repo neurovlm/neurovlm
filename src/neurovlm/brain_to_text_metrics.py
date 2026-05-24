@@ -713,7 +713,7 @@ def run_pubmed_mesh_gold_ranking(
     node_type_by_term: dict[str, str] = {}
     if annotations is not None:
         try:
-            mesh_nodes_for_gold = load_dataset("mesh_kg_nodes")
+            mesh_nodes_for_gold = load_dataset("pubmed_mesh_nodes")
             if "node_type" in mesh_nodes_for_gold.columns:
                 name_col = "name" if "name" in mesh_nodes_for_gold.columns else "term"
                 node_type_by_term = {
@@ -722,7 +722,7 @@ def run_pubmed_mesh_gold_ranking(
                     if pd.notna(row.get(name_col)) and pd.notna(row.get("node_type"))
                 }
         except Exception as exc:
-            print(f"Could not load mesh_kg_nodes for node-type filtering: {type(exc).__name__}: {exc}")
+            print(f"Could not load pubmed_mesh_nodes for node-type filtering: {type(exc).__name__}: {exc}")
 
     allowed_mesh_types = set(mesh_brain_rankable_node_types)
     mesh_candidate_df = load_dataset(pubmed_b2t_dataset).copy()

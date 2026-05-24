@@ -157,7 +157,7 @@ def load_existing_terms() -> set[str]:
     from neurovlm.data import load_dataset
 
     existing: set[str] = set()
-    for dataset_name in ["cogatlas", "cogatlas_task", "cogatlas_disorder", "kg_mesh"]:
+    for dataset_name in ["cogatlas", "cogatlas_task", "cogatlas_disorder", "pubmed_mesh"]:
         df = load_dataset(dataset_name)
         for col in ["term", "title", "name"]:
             if col in df.columns:

@@ -21,14 +21,13 @@ TEXT_EMBED_DIM = 768
 LATENT_DIM = 384
 BRAIN_FLAT_DIM = 28542
 
-DEFAULT_TEXT_DATASETS = ("wiki", "cogatlas", "ngrams", "kg_mesh", "llm_neuro_terms")
+DEFAULT_TEXT_DATASETS = ("wiki", "cogatlas", "ngrams", "pubmed_mesh", "llm_neuro_terms")
 DATASET_ALIASES = {
     "publications": "pubmed",
     "summaries": "pubmed_summaries",
     "summary": "pubmed_summaries",
     "neuro_summaries": "pubmed_summaries",
     "pubmed_summary": "pubmed_summaries",
-    "neurowiki": "wiki",
     "concepts": "cogatlas",
     "tasks": "cogatlas_task",
     "disorders": "cogatlas_disorder",
@@ -39,16 +38,6 @@ DATASET_ALIASES = {
     "ngram": "ngrams",
     "n_grams": "ngrams",
     "n-grams": "ngrams",
-    "mesh_kg": "kg_mesh",
-    "pubmed_mesh": "kg_mesh",
-    "pubmed_mesh_brain_rankable": "kg_mesh_brain_rankable",
-    "mesh_brain_rankable": "kg_mesh_brain_rankable",
-    "pubmed_mesh_brain_rankable_plus_molecular": "kg_mesh_brain_rankable_plus_molecular",
-    "mesh_brain_rankable_plus_molecular": "kg_mesh_brain_rankable_plus_molecular",
-    "llm_terms": "llm_neuro_terms",
-    "llm_extracted_terms": "llm_neuro_terms",
-    "llm_extracted_neuro_terms": "llm_neuro_terms",
-    "llm_extracted__neuro_terms": "llm_neuro_terms",
 }
 DATASET_ID_COLUMNS = {
     "pubmed": "pmid",
@@ -59,37 +48,37 @@ DATASET_ID_COLUMNS = {
     "cogatlas_disorder": "term",
     "networks": "title",
     "ngrams": "term",
-    "kg_mesh": "term",
-    "kg_mesh_brain_rankable": "term",
-    "kg_mesh_brain_rankable_plus_molecular": "term",
+    "pubmed_mesh": "term",
+    "pubmed_mesh_brain_rankable": "term",
+    "pubmed_mesh_brain_rankable_plus_molecular": "term",
     "llm_neuro_terms": "term",
 }
 
 TEXT_DATASET_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
     "pubmed": ("pubmed_text", "publications", "pubmed"),
     "pubmed_summaries": ("pubmed_summaries", "neuro_summaries"),
-    "wiki": ("wiki", "neurowiki"),
+    "wiki": ("wiki",),
     "cogatlas": ("cogatlas",),
     "cogatlas_task": ("cogatlas_task",),
     "cogatlas_disorder": ("cogatlas_disorder",),
     "ngrams": ("ngrams",),
-    "kg_mesh": ("kg_mesh",),
-    "kg_mesh_brain_rankable": ("kg_mesh_brain_rankable",),
-    "kg_mesh_brain_rankable_plus_molecular": ("kg_mesh_brain_rankable_plus_molecular",),
-    "llm_neuro_terms": ("llm_neuro_terms", "llm_terms", "llm_extracted_neuro_terms"),
+    "pubmed_mesh": ("pubmed_mesh",),
+    "pubmed_mesh_brain_rankable": ("pubmed_mesh_brain_rankable",),
+    "pubmed_mesh_brain_rankable_plus_molecular": ("pubmed_mesh_brain_rankable_plus_molecular",),
+    "llm_neuro_terms": ("llm_neuro_terms",),
 }
 TEXT_LATENT_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
     "pubmed": ("pubmed_text", "publications", "pubmed"),
     "pubmed_summaries": ("pubmed_summaries", "neuro_summaries"),
-    "wiki": ("wiki", "neurowiki"),
+    "wiki": ("wiki",),
     "cogatlas": ("cogatlas",),
     "cogatlas_task": ("cogatlas_task",),
     "cogatlas_disorder": ("cogatlas_disorder",),
     "ngrams": ("ngrams",),
-    "kg_mesh": ("kg_mesh",),
-    "kg_mesh_brain_rankable": ("kg_mesh_brain_rankable",),
-    "kg_mesh_brain_rankable_plus_molecular": ("kg_mesh_brain_rankable_plus_molecular",),
-    "llm_neuro_terms": ("llm_neuro_terms", "llm_terms", "llm_extracted_neuro_terms"),
+    "pubmed_mesh": ("pubmed_mesh",),
+    "pubmed_mesh_brain_rankable": ("pubmed_mesh_brain_rankable",),
+    "pubmed_mesh_brain_rankable_plus_molecular": ("pubmed_mesh_brain_rankable_plus_molecular",),
+    "llm_neuro_terms": ("llm_neuro_terms",),
 }
 
 
@@ -2384,7 +2373,7 @@ class NeuroVLM:
                 )
 
             # Run text-to-text retrieval without overwriting the user's stored results.
-            # Default to cogatlas + neurowiki (wiki) so the LLM receives clean term lists.
+            # Default to cogatlas + wiki so the LLM receives clean term lists.
             saved_last_result = self._last_result
             saved_last_text_result = self.last_text_result
             try:
@@ -2460,9 +2449,9 @@ class NeuroVLM:
                 "cogatlas_task",
                 "cogatlas_disorder",
                 "ngrams",
-                "kg_mesh",
-                "kg_mesh_brain_rankable",
-                "kg_mesh_brain_rankable_plus_molecular",
+                "pubmed_mesh",
+                "pubmed_mesh_brain_rankable",
+                "pubmed_mesh_brain_rankable_plus_molecular",
                 "llm_neuro_terms",
             ):
                 cogatlas_lines.append(entry)
