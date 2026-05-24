@@ -704,7 +704,6 @@ def _load_pubmed_mesh_annotations() -> dict:
         return json.load(f)
 
 
-@lru_cache(maxsize=1)
 def _proj_head_image_infonce() -> torch.nn.Module:
     """Load and return the image projection head from HuggingFace."""
     model_path = _download_from_hf(

@@ -755,7 +755,7 @@ class NeuroVLM:
 
         self.datasets = tuple(self._canonicalize_datasets(datasets or DEFAULT_TEXT_DATASETS))
 
-        self._proj_head_image = None
+        self._proj_head_image_infonce = None
         self._proj_head_text_infonce = None
         self._proj_head_text_mse = None
         self._specter = None
@@ -1163,7 +1163,7 @@ class NeuroVLM:
             latent = self._encode_brain_image(X)
             self._ensure_projection_heads()
             with torch.no_grad():
-                latent = self._proj_head_image(latent.to(self.device))
+                latent = self._proj_head_image_infonce(latent.to(self.device))
             return _l2_normalize(latent), "shared"
 
         tensor = self._coerce_numeric_query(X)
@@ -1188,7 +1188,7 @@ class NeuroVLM:
             latent = self._encode_brain_flat(tensor)
             self._ensure_projection_heads()
             with torch.no_grad():
-                latent = self._proj_head_image(latent.to(self.device))
+                latent = self._proj_head_image_infonce(latent.to(self.device))
             return _l2_normalize(latent), "shared"
 
         if dim == LATENT_DIM:
@@ -1196,7 +1196,7 @@ class NeuroVLM:
                 raise ValueError("brain-to-text retrieval requires `project=True`.")
             self._ensure_projection_heads()
             with torch.no_grad():
-                latent = self._proj_head_image(tensor.to(self.device))
+                latent = self._proj_head_image_infonce(tensor.to(self.device))
             return _l2_normalize(latent), "shared"
 
         raise ValueError(
@@ -1268,7 +1268,7 @@ class NeuroVLM:
         if head == "infonce" and project:
             self._ensure_projection_heads()
             with torch.no_grad():
-                out = self._proj_head_image(latent.to(self.device))
+                out = self._proj_head_image_infonce(latent.to(self.device))
             return _l2_normalize(out), "infonce"
         return latent.to(self.device), "mse"
 
@@ -1330,7 +1330,7 @@ class NeuroVLM:
         if require_infonce and self._brain_embeddings_infonce is None:
             self._ensure_projection_heads()
             with torch.no_grad():
-                shared = self._proj_head_image(self._brain_latent.to(self.device))
+                shared = self._proj_head_image_infonce(self._brain_latent.to(self.device))
             self._brain_embeddings_infonce = _l2_normalize(shared)
 
     def _ensure_network_brain_index(self) -> None:
@@ -1344,7 +1344,7 @@ class NeuroVLM:
 
         self._ensure_projection_heads()
         with torch.no_grad():
-            shared = self._proj_head_image(latent_tensor.to(self.device))
+            shared = self._proj_head_image_infonce(latent_tensor.to(self.device))
 
         self._network_brain_latent = latent_tensor
         self._network_brain_latent_cpu = latent_tensor.detach().cpu()
@@ -1362,7 +1362,7 @@ class NeuroVLM:
 
         self._ensure_projection_heads()
         with torch.no_grad():
-            shared = self._proj_head_image(latent_tensor.to(self.device))
+            shared = self._proj_head_image_infonce(latent_tensor.to(self.device))
 
         self._neurovault_brain_latent = latent_tensor
         self._neurovault_brain_latent_cpu = latent_tensor.detach().cpu()
@@ -1787,8 +1787,8 @@ class NeuroVLM:
 
     def _ensure_projection_heads(self) -> None:
         """Lazy-load projection heads."""
-        if self._proj_head_image is None:
-            self._proj_head_image = load_model("proj_head_image_infonce").to(self.device).eval()
+        if self._proj_head_image_infonce is None:
+            self._proj_head_image_infonce = load_model("proj_head_image_infonce").to(self.device).eval()
         if self._proj_head_text_infonce is None:
             self._proj_head_text_infonce = load_model("proj_head_text_infonce").to(self.device).eval()
         if self._proj_head_text_mse is None:

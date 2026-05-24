@@ -522,7 +522,8 @@ def project_text_latents_to_shared(nvlm, text_latents, batch_size: int = 4096) -
     chunks = []
     with torch.no_grad():
         for start in range(0, len(x), batch_size):
-            z = nvlm._proj_head_text_infonce(x[start : start + batch_size].to(nvlm.device))
+            text_batch = F.normalize(x[start : start + batch_size].to(nvlm.device), dim=1, eps=1e-8)
+            z = nvlm._proj_head_text_infonce(text_batch)
             chunks.append(F.normalize(z.float(), dim=1, eps=1e-8).detach().cpu())
     return torch.cat(chunks, dim=0)
 
@@ -531,9 +532,10 @@ def project_brain_latents_to_shared(nvlm, brain_latents, batch_size: int = 4096)
     nvlm._ensure_projection_heads()
     batch = as_latent_batch(brain_latents).float()
     chunks = []
+    image_head = nvlm._proj_head_image_infonce
     with torch.no_grad():
         for start in range(0, len(batch), batch_size):
-            z = nvlm._proj_head_image(batch[start : start + batch_size].to(nvlm.device))
+            z = image_head(batch[start : start + batch_size].to(nvlm.device))
             chunks.append(F.normalize(z.float(), dim=1, eps=1e-8).detach().cpu())
     return torch.cat(chunks, dim=0)
 

@@ -11,6 +11,7 @@ from neurovlm.metrics import (
     compute_metrics,
     dice,
     dice_top_k,
+    nvlm_latent_similarity,
     pearson_correlation,
     psnr,
     recall_at_k,
@@ -28,7 +29,7 @@ from neurovlm.semantic_evaluation import (
     build_network_term_corpus_from_label_table,
     multi_positive_ranking_metrics,
 )
-from neurovlm.brain_to_text_metrics import exact_term_ranking_outputs
+from neurovlm.brain_to_text_metrics import exact_term_ranking_outputs, project_text_latents_to_shared
 
 
 class TestBleu:
@@ -144,6 +145,57 @@ class TestB2TTextMetrics:
                 return torch.dot(a, b).reshape(1, 1)
 
         assert semantic_similarity(FakeModel(), FakeUtil(), "a", "b") == pytest.approx(0.0)
+
+    def test_nvlm_latent_similarity_normalizes_text_before_projection(self):
+        class FakeProj:
+            def __init__(self):
+                self.seen = None
+
+            def __call__(self, x):
+                self.seen = x.detach().cpu()
+                return x
+
+        class FakeNVLM:
+            def __init__(self):
+                self.device = "cpu"
+                self._proj_head_text_infonce = FakeProj()
+
+            def _ensure_projection_heads(self):
+                pass
+
+            def _encode_text(self, generated):
+                return torch.tensor([[3.0, 4.0]])
+
+        nvlm = FakeNVLM()
+
+        score = nvlm_latent_similarity(nvlm, torch.tensor([[0.6, 0.8]]), "generated")
+
+        assert score == pytest.approx(1.0)
+        assert torch.linalg.norm(nvlm._proj_head_text_infonce.seen, dim=1).item() == pytest.approx(1.0)
+
+    def test_project_text_latents_to_shared_normalizes_text_before_projection(self):
+        class FakeProj:
+            def __init__(self):
+                self.seen = None
+
+            def __call__(self, x):
+                self.seen = x.detach().cpu()
+                return x
+
+        class FakeNVLM:
+            def __init__(self):
+                self.device = "cpu"
+                self._proj_head_text_infonce = FakeProj()
+
+            def _ensure_projection_heads(self):
+                pass
+
+        nvlm = FakeNVLM()
+
+        out = project_text_latents_to_shared(nvlm, torch.tensor([[3.0, 4.0], [5.0, 12.0]]))
+
+        assert torch.allclose(torch.linalg.norm(nvlm._proj_head_text_infonce.seen, dim=1), torch.ones(2))
+        assert torch.allclose(torch.linalg.norm(out, dim=1), torch.ones(2))
 
 
 class TestPearsonCorrelation:

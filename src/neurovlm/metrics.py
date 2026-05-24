@@ -134,7 +134,8 @@ def nvlm_latent_similarity(nvlm, brain_query_emb: torch.Tensor, generated: str) 
     nvlm._ensure_projection_heads()
     with torch.no_grad():
         raw_emb = nvlm._encode_text(generated)
-        z_text = nvlm._proj_head_text_infonce(raw_emb.to(nvlm.device))
+        raw_emb = F.normalize(raw_emb.to(nvlm.device), dim=1, eps=1e-8)
+        z_text = nvlm._proj_head_text_infonce(raw_emb)
         z_text = F.normalize(z_text, dim=-1).cpu()
     z_brain = brain_query_emb.cpu()
     if z_brain.dim() == 1:
