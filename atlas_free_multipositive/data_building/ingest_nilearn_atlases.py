@@ -122,6 +122,19 @@ def _labels(atlas: Any) -> list[str]:
     return [clean(x) for x in labels]
 
 
+def _label_indices(atlas: Any) -> list[int] | None:
+    indices = _atlas_value(atlas, "indices")
+    if indices is None:
+        return None
+    cleaned: list[int] = []
+    for value in indices:
+        try:
+            cleaned.append(int(value))
+        except (TypeError, ValueError):
+            return None
+    return cleaned
+
+
 def _maps_path(atlas: Any) -> str | None:
     keys = (
         "maps",
@@ -168,54 +181,59 @@ def _maps_img(atlas: Any):
     return nib.load(path)
 
 
-def fetch_atlas(name: str):
+def fetch_atlas(name: str, data_dir: str | Path | None = None):
     from nilearn import datasets
 
     name = name.lower()
-    if name == "yeo_2011":
-        return datasets.fetch_atlas_yeo_2011(n_networks=7, thickness="thick")
-    if name == "yeo_2011_17":
-        return datasets.fetch_atlas_yeo_2011(n_networks=17, thickness="thick")
-    if name == "schaefer_2018":
-        return datasets.fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=2)
+    fetch_kwargs = {"data_dir": str(data_dir)} if data_dir else {}
+    if name in {"yeo_2011", "yeo_2011_17"}:
+        return datasets.fetch_atlas_yeo_2011(n_networks=17, thickness="thick", **fetch_kwargs)
+    if name == "yeo_2011_7":
+        return datasets.fetch_atlas_yeo_2011(n_networks=7, thickness="thick", **fetch_kwargs)
+    if name in {"schaefer_2018", "schaefer_2018_400"}:
+        return datasets.fetch_atlas_schaefer_2018(n_rois=400, yeo_networks=7, resolution_mm=2, **fetch_kwargs)
+    if name == "schaefer_2018_100":
+        return datasets.fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=2, **fetch_kwargs)
     if name == "schaefer_2018_200":
-        return datasets.fetch_atlas_schaefer_2018(n_rois=200, yeo_networks=7, resolution_mm=2)
+        return datasets.fetch_atlas_schaefer_2018(n_rois=200, yeo_networks=7, resolution_mm=2, **fetch_kwargs)
     if name == "harvard_oxford_cortical":
-        return datasets.fetch_atlas_harvard_oxford("cort-maxprob-thr25-2mm")
+        return datasets.fetch_atlas_harvard_oxford("cort-maxprob-thr25-2mm", **fetch_kwargs)
     if name == "harvard_oxford_subcortical":
-        return datasets.fetch_atlas_harvard_oxford("sub-maxprob-thr25-2mm")
+        return datasets.fetch_atlas_harvard_oxford("sub-maxprob-thr25-2mm", **fetch_kwargs)
     if name in {"juelich", "juelich_maxprob"}:
-        return datasets.fetch_atlas_juelich("maxprob-thr25-2mm")
+        return datasets.fetch_atlas_juelich("maxprob-thr25-2mm", **fetch_kwargs)
     if name in {"juelich_probabilistic", "juelich_prob"}:
-        return datasets.fetch_atlas_juelich("prob-2mm")
+        return datasets.fetch_atlas_juelich("prob-2mm", **fetch_kwargs)
     if name == "aal":
-        return datasets.fetch_atlas_aal(version="SPM12")
-    if name == "smith_2009":
-        return datasets.fetch_atlas_smith_2009(dimension=10, resting=True)
+        return datasets.fetch_atlas_aal(version="SPM12", **fetch_kwargs)
+    if name in {"smith_2009", "smith_2009_20"}:
+        return datasets.fetch_atlas_smith_2009(dimension=20, resting=True, **fetch_kwargs)
+    if name == "smith_2009_10":
+        return datasets.fetch_atlas_smith_2009(dimension=10, resting=True, **fetch_kwargs)
     if name in {"difumo", "difumo_64"}:
         try:
-            return datasets.fetch_atlas_difumo(dimension=64, resolution_mm=2, legacy_format=False)
+            return datasets.fetch_atlas_difumo(dimension=64, resolution_mm=2, legacy_format=False, **fetch_kwargs)
         except TypeError as exc:
             if "legacy_format" not in str(exc):
                 raise
-            return datasets.fetch_atlas_difumo(dimension=64, resolution_mm=2)
+            return datasets.fetch_atlas_difumo(dimension=64, resolution_mm=2, **fetch_kwargs)
     if name == "difumo_128":
         try:
-            return datasets.fetch_atlas_difumo(dimension=128, resolution_mm=2, legacy_format=False)
+            return datasets.fetch_atlas_difumo(dimension=128, resolution_mm=2, legacy_format=False, **fetch_kwargs)
         except TypeError as exc:
             if "legacy_format" not in str(exc):
                 raise
-            return datasets.fetch_atlas_difumo(dimension=128, resolution_mm=2)
+            return datasets.fetch_atlas_difumo(dimension=128, resolution_mm=2, **fetch_kwargs)
     if name == "msdl":
-        return datasets.fetch_atlas_msdl()
+        return datasets.fetch_atlas_msdl(**fetch_kwargs)
     if name in {"basc", "basc_064"}:
-        return datasets.fetch_atlas_basc_multiscale_2015(resolution=64, version="sym")
+        return datasets.fetch_atlas_basc_multiscale_2015(resolution=64, version="sym", **fetch_kwargs)
     if name == "basc_122":
-        return datasets.fetch_atlas_basc_multiscale_2015(resolution=122, version="sym")
+        return datasets.fetch_atlas_basc_multiscale_2015(resolution=122, version="sym", **fetch_kwargs)
     if name in {"craddock", "craddock_spatial"}:
-        return datasets.fetch_atlas_craddock_2012(homogeneity="spatial", grp_mean=True)
+        return datasets.fetch_atlas_craddock_2012(homogeneity="spatial", grp_mean=True, **fetch_kwargs)
     if name == "craddock_temporal":
-        return datasets.fetch_atlas_craddock_2012(homogeneity="temporal", grp_mean=True)
+        return datasets.fetch_atlas_craddock_2012(homogeneity="temporal", grp_mean=True, **fetch_kwargs)
     raise ValueError(f"Unknown atlas: {name}")
 
 
@@ -303,7 +321,20 @@ def _row(
     }
 
 
-def _iter_3d_components(data: np.ndarray, labels: list[str], atlas_name: str, map_type: str) -> Iterable[tuple[int, str, np.ndarray, bool]]:
+def _iter_3d_components(
+    data: np.ndarray,
+    labels: list[str],
+    atlas_name: str,
+    map_type: str,
+    label_indices: list[int] | None = None,
+) -> Iterable[tuple[int, str, np.ndarray, bool]]:
+    label_by_value = {}
+    if label_indices is not None:
+        label_by_value = {
+            label_id: labels[i]
+            for i, label_id in enumerate(label_indices)
+            if i < len(labels)
+        }
     if data.ndim == 4 and data.shape[3] == 1:
         data = data[..., 0]
     if data.ndim == 4:
@@ -315,7 +346,9 @@ def _iter_3d_components(data: np.ndarray, labels: list[str], atlas_name: str, ma
         unique = [int(v) for v in np.unique(data) if int(v) != 0]
         for label_id in unique:
             label_idx = label_id
-            label = labels[label_idx] if label_idx < len(labels) else f"{atlas_name} label {label_id}"
+            label = label_by_value.get(label_id)
+            if label is None:
+                label = labels[label_idx] if label_idx < len(labels) else f"{atlas_name} label {label_id}"
             if str(label).strip().lower() in {"background", "0"}:
                 continue
             yield label_id, label, (data == label_id).astype(np.float32), True
@@ -369,6 +402,9 @@ def _custom_atlas_rows(custom_cfg: list[dict[str, Any]], paths: dict[str, Any], 
 
 def build_nilearn_rows(atlas_names: list[str], paths: dict[str, Any], dataset_cfg: dict[str, Any]) -> list[dict]:
     out_dir = Path(paths.get("map_cache_dir", "atlas_free_multipositive/cache/maps")) / "nilearn"
+    nilearn_data_dir = paths.get("nilearn_data_dir")
+    if not nilearn_data_dir:
+        nilearn_data_dir = Path(paths.get("cache_dir", "atlas_free_multipositive/cache")) / "nilearn_data"
     target_img = load_target_mni152_2mm()
     rows: list[dict] = []
     preprocessing_config = {
@@ -380,7 +416,7 @@ def build_nilearn_rows(atlas_names: list[str], paths: dict[str, Any], dataset_cf
 
     for atlas_name in atlas_names:
         try:
-            atlas = fetch_atlas(atlas_name)
+            atlas = fetch_atlas(atlas_name, data_dir=nilearn_data_dir)
             img = _maps_img(atlas)
             if img is None:
                 print(f"Skipping {atlas_name}: no maps path")
@@ -390,8 +426,9 @@ def build_nilearn_rows(atlas_names: list[str], paths: dict[str, Any], dataset_cf
             continue
         data = np.asarray(img.get_fdata())
         labels = _labels(atlas)
+        label_indices = _label_indices(atlas)
         map_type = infer_map_kind(atlas_name, img)
-        for label_id, label_name, component, is_binary in _iter_3d_components(data, labels, atlas_name, map_type):
+        for label_id, label_name, component, is_binary in _iter_3d_components(data, labels, atlas_name, map_type, label_indices):
             component_img = nib.Nifti1Image(component, img.affine, img.header)
             resampled = resample_to_target(component_img, target_img, binary=is_binary, clamp_nonnegative=not is_binary)
             label_slug = slugify(label_name)

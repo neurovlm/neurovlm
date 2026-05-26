@@ -11,20 +11,25 @@ nilearn_atlases:
   - schaefer_2018
   - harvard_oxford_cortical
   - harvard_oxford_subcortical
-  - juelich_probabilistic
+  - juelich
   - aal
   - smith_2009
-  - difumo_64
-  - msdl
-  - basc_064
-  - craddock_spatial
 
 # Other supported Nilearn variants you can add after the defaults are stable:
+#   - yeo_2011_7
 #   - yeo_2011_17
+#   - schaefer_2018_100
 #   - schaefer_2018_200
-#   - juelich_maxprob
+#   - schaefer_2018_400
+#   - juelich_probabilistic
+#   - smith_2009_10
+#   - smith_2009_20
+#   - difumo_64
 #   - difumo_128
+#   - msdl
+#   - basc_064
 #   - basc_122
+#   - craddock_spatial
 #   - craddock_temporal
 
 # Optional priority-3 atlases that are not fetched reliably through Nilearn.

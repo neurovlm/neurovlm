@@ -16,11 +16,22 @@ def read_jsonl(path: str | Path) -> list[dict]:
 def summarize(rows: list[dict]) -> dict:
     source_counts = Counter(str(r.get("source", "")).split(":")[0] for r in rows)
     map_type_counts = Counter(r.get("map_type", "") for r in rows)
+    atlas_map_counts = Counter()
+    atlas_label_counts = Counter()
+    atlas_fallback_counts = Counter()
     pos_category_counts = Counter()
     pos_source_counts = Counter()
     missing_paths = []
     shapes = Counter()
     for row in rows:
+        source = str(row.get("source", ""))
+        is_atlas = source.startswith("nilearn:") or source.startswith("custom_atlas:")
+        if is_atlas:
+            atlas_name = source.split(":", 1)[1]
+            atlas_map_counts[atlas_name] += 1
+            atlas_label_counts[atlas_name] += len(row.get("positive_terms", []))
+            if row.get("quality_flags", {}).get("definition_fallback"):
+                atlas_fallback_counts[atlas_name] += 1
         path = row.get("nifti_path") or row.get("tensor_path")
         if path and not Path(path).exists():
             missing_paths.append(path)
@@ -31,6 +42,12 @@ def summarize(rows: list[dict]) -> dict:
     return {
         "n_rows": len(rows),
         "source_counts": dict(source_counts),
+        "atlas_map_counts": dict(atlas_map_counts),
+        "atlas_label_counts": dict(atlas_label_counts),
+        "atlas_fallback_definition_counts": dict(atlas_fallback_counts),
+        "total_new_atlas_derived_maps": sum(atlas_map_counts.values()),
+        "total_pubmed_ale_maps": source_counts.get("pubmed", 0),
+        "total_combined_training_examples": len(rows),
         "map_type_counts": dict(map_type_counts),
         "positive_category_counts": dict(pos_category_counts),
         "positive_source_counts": dict(pos_source_counts),
@@ -53,4 +70,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

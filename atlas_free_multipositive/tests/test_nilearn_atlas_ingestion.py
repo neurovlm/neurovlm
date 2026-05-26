@@ -23,3 +23,15 @@ def test_recarray_labels_prefer_readable_name_column():
     )
 
     assert _labels({"labels": labels}) == ["Mode A", "Mode B"]
+
+
+def test_label_indices_map_nonconsecutive_values_to_labels():
+    data = np.zeros((3, 3, 3), dtype=np.float32)
+    data[0, 0, 0] = 2001
+    data[1, 1, 1] = 5021
+    labels = ["Frontal Region", "Temporal Region"]
+    label_indices = [2001, 5021]
+
+    components = list(_iter_3d_components(data, labels, "aal", "atlas_region", label_indices))
+
+    assert [item[1] for item in components] == ["Frontal Region", "Temporal Region"]
