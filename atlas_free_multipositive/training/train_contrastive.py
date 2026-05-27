@@ -54,11 +54,28 @@ def main() -> None:
     p.add_argument("--text-proj-init", choices=["random", "pretrained_text_infonce"], default="random")
     p.add_argument("--text-proj-checkpoint", default=None, help="Optional Stage 2 text-to-brain projection checkpoint.")
     p.add_argument("--autoencoder-checkpoint", default=None, help="Optional Stage 1 checkpoint used to initialize the CNN brain encoder.")
+    p.add_argument("--base-channels", type=int, default=8)
+    p.add_argument("--num-blocks", type=int, default=2)
+    p.add_argument("--out-dim", type=int, default=384)
+    p.add_argument("--encoder-arch", choices=["plain", "resnet"], default="plain")
+    p.add_argument("--blocks-per-stage", type=int, default=2)
+    p.add_argument("--use-dilation", action="store_true")
+    p.add_argument("--multi-scale", action="store_true")
+    p.add_argument("--global-context", choices=["none", "se", "attention"], default="none")
     args = p.parse_args()
 
     ds = UnifiedMapTextDataset(args.jsonl)
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=True, collate_fn=MultiPositiveCollator(positives_per_map=2))
-    brain = build_brain_encoder().to(args.device)
+    brain = build_brain_encoder(
+        out_dim=args.out_dim,
+        encoder_arch=args.encoder_arch,
+        base_channels=args.base_channels,
+        num_blocks=args.num_blocks,
+        blocks_per_stage=args.blocks_per_stage,
+        use_dilation=args.use_dilation,
+        multi_scale=args.multi_scale,
+        global_context=args.global_context,
+    ).to(args.device)
     if args.autoencoder_checkpoint:
         init_summary = load_brain_encoder_from_autoencoder(brain, args.autoencoder_checkpoint, strict=False)
         print({"autoencoder_encoder_init": args.autoencoder_checkpoint, **init_summary})

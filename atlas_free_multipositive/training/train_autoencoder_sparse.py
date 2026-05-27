@@ -190,7 +190,10 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         model = torch.compile(model)
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(cfg.get("lr", 1e-4)), weight_decay=float(cfg.get("weight_decay", 1e-4)))
     loss_cfg = loss_config_from_dict(cfg)
-    ckpt = CheckpointManager(cfg.get("checkpoint_dir", "atlas_free_multipositive/outputs/runs/sparse_autoencoder/checkpoints"))
+    ckpt = CheckpointManager(
+        cfg.get("checkpoint_dir", "atlas_free_multipositive/outputs/runs/sparse_autoencoder/checkpoints"),
+        maximize={"val_loss": False},
+    )
     history = []
     use_amp = bool(cfg.get("amp", device.type == "cuda"))
     scaler = torch.cuda.amp.GradScaler(enabled=bool(use_amp and device.type == "cuda"))
@@ -249,6 +252,10 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         }
         ckpt.save_last(payload)
         if val_metrics:
+            ckpt.maybe_save_best("val_loss", val_metrics.get("loss", float("inf")), payload)
+            ckpt.maybe_save_best("spatial_corr", val_metrics.get("spatial_corr", -1.0), payload)
+            ckpt.maybe_save_best("top1_dice", val_metrics.get("top1_dice", 0.0), payload)
+            ckpt.maybe_save_best("top5_dice", val_metrics.get("top5_dice", 0.0), payload)
             ckpt.maybe_save_best("generation_top5_dice", val_metrics.get("top5_dice", 0.0), payload)
             ckpt.maybe_save_best("generation_spatial_correlation", val_metrics.get("spatial_corr", -1.0), payload)
             ckpt.maybe_save_best("validation_combined_generation_score", val_metrics.get("top5_dice", 0.0) + val_metrics.get("spatial_corr", 0.0), payload)
