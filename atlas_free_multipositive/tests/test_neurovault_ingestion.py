@@ -4,6 +4,7 @@ from atlas_free_multipositive.data_building.ingest_neurovault import (
     collection_id_from_image,
     image_id_from_summary,
     is_probably_volumetric_nifti,
+    _looks_binary_volume,
     quality_flags_for_metadata,
     quality_score,
     quality_tier,
@@ -87,3 +88,8 @@ def test_neurovault_download_url_and_nifti_filter():
 def test_neurovault_ids_can_be_extracted_from_api_urls():
     assert image_id_from_summary({"url": "https://neurovault.org/api/images/123/"}) == "123"
     assert collection_id_from_image({"collection": "https://neurovault.org/api/collections/45/"}) == "45"
+
+
+def test_binary_volume_detection_for_nearest_resampling():
+    assert _looks_binary_volume([[0, 1], [1, 0]]) is True
+    assert _looks_binary_volume([[0.0, 0.5], [1.0, 0.0]]) is False

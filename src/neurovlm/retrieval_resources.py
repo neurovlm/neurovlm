@@ -59,6 +59,10 @@ __all__ = [
     "_load_latent_neurovault_text",
     "_load_neurovault_images",
     "_load_pubmed_images",
+    "_load_atlas_free_cnn_dataset",
+    "_load_atlas_free_cnn_volumes",
+    "_load_atlas_free_cnn_rows",
+    "_load_atlas_free_cnn_text_pairs",
     "_load_latent_ngram",
     "_load_ngram",
     "_load_kg_mesh_dataset",
@@ -600,6 +604,74 @@ def _load_pubmed_images() -> torch.Tensor:
         map_location="cpu"
     ).values()
     return images, pmids
+
+
+@lru_cache(maxsize=1)
+def _load_atlas_free_cnn_volumes() -> dict:
+    """Load packed atlas-free CNN volumes from HuggingFace.
+
+    Expected file in ``neurovlm/atlas_free_cnn_dataset``:
+    ``atlas_free_cnn_volumes.pt`` with at least ``volumes`` and ``map_ids``.
+    """
+
+    volume_path = _download_from_hf(
+        "neurovlm/atlas_free_cnn_dataset",
+        "atlas_free_cnn_volumes.pt",
+    )
+    payload = torch.load(volume_path, weights_only=False, map_location="cpu")
+    if not isinstance(payload, dict) or "volumes" not in payload:
+        raise TypeError("Expected atlas_free_cnn_volumes.pt to contain a dict with a 'volumes' tensor.")
+    payload["volumes"] = torch.as_tensor(payload["volumes"]).cpu()
+    return payload
+
+
+@lru_cache(maxsize=1)
+def _load_atlas_free_cnn_rows() -> pd.DataFrame:
+    """Load map-level atlas-free CNN metadata from HuggingFace."""
+
+    rows_path = _download_from_hf(
+        "neurovlm/atlas_free_cnn_dataset",
+        "atlas_free_cnn_rows.parquet",
+    )
+    try:
+        return pd.read_parquet(rows_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(rows_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_atlas_free_cnn_text_pairs() -> pd.DataFrame:
+    """Load text-pair table for the packed atlas-free CNN dataset."""
+
+    pairs_path = _download_from_hf(
+        "neurovlm/atlas_free_cnn_dataset",
+        "atlas_free_cnn_text_pairs.parquet",
+    )
+    try:
+        return pd.read_parquet(pairs_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(pairs_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_atlas_free_cnn_dataset() -> dict:
+    """Load packed atlas-free CNN volumes plus rows and text pairs.
+
+    This is the Colab-friendly loader for the preprocessed PubMed/Nilearn/
+    NeuroVault atlas-free CNN dataset. It avoids downloading individual NIfTI
+    files during training or evaluation.
+    """
+
+    volume_payload = _load_atlas_free_cnn_volumes()
+    rows = _load_atlas_free_cnn_rows()
+    text_pairs = _load_atlas_free_cnn_text_pairs()
+    return {
+        **volume_payload,
+        "rows": rows,
+        "text_pairs": text_pairs,
+    }
 
 @lru_cache(maxsize=1)
 def _load_latent_networks_canonical_text() -> dict:

@@ -5,31 +5,46 @@ from __future__ import annotations
 import argparse
 import json
 import random
+from collections import defaultdict
 from pathlib import Path
 
 from atlas_free_multipositive.data_building.text_registry import attach_text_ids, read_jsonl, write_jsonl
 
 
+def split_group_key(row: dict) -> str:
+    """Return the stratum used to preserve source proportions across splits."""
+
+    source = str(row.get("source") or "")
+    if source:
+        return source
+    if row.get("pmid"):
+        return "pubmed"
+    return "unknown"
+
+
 def split_rows(rows: list[dict], *, seed: int, val_frac: float, test_frac: float) -> dict[str, list[dict]]:
     rng = random.Random(seed)
-    pubmed = [r for r in rows if r.get("pmid")]
-    atlas = [r for r in rows if not r.get("pmid")]
-    rng.shuffle(pubmed)
-    rng.shuffle(atlas)
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        groups[split_group_key(row)].append(row)
 
     def split_one(group: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+        group = list(group)
+        rng.shuffle(group)
         n = len(group)
         n_test = int(round(n * test_frac))
         n_val = int(round(n * val_frac))
         return group[n_test + n_val :], group[n_test : n_test + n_val], group[:n_test]
 
-    p_train, p_val, p_test = split_one(pubmed)
-    a_train, a_val, a_test = split_one(atlas)
-    return {
-        "train": p_train + a_train,
-        "val": p_val + a_val,
-        "test": p_test + a_test,
-    }
+    splits = {"train": [], "val": [], "test": []}
+    for key in sorted(groups):
+        train, val, test = split_one(groups[key])
+        splits["train"].extend(train)
+        splits["val"].extend(val)
+        splits["test"].extend(test)
+    for split_rows_ in splits.values():
+        rng.shuffle(split_rows_)
+    return splits
 
 
 def main() -> None:
@@ -64,4 +79,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

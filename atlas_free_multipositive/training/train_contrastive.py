@@ -24,6 +24,26 @@ from atlas_free_multipositive.training.model_wrappers import (
 )
 
 
+def load_brain_encoder_from_autoencoder(brain, checkpoint_path: str | Path, *, strict: bool = False) -> dict[str, int]:
+    """Initialize a contrastive brain encoder from an autoencoder checkpoint."""
+
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    state = payload.get("model") or payload.get("autoencoder") or payload.get("state_dict")
+    if state is None:
+        raise KeyError("Checkpoint must contain 'model', 'autoencoder', or 'state_dict'")
+    encoder_state = {
+        key.removeprefix("encoder."): value
+        for key, value in state.items()
+        if key.startswith("encoder.")
+    }
+    result = brain.load_state_dict(encoder_state, strict=strict)
+    return {
+        "loaded_tensors": len(encoder_state) - len(result.unexpected_keys),
+        "missing_tensors": len(result.missing_keys),
+        "unexpected_tensors": len(result.unexpected_keys),
+    }
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--jsonl", default="atlas_free_multipositive/cache/unified_jsonl/splits/train.jsonl")
@@ -33,11 +53,15 @@ def main() -> None:
     p.add_argument("--device", default="cpu")
     p.add_argument("--text-proj-init", choices=["random", "pretrained_text_infonce"], default="random")
     p.add_argument("--text-proj-checkpoint", default=None, help="Optional Stage 2 text-to-brain projection checkpoint.")
+    p.add_argument("--autoencoder-checkpoint", default=None, help="Optional Stage 1 checkpoint used to initialize the CNN brain encoder.")
     args = p.parse_args()
 
     ds = UnifiedMapTextDataset(args.jsonl)
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=True, collate_fn=MultiPositiveCollator(positives_per_map=2))
     brain = build_brain_encoder().to(args.device)
+    if args.autoencoder_checkpoint:
+        init_summary = load_brain_encoder_from_autoencoder(brain, args.autoencoder_checkpoint, strict=False)
+        print({"autoencoder_encoder_init": args.autoencoder_checkpoint, **init_summary})
     text_proj = build_text_projection(args.text_proj_init, device=args.device)
     if args.text_proj_checkpoint:
         load_text_projection_checkpoint(text_proj, args.text_proj_checkpoint)

@@ -400,6 +400,55 @@ def _custom_atlas_rows(custom_cfg: list[dict[str, Any]], paths: dict[str, Any], 
     return rows
 
 
+def _cached_processed_rows_for_atlas(
+    atlas_name: str,
+    out_dir: Path,
+    preprocessing_config: dict[str, Any],
+) -> list[dict]:
+    """Recover row metadata from already-processed Nilearn map files.
+
+    This is a fallback for atlas fetch failures. It keeps cached maps such as
+    DiFuMo/MSDL/BASC available when the original archive is temporarily
+    unreachable, without blindly including unrelated files.
+    """
+
+    atlas_dir = out_dir / slugify(atlas_name)
+    if not atlas_dir.exists():
+        return []
+    map_type = "network_map" if any(key in atlas_name.lower() for key in ("difumo", "msdl", "basc", "smith", "yeo")) else "atlas_region"
+    rows: list[dict] = []
+    prefix = f"nilearn_{slugify(atlas_name)}_"
+    for path in sorted(atlas_dir.glob("*.nii*")):
+        name = path.name
+        stem = name.removesuffix(".nii.gz").removesuffix(".nii")
+        if not stem.startswith(prefix):
+            continue
+        rest = stem[len(prefix) :]
+        label_id_text, _, label_slug = rest.partition("_")
+        try:
+            label_id = int(label_id_text)
+        except ValueError:
+            continue
+        label_name = label_slug.replace("_", " ").strip() or f"{atlas_name} component {label_id}"
+        if label_name.lower() in {"background", "0"}:
+            continue
+        positive, fallback = _positive_for_label(label_name, atlas_name, map_type)
+        rows.append(
+            _row(
+                map_id=stem,
+                atlas_name=atlas_name,
+                map_type=map_type,
+                nifti_path=path,
+                label_name=label_name,
+                label_id=label_id,
+                positive=positive,
+                definition_fallback=fallback,
+                preprocessing_config={**preprocessing_config, "source": "cached_processed_nilearn_map"},
+            )
+        )
+    return rows
+
+
 def build_nilearn_rows(atlas_names: list[str], paths: dict[str, Any], dataset_cfg: dict[str, Any]) -> list[dict]:
     out_dir = Path(paths.get("map_cache_dir", "atlas_free_multipositive/cache/maps")) / "nilearn"
     nilearn_data_dir = paths.get("nilearn_data_dir")
@@ -419,10 +468,20 @@ def build_nilearn_rows(atlas_names: list[str], paths: dict[str, Any], dataset_cf
             atlas = fetch_atlas(atlas_name, data_dir=nilearn_data_dir)
             img = _maps_img(atlas)
             if img is None:
-                print(f"Skipping {atlas_name}: no maps path")
+                cached_rows = _cached_processed_rows_for_atlas(atlas_name, out_dir, preprocessing_config)
+                if cached_rows:
+                    print(f"Recovered {len(cached_rows)} cached processed rows for {atlas_name}: no maps path")
+                    rows.extend(cached_rows)
+                else:
+                    print(f"Skipping {atlas_name}: no maps path")
                 continue
         except Exception as exc:
-            print(f"Skipping {atlas_name}: {exc}")
+            cached_rows = _cached_processed_rows_for_atlas(atlas_name, out_dir, preprocessing_config)
+            if cached_rows:
+                print(f"Recovered {len(cached_rows)} cached processed rows for {atlas_name}: {exc}")
+                rows.extend(cached_rows)
+            else:
+                print(f"Skipping {atlas_name}: {exc}")
             continue
         data = np.asarray(img.get_fdata())
         labels = _labels(atlas)

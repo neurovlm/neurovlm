@@ -1,6 +1,12 @@
 import numpy as np
 
-from atlas_free_multipositive.data_building.ingest_nilearn_atlases import _iter_3d_components, _labels
+import nibabel as nib
+
+from atlas_free_multipositive.data_building.ingest_nilearn_atlases import (
+    _cached_processed_rows_for_atlas,
+    _iter_3d_components,
+    _labels,
+)
 
 
 def test_singleton_4d_label_atlas_is_split_as_labels():
@@ -35,3 +41,22 @@ def test_label_indices_map_nonconsecutive_values_to_labels():
     components = list(_iter_3d_components(data, labels, "aal", "atlas_region", label_indices))
 
     assert [item[1] for item in components] == ["Frontal Region", "Temporal Region"]
+
+
+def test_cached_processed_rows_recover_fetch_failed_atlas(tmp_path):
+    atlas_dir = tmp_path / "difumo_64"
+    atlas_dir.mkdir()
+    path = atlas_dir / "nilearn_difumo_64_1_visual_network.nii.gz"
+    nib.save(nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4)), path)
+
+    rows = _cached_processed_rows_for_atlas(
+        "difumo_64",
+        tmp_path,
+        {"target_space": "MNI152_2mm", "target_resolution_mm": 2.0},
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["source"] == "nilearn:difumo_64"
+    assert rows[0]["map_id"] == "nilearn_difumo_64_1_visual_network"
+    assert rows[0]["nifti_path"] == str(path)
+    assert rows[0]["positive_texts"]

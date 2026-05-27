@@ -17,6 +17,7 @@ import shutil
 import sys
 import tempfile
 import time
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -70,6 +71,10 @@ class NeuroVaultConfig:
     mostly_empty_min_fraction: float = 0.001
     request_sleep_s: float = 0.05
     timeout_s: float = 60.0
+    max_accepted_per_collection: int | None = None
+    target_accepted_volumes: int | None = None
+    show_progress: bool = True
+    progress_interval: int = 100
 
 
 def _clean_text(value: Any, *, max_words: int | None = None) -> str:
@@ -189,6 +194,13 @@ def collection_id_from_image(image_meta: dict[str, Any]) -> str:
         raw = str(image_meta.get("collection_id") or collection or "").strip()
     match = re.search(r"/collections/(\d+)/?", raw)
     return match.group(1) if match else raw
+
+
+def collection_key(collection_id: str, collection_meta: dict[str, Any]) -> str:
+    if collection_id:
+        return str(collection_id)
+    name = _clean_text(_first(collection_meta, ("name", "title")))
+    return name or "unknown_collection"
 
 
 def usable_download_url(image_meta: dict[str, Any], *, api_base: str = NEUROVAULT_API) -> str:
@@ -473,6 +485,19 @@ def _load_downloaded_nifti(path: Path):
         raise
 
 
+def _looks_binary_volume(data: np.ndarray) -> bool:
+    """Return True for 0/1 mask-like volumes that should use nearest resampling."""
+
+    arr = np.asarray(data, dtype=np.float32)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return False
+    unique = np.unique(finite)
+    if unique.size > 3:
+        return False
+    return bool(np.all(np.isclose(unique, 0.0, atol=1e-5) | np.isclose(unique, 1.0, atol=1e-5)))
+
+
 def preprocess_neurovault_nifti(
     nifti_path: str | Path,
     *,
@@ -500,7 +525,10 @@ def preprocess_neurovault_nifti(
         mask_img = _get_mask_img_for_resolution(config.target_resolution_mm)
         mask = np.asarray(mask_img.get_fdata() > 0)
         crop = _brain_crop(mask) if config.crop_to_brain else (slice(None), slice(None), slice(None))
-        resampled = resample_to_img(img, mask_img, interpolation="continuous", force_resample=True, copy_header=True)
+        source_data = np.nan_to_num(img.get_fdata(dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+        interpolation = "nearest" if _looks_binary_volume(source_data) else "continuous"
+        meta["resample_interpolation"] = interpolation
+        resampled = resample_to_img(img, mask_img, interpolation=interpolation, force_resample=True, copy_header=True)
         arr = np.nan_to_num(resampled.get_fdata().astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
         flags["negative_values_present"] = bool(np.any(arr[mask] < 0))
         if config.positive_only:
@@ -635,33 +663,144 @@ def collect_neurovault(
     volume_map_ids: list[str] = []
     preprocess_records: list[dict[str, Any]] = []
     collection_cache: dict[str, dict[str, Any]] = {}
+    accepted_by_collection: dict[str, int] = defaultdict(int)
+    candidate_count = 0
+    cap_skipped = 0
+    quality_skipped = 0
+    preprocess_skipped = 0
+    error_count = 0
 
-    for summary in iter_neurovault_image_summaries(
-        api_base=api_base,
-        max_images=config.max_images,
-        max_pages=config.max_pages,
-        collection_ids=collection_ids,
-        timeout_s=config.timeout_s,
-        request_sleep_s=config.request_sleep_s,
-    ):
-        image_id = image_id_from_summary(summary)
-        if not image_id:
-            continue
-        map_id = f"neurovault_{image_id}"
+    progress_bar = None
+    if config.show_progress:
         try:
-            image_meta = load_image_metadata(image_id, api_base=api_base, timeout_s=config.timeout_s)
-            collection_id = collection_id_from_image(image_meta)
-            collection_meta = collection_cache.get(collection_id, {})
-            if collection_id and collection_id not in collection_cache:
-                collection_meta = load_collection_metadata(collection_id, api_base=api_base, timeout_s=config.timeout_s)
-                collection_cache[collection_id] = collection_meta
-            download_url = usable_download_url(image_meta, api_base=api_base)
-            flags = quality_flags_for_metadata(image_meta, collection_meta, download_url=download_url)
-            if not download_url or not is_probably_volumetric_nifti(image_meta, download_url):
-                flags["weird_shape"] = True
-            score = quality_score(flags, image_meta, collection_meta)
-            tier = quality_tier(score, flags, config)
-            if tier == "skipped":
+            from tqdm import tqdm
+
+            progress_bar = tqdm(total=config.max_images, desc="Collecting NeuroVault", unit="image")
+        except ImportError:
+            progress_bar = None
+
+    def progress_status() -> dict[str, int]:
+        return {
+            "candidates": candidate_count,
+            "accepted": len(volumes),
+            "strong": sum(1 for row in manifest_rows if row.get("quality_tier") == "strong"),
+            "weak": sum(1 for row in manifest_rows if row.get("quality_tier") == "weak"),
+            "skipped": sum(1 for row in manifest_rows if row.get("quality_tier") == "skipped"),
+            "cap_skipped": cap_skipped,
+            "quality_skipped": quality_skipped,
+            "preprocess_skipped": preprocess_skipped,
+            "errors": error_count,
+            "texts": len(positives_rows),
+            "collections": len(accepted_by_collection),
+        }
+
+    def update_progress(*, force: bool = False) -> None:
+        status = progress_status()
+        if progress_bar is not None:
+            progress_bar.set_postfix(
+                accepted=status["accepted"],
+                skipped=status["skipped"],
+                cap=status["cap_skipped"],
+                collections=status["collections"],
+                texts=status["texts"],
+            )
+            return
+        interval = max(1, int(config.progress_interval))
+        if config.show_progress and (force or candidate_count == 1 or candidate_count % interval == 0):
+            print(f"NeuroVault progress: {status}", flush=True)
+
+    try:
+        for summary in iter_neurovault_image_summaries(
+            api_base=api_base,
+            max_images=config.max_images,
+            max_pages=config.max_pages,
+            collection_ids=collection_ids,
+            timeout_s=config.timeout_s,
+            request_sleep_s=config.request_sleep_s,
+        ):
+            candidate_count += 1
+            if progress_bar is not None:
+                progress_bar.update(1)
+            image_id = image_id_from_summary(summary)
+            if not image_id:
+                update_progress()
+                continue
+            map_id = f"neurovault_{image_id}"
+            try:
+                image_meta = load_image_metadata(image_id, api_base=api_base, timeout_s=config.timeout_s)
+                collection_id = collection_id_from_image(image_meta)
+                collection_meta = collection_cache.get(collection_id, {})
+                if collection_id and collection_id not in collection_cache:
+                    collection_meta = load_collection_metadata(collection_id, api_base=api_base, timeout_s=config.timeout_s)
+                    collection_cache[collection_id] = collection_meta
+                coll_key = collection_key(collection_id, collection_meta)
+                download_url = usable_download_url(image_meta, api_base=api_base)
+                flags = quality_flags_for_metadata(image_meta, collection_meta, download_url=download_url)
+                if not download_url or not is_probably_volumetric_nifti(image_meta, download_url):
+                    flags["weird_shape"] = True
+                score = quality_score(flags, image_meta, collection_meta)
+                tier = quality_tier(score, flags, config)
+                if (
+                    tier != "skipped"
+                    and config.max_accepted_per_collection is not None
+                    and config.max_accepted_per_collection > 0
+                    and accepted_by_collection[coll_key] >= config.max_accepted_per_collection
+                ):
+                    cap_skipped += 1
+                    manifest_rows.append(
+                        _manifest_row(
+                            image_id=image_id,
+                            collection_id=collection_id,
+                            map_id=map_id,
+                            image_meta=image_meta,
+                            collection_meta=collection_meta,
+                            download_url=download_url,
+                            score=score,
+                            tier="skipped",
+                            flags=flags,
+                            tensor_index=None,
+                            error=f"collection_cap_reached:{config.max_accepted_per_collection}",
+                        )
+                    )
+                    update_progress()
+                    continue
+                if tier == "skipped":
+                    quality_skipped += 1
+                    manifest_rows.append(
+                        _manifest_row(
+                            image_id=image_id,
+                            collection_id=collection_id,
+                            map_id=map_id,
+                            image_meta=image_meta,
+                            collection_meta=collection_meta,
+                            download_url=download_url,
+                            score=score,
+                            tier=tier,
+                            flags=flags,
+                            tensor_index=None,
+                        )
+                    )
+                    update_progress()
+                    continue
+
+                raw_path = raw_dir / f"{map_id}_{slugify(_clean_text(image_meta.get('name')) or image_id)}.nii.gz"
+                download_nifti(download_url, raw_path, timeout_s=config.timeout_s)
+                tensor, pre_meta, pre_flags = preprocess_neurovault_nifti(raw_path, config=config)
+                flags.update(pre_flags)
+                score = quality_score(flags, image_meta, collection_meta)
+                tier = quality_tier(score, flags, config)
+                tensor_index = None
+                if tensor is not None and tier != "skipped":
+                    tensor_index = len(volumes)
+                    volumes.append(tensor)
+                    volume_map_ids.append(map_id)
+                    accepted_by_collection[coll_key] += 1
+                    for pos in build_text_positives(image_meta, collection_meta, map_id=map_id):
+                        pos.update({"quality_score": score, "quality_tier": tier, "image_id": image_id, "collection_id": collection_id})
+                        positives_rows.append(pos)
+                else:
+                    preprocess_skipped += 1
+                preprocess_records.append({"map_id": map_id, "image_id": image_id, "flags": flags, "metadata": pre_meta})
                 manifest_rows.append(
                     _manifest_row(
                         image_id=image_id,
@@ -673,59 +812,38 @@ def collect_neurovault(
                         score=score,
                         tier=tier,
                         flags=flags,
-                        tensor_index=None,
+                        tensor_index=tensor_index,
+                        error=pre_meta.get("error", ""),
                     )
                 )
-                continue
-
-            raw_path = raw_dir / f"{map_id}_{slugify(_clean_text(image_meta.get('name')) or image_id)}.nii.gz"
-            download_nifti(download_url, raw_path, timeout_s=config.timeout_s)
-            tensor, pre_meta, pre_flags = preprocess_neurovault_nifti(raw_path, config=config)
-            flags.update(pre_flags)
-            score = quality_score(flags, image_meta, collection_meta)
-            tier = quality_tier(score, flags, config)
-            tensor_index = None
-            if tensor is not None and tier != "skipped":
-                tensor_index = len(volumes)
-                volumes.append(tensor)
-                volume_map_ids.append(map_id)
-                for pos in build_text_positives(image_meta, collection_meta, map_id=map_id):
-                    pos.update({"quality_score": score, "quality_tier": tier, "image_id": image_id, "collection_id": collection_id})
-                    positives_rows.append(pos)
-            preprocess_records.append({"map_id": map_id, "image_id": image_id, "flags": flags, "metadata": pre_meta})
-            manifest_rows.append(
-                _manifest_row(
-                    image_id=image_id,
-                    collection_id=collection_id,
-                    map_id=map_id,
-                    image_meta=image_meta,
-                    collection_meta=collection_meta,
-                    download_url=download_url,
-                    score=score,
-                    tier=tier,
-                    flags=flags,
-                    tensor_index=tensor_index,
-                    error=pre_meta.get("error", ""),
+                update_progress()
+                if config.target_accepted_volumes is not None and len(volumes) >= config.target_accepted_volumes:
+                    update_progress(force=True)
+                    break
+            except Exception as exc:
+                error_count += 1
+                flags = {key: False for key in QUALITY_FLAGS}
+                flags["failed_resample"] = True
+                manifest_rows.append(
+                    _manifest_row(
+                        image_id=image_id,
+                        collection_id="",
+                        map_id=map_id,
+                        image_meta=summary,
+                        collection_meta={},
+                        download_url="",
+                        score=0,
+                        tier="skipped",
+                        flags=flags,
+                        tensor_index=None,
+                        error=repr(exc),
+                    )
                 )
-            )
-        except Exception as exc:
-            flags = {key: False for key in QUALITY_FLAGS}
-            flags["failed_resample"] = True
-            manifest_rows.append(
-                _manifest_row(
-                    image_id=image_id,
-                    collection_id="",
-                    map_id=map_id,
-                    image_meta=summary,
-                    collection_meta={},
-                    download_url="",
-                    score=0,
-                    tier="skipped",
-                    flags=flags,
-                    tensor_index=None,
-                    error=repr(exc),
-                )
-            )
+                update_progress()
+    finally:
+        update_progress(force=True)
+        if progress_bar is not None:
+            progress_bar.close()
 
     manifest_path = output_dir / "neurovault_manifest.csv"
     positives_path = output_dir / "neurovault_text_positives.jsonl"
@@ -766,6 +884,13 @@ def collect_neurovault(
             "skipped": sum(1 for row in manifest_rows if row["quality_tier"] == "skipped"),
             "text_positives": len(positives_rows),
         },
+        "accepted_by_collection": dict(sorted(accepted_by_collection.items(), key=lambda item: item[1], reverse=True)),
+        "skipped_by_reason": {
+            "collection_cap_reached": cap_skipped,
+            "metadata_or_quality": quality_skipped,
+            "preprocess_or_empty": preprocess_skipped,
+            "errors": error_count,
+        },
         "quality_flags": {
             flag: sum(1 for row in manifest_rows if row.get(flag) is True)
             for flag in QUALITY_FLAGS
@@ -796,6 +921,20 @@ def main() -> None:
     parser.add_argument("--target-resolution-mm", type=float, default=4.0)
     parser.add_argument("--allow-negative", action="store_true", help="Disable positive-only clipping.")
     parser.add_argument("--request-sleep-s", type=float, default=0.05)
+    parser.add_argument("--no-progress", action="store_true", help="Disable tqdm/progress status output.")
+    parser.add_argument("--progress-interval", type=int, default=100, help="Print status every N candidates when tqdm is unavailable.")
+    parser.add_argument(
+        "--max-accepted-per-collection",
+        type=int,
+        default=0,
+        help="Skip additional accepted maps from a collection after this cap. Use 0 for no cap.",
+    )
+    parser.add_argument(
+        "--target-accepted-volumes",
+        type=int,
+        default=0,
+        help="Stop once this many accepted volumes have been saved. Use 0 to rely on --max-images.",
+    )
     args = parser.parse_args()
 
     config = NeuroVaultConfig(
@@ -806,6 +945,10 @@ def main() -> None:
         target_resolution_mm=args.target_resolution_mm,
         positive_only=not args.allow_negative,
         request_sleep_s=args.request_sleep_s,
+        max_accepted_per_collection=None if args.max_accepted_per_collection <= 0 else args.max_accepted_per_collection,
+        target_accepted_volumes=None if args.target_accepted_volumes <= 0 else args.target_accepted_volumes,
+        show_progress=not args.no_progress,
+        progress_interval=args.progress_interval,
     )
     outputs = collect_neurovault(
         output_dir=args.output_dir,
