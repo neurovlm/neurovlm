@@ -12,6 +12,11 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 try:
+    from tqdm.auto import tqdm
+except ImportError:  # pragma: no cover
+    tqdm = None
+
+try:
     import yaml
 except ImportError:  # pragma: no cover
     yaml = None
@@ -97,11 +102,19 @@ def run_epoch(
     scaler: torch.cuda.amp.GradScaler | None = None,
     metrics_device: torch.device | None = None,
     include_voxel_auroc: bool = False,
+    show_progress: bool = True,
+    progress_desc: str | None = None,
 ):
     model.train(train)
     losses = []
     metric_rows = []
-    for step, batch in enumerate(loader):
+    total = len(loader)
+    if max_batches is not None:
+        total = min(total, int(max_batches))
+    iterator = loader
+    if show_progress and tqdm is not None:
+        iterator = tqdm(loader, total=total, desc=progress_desc or ("train" if train else "val"), unit="batch", leave=False)
+    for step, batch in enumerate(iterator):
         if max_batches is not None and step >= max_batches:
             break
         x = batch["volume"].to(device)
@@ -129,6 +142,8 @@ def run_epoch(
                 pred_metric = pred_metric.to(metrics_device, non_blocking=True)
                 x_metric = x_metric.to(metrics_device, non_blocking=True)
             metric_rows.append(generation_metrics(pred_metric, x_metric, include_voxel_auroc=include_voxel_auroc))
+        if show_progress and tqdm is not None:
+            iterator.set_postfix(loss=f"{losses[-1]:.4f}")
     avg_metrics = {k: float(sum(r[k] for r in metric_rows) / max(1, len(metric_rows))) for k in metric_rows[0]} if metric_rows else {}
     avg_metrics["loss"] = float(sum(losses) / max(1, len(losses)))
     return avg_metrics
@@ -201,6 +216,8 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             scaler=scaler,
             metrics_device=metrics_device,
             include_voxel_auroc=include_voxel_auroc,
+            show_progress=bool(cfg.get("progress", True)),
+            progress_desc=f"epoch {epoch} train",
         )
         if epoch == 1 or epoch % val_interval == 0 or epoch == int(cfg.get("epochs", 3)):
             last_val_metrics = run_epoch(
@@ -216,6 +233,8 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 use_amp=use_amp,
                 metrics_device=metrics_device,
                 include_voxel_auroc=include_voxel_auroc,
+                show_progress=bool(cfg.get("progress", True)),
+                progress_desc=f"epoch {epoch} val",
             )
         val_metrics = dict(last_val_metrics)
         row = {"epoch": epoch, **{f"train_{k}": v for k, v in train_metrics.items()}, **{f"val_{k}": v for k, v in val_metrics.items()}}
