@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
-from atlas_free_multipositive.evaluation.metrics import ranking_metrics
+from atlas_free_cnn.evaluation.metrics import ranking_metrics
 
 
 @torch.no_grad()
@@ -27,7 +27,7 @@ def main() -> None:
     p.add_argument("--generated-brain-embeddings", required=True)
     p.add_argument("--candidate-text-embeddings", required=True)
     p.add_argument("--positive-mask", required=True)
-    p.add_argument("--output", default="atlas_free_multipositive/outputs/eval/generated_semantic_retrieval.json")
+    p.add_argument("--output", default="experiments/3dcnn/atlas_free_cnn/outputs/eval/generated_semantic_retrieval.json")
     args = p.parse_args()
     metrics = generated_map_retrieval_metrics(
         torch.load(args.generated_brain_embeddings, map_location="cpu", weights_only=False),

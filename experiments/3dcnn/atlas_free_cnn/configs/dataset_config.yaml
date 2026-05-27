@@ -38,15 +38,15 @@ nilearn_atlases:
 #   atlas_region, anatomical_mask, probabilistic_atlas_region, network_map, ica_component
 custom_nifti_atlases:
   # - name: brainnetome
-  #   path: atlas_free_multipositive/external_atlases/brainnetome.nii.gz
+  #   path: experiments/3dcnn/atlas_free_cnn/external_atlases/brainnetome.nii.gz
   #   map_type: atlas_region
   #   labels: []
   # - name: glasser_hcp_mmp
-  #   path: atlas_free_multipositive/external_atlases/glasser_hcp_mmp_volumetric.nii.gz
+  #   path: experiments/3dcnn/atlas_free_cnn/external_atlases/glasser_hcp_mmp_volumetric.nii.gz
   #   map_type: atlas_region
   #   labels: []
   # - name: hcp_task_maps
-  #   path: atlas_free_multipositive/external_atlases/hcp_task_maps_4d.nii.gz
+  #   path: experiments/3dcnn/atlas_free_cnn/external_atlases/hcp_task_maps_4d.nii.gz
   #   map_type: network_map
   #   labels: []
 

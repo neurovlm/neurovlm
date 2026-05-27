@@ -28,12 +28,12 @@ import nibabel as nib
 import numpy as np
 
 HERE = Path(__file__).resolve()
-REPO_ROOT = HERE.parents[2]
+REPO_ROOT = HERE.parents[4]
 SRC = REPO_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from atlas_free_multipositive.data_building.definitions import (  # noqa: E402
+from atlas_free_cnn.data_building.definitions import (  # noqa: E402
     POSITIVE_WEIGHTS,
     normalize_key,
     slugify,
@@ -650,7 +650,7 @@ def write_jsonl(records: Iterable[dict[str, Any]], path: str | Path) -> Path:
 
 def collect_neurovault(
     *,
-    output_dir: str | Path = "atlas_free_multipositive/cache/neurovault",
+    output_dir: str | Path = "experiments/3dcnn/atlas_free_cnn/cache/neurovault",
     api_base: str = NEUROVAULT_API,
     collection_ids: Iterable[int | str] | None = None,
     config: NeuroVaultConfig = NeuroVaultConfig(),
@@ -911,7 +911,7 @@ def collect_neurovault(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", default="atlas_free_multipositive/cache/neurovault")
+    parser.add_argument("--output-dir", default="experiments/3dcnn/atlas_free_cnn/cache/neurovault")
     parser.add_argument("--api-base", default=NEUROVAULT_API)
     parser.add_argument("--max-images", type=int, default=500)
     parser.add_argument("--max-pages", type=int, default=100)

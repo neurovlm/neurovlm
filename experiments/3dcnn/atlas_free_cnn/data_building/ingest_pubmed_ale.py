@@ -13,7 +13,7 @@ import pandas as pd
 import torch
 
 HERE = Path(__file__).resolve()
-REPO_ROOT = HERE.parents[2]
+REPO_ROOT = HERE.parents[4]
 SRC = REPO_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -23,14 +23,14 @@ try:
 except ImportError:  # pragma: no cover
     yaml = None
 
-from atlas_free_multipositive.data_building.definitions import (
+from atlas_free_cnn.data_building.definitions import (
     ALLOWED_PUBMED_MESH_CATEGORIES,
     POSITIVE_WEIGHTS,
     normalize_key,
     text_pair,
 )
-from atlas_free_multipositive.data_building.preprocessing import nifti_metadata
-from atlas_free_multipositive.data_building.text_registry import write_jsonl
+from atlas_free_cnn.data_building.preprocessing import nifti_metadata
+from atlas_free_cnn.data_building.text_registry import write_jsonl
 
 
 def _load_yaml(path: str | Path) -> dict[str, Any]:
@@ -211,7 +211,7 @@ def build_pubmed_rows(paths: dict[str, Any], dataset_cfg: dict[str, Any]) -> lis
         entries = [(pmid, tensor_path, None, i, common_meta) for i, pmid in enumerate(pmids)]
     else:
         entries = []
-        for path in sorted(Path(paths.get("map_cache_dir", "atlas_free_multipositive/cache/maps")).glob("*.nii*")):
+        for path in sorted(Path(paths.get("map_cache_dir", "experiments/3dcnn/atlas_free_cnn/cache/maps")).glob("*.nii*")):
             pmid = path.name.split("_")[-1].split(".")[0]
             entries.append((pmid, None, str(path), None, {**nifti_metadata(path), "preprocessing_config": {}}))
 
@@ -272,9 +272,9 @@ def build_pubmed_rows(paths: dict[str, Any], dataset_cfg: dict[str, Any]) -> lis
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--paths", default="atlas_free_multipositive/configs/paths.yaml")
-    p.add_argument("--config", default="atlas_free_multipositive/configs/dataset_config.yaml")
-    p.add_argument("--output", default="atlas_free_multipositive/cache/unified_jsonl/pubmed_ale.jsonl")
+    p.add_argument("--paths", default="experiments/3dcnn/atlas_free_cnn/configs/paths.yaml")
+    p.add_argument("--config", default="experiments/3dcnn/atlas_free_cnn/configs/dataset_config.yaml")
+    p.add_argument("--output", default="experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/pubmed_ale.jsonl")
     args = p.parse_args()
     paths = _load_yaml(args.paths)
     cfg = _load_yaml(args.config)

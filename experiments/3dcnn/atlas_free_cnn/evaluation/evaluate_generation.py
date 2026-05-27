@@ -8,7 +8,7 @@ from pathlib import Path
 
 import torch
 
-from atlas_free_multipositive.evaluation.generation_metrics import generation_metrics
+from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
 
 
 def evaluate_prediction_tensor(pred: torch.Tensor, target: torch.Tensor) -> dict[str, float]:
@@ -21,7 +21,7 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--pred", required=True, help="Torch tensor [B,1,X,Y,Z] predictions")
     p.add_argument("--target", required=True, help="Torch tensor [B,1,X,Y,Z] targets")
-    p.add_argument("--output", default="atlas_free_multipositive/outputs/eval/generation_metrics.json")
+    p.add_argument("--output", default="experiments/3dcnn/atlas_free_cnn/outputs/eval/generation_metrics.json")
     args = p.parse_args()
     pred = torch.load(args.pred, map_location="cpu", weights_only=False)
     target = torch.load(args.target, map_location="cpu", weights_only=False)

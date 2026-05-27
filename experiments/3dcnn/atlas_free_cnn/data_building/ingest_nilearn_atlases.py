@@ -11,7 +11,7 @@ import nibabel as nib
 import numpy as np
 
 HERE = Path(__file__).resolve()
-REPO_ROOT = HERE.parents[2]
+REPO_ROOT = HERE.parents[4]
 SRC = REPO_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -21,20 +21,20 @@ try:
 except ImportError:  # pragma: no cover
     yaml = None
 
-from atlas_free_multipositive.data_building.definitions import (
+from atlas_free_cnn.data_building.definitions import (
     POSITIVE_WEIGHTS,
     atlas_label_definition,
     display_atlas_label,
     slugify,
     text_pair,
 )
-from atlas_free_multipositive.data_building.preprocessing import (
+from atlas_free_cnn.data_building.preprocessing import (
     load_target_mni152_2mm,
     nifti_metadata,
     resample_to_target,
     save_nifti,
 )
-from atlas_free_multipositive.data_building.text_registry import write_jsonl
+from atlas_free_cnn.data_building.text_registry import write_jsonl
 
 
 def _load_yaml(path: str | Path) -> dict[str, Any]:
@@ -357,7 +357,7 @@ def _iter_3d_components(
 def _custom_atlas_rows(custom_cfg: list[dict[str, Any]], paths: dict[str, Any], dataset_cfg: dict[str, Any]) -> list[dict]:
     """Ingest optional user-provided priority-3 atlases from local NIfTI files."""
 
-    out_dir = Path(paths.get("map_cache_dir", "atlas_free_multipositive/cache/maps")) / "custom"
+    out_dir = Path(paths.get("map_cache_dir", "experiments/3dcnn/atlas_free_cnn/cache/maps")) / "custom"
     target_img = load_target_mni152_2mm()
     rows: list[dict] = []
     preprocessing_config = {
@@ -450,10 +450,10 @@ def _cached_processed_rows_for_atlas(
 
 
 def build_nilearn_rows(atlas_names: list[str], paths: dict[str, Any], dataset_cfg: dict[str, Any]) -> list[dict]:
-    out_dir = Path(paths.get("map_cache_dir", "atlas_free_multipositive/cache/maps")) / "nilearn"
+    out_dir = Path(paths.get("map_cache_dir", "experiments/3dcnn/atlas_free_cnn/cache/maps")) / "nilearn"
     nilearn_data_dir = paths.get("nilearn_data_dir")
     if not nilearn_data_dir:
-        nilearn_data_dir = Path(paths.get("cache_dir", "atlas_free_multipositive/cache")) / "nilearn_data"
+        nilearn_data_dir = Path(paths.get("cache_dir", "experiments/3dcnn/atlas_free_cnn/cache")) / "nilearn_data"
     target_img = load_target_mni152_2mm()
     rows: list[dict] = []
     preprocessing_config = {
@@ -514,9 +514,9 @@ def build_nilearn_rows(atlas_names: list[str], paths: dict[str, Any], dataset_cf
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--paths", default="atlas_free_multipositive/configs/paths.yaml")
-    p.add_argument("--config", default="atlas_free_multipositive/configs/dataset_config.yaml")
-    p.add_argument("--output", default="atlas_free_multipositive/cache/unified_jsonl/nilearn_atlases.jsonl")
+    p.add_argument("--paths", default="experiments/3dcnn/atlas_free_cnn/configs/paths.yaml")
+    p.add_argument("--config", default="experiments/3dcnn/atlas_free_cnn/configs/dataset_config.yaml")
+    p.add_argument("--output", default="experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/nilearn_atlases.jsonl")
     p.add_argument("--atlases", nargs="*", default=None)
     args = p.parse_args()
     paths = _load_yaml(args.paths)

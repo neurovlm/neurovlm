@@ -1,6 +1,6 @@
-prediction_tensor: atlas_free_multipositive/outputs/eval/generated_maps.pt
-target_tensor: atlas_free_multipositive/outputs/eval/true_maps.pt
-output_dir: atlas_free_multipositive/outputs/eval/generation
+prediction_tensor: experiments/3dcnn/atlas_free_cnn/outputs/eval/generated_maps.pt
+target_tensor: experiments/3dcnn/atlas_free_cnn/outputs/eval/true_maps.pt
+output_dir: experiments/3dcnn/atlas_free_cnn/outputs/eval/generation
 
 metrics:
   voxel:

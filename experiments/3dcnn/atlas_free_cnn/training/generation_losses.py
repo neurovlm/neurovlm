@@ -172,23 +172,25 @@ def hard_topk_dice(
 class GenerationLossConfig:
     lambda_recon: float = 1.0
     lambda_latent: float = 0.0
-    lambda_dice: float = 0.5
-    lambda_topk: float = 0.5
-    lambda_corr: float = 0.25
+    lambda_dice: float = 0.0
+    lambda_topk: float = 0.0
+    lambda_corr: float = 0.0
     recon_type: str = "mse"
-    recon_alpha: float = 10.0
+    recon_alpha: float = 0.0
     recon_gamma: float = 1.0
-    prediction_activation: str = "sigmoid"
+    prediction_activation: str = "none"
 
 
-def apply_prediction_activation(pred: torch.Tensor, activation: str = "sigmoid") -> torch.Tensor:
+def apply_prediction_activation(pred: torch.Tensor, activation: str = "none") -> torch.Tensor:
     if activation == "sigmoid":
         return torch.sigmoid(pred)
     if activation == "softplus":
         return F.softplus(pred)
+    if activation == "clamp":
+        return pred.clamp(0.0, 1.0)
     if activation in {"none", None}:
         return pred
-    raise ValueError("prediction_activation must be 'sigmoid', 'softplus', or 'none'")
+    raise ValueError("prediction_activation must be 'sigmoid', 'softplus', 'clamp', or 'none'")
 
 
 def combined_generation_loss(
@@ -229,4 +231,3 @@ def combined_generation_loss(
     )
     parts["total"] = total
     return total, parts
-

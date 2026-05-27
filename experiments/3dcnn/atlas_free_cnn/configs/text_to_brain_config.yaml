@@ -1,14 +1,19 @@
-train_jsonl: atlas_free_multipositive/cache/unified_jsonl/splits/train.jsonl
-val_jsonl: atlas_free_multipositive/cache/unified_jsonl/splits/val.jsonl
-text_embedding_cache: atlas_free_multipositive/cache/text_embeddings/specter_text_cache.pt
-autoencoder_checkpoint: atlas_free_multipositive/outputs/runs/sparse_autoencoder/checkpoints/best_generation_top5_dice.pt
-output_dir: atlas_free_multipositive/outputs/runs/text_to_brain_pretrained_infonce
-checkpoint_dir: atlas_free_multipositive/outputs/runs/text_to_brain_pretrained_infonce/checkpoints
+train_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/train.jsonl
+val_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/val.jsonl
+test_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/test.jsonl
+eval_jsonls:
+  networks_test: experiments/3dcnn/atlas_free_cnn/cache/network_eval/network_test.jsonl
+text_embedding_cache: experiments/3dcnn/atlas_free_cnn/cache/text_embeddings/specter_text_cache.pt
+autoencoder_checkpoint: experiments/3dcnn/atlas_free_cnn/outputs/runs/autoencoder_stable_mixed_base/checkpoints/best_cnn_autoencoder.pt
+output_dir: experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain_pretrained_infonce
+checkpoint_dir: experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain_pretrained_infonce/checkpoints
 
 device: auto
 seed: 42
 target_shape: [36, 45, 38]
 batch_size: 256
+preflight_batch_size: true
+batch_candidates: [4096, 3072, 2048, 1536, 1024, 768, 512]
 num_workers: 8
 pin_memory: true
 persistent_workers: true
@@ -18,7 +23,7 @@ lr: 0.0001
 weight_decay: 0.0001
 positive_texts_per_map: 1
 text_projection_init: pretrained_text_infonce  # random | pretrained_text_infonce
-prediction_activation: sigmoid
+prediction_activation: none
 max_train_batches:
 max_val_batches:
 amp: true
@@ -29,6 +34,10 @@ train_metric_batches: 8
 val_metric_batches: 16
 metrics_device: cuda
 include_voxel_auroc: false
+test_metric_batches:
+max_test_batches:
+eval_batch_size:
+eval_num_workers: 0
 
 freeze:
   specter: true
@@ -40,15 +49,23 @@ model:
   latent_dim: 384
   base_channels: 48
   num_blocks: 4
-  encoder_arch: resnet
+  encoder_arch: plain
+  dropout: 0.1
+  norm: group
+  pooling: max
   blocks_per_stage: 2
   use_dilation: false
-  multi_scale: true
-  global_context: attention
+  multi_scale: false
+  global_context: none
+
+text_to_brain_projection:
+  hidden_dim: 512   # ablate 512, 1024, 2048
+  depth: 2          # ablate 2 or 3
+  dropout: 0.1
 
 weighted_recon:
   type: mse
-  alpha: 10.0
+  alpha: 0.0
   gamma: 1.0
   normalize_target: true
 
@@ -61,6 +78,6 @@ latent_alignment:
 loss:
   lambda_recon: 1.0
   lambda_latent: 1.0
-  lambda_dice: 0.5
-  lambda_topk: 0.5
-  lambda_corr: 0.25
+  lambda_dice: 0.0
+  lambda_topk: 0.0
+  lambda_corr: 0.0

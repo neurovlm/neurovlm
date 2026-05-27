@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 SRC = REPO_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -61,7 +61,7 @@ def main() -> None:
     p.add_argument("--pred", required=True)
     p.add_argument("--pmids-json", required=True)
     p.add_argument("--affine-json", required=True)
-    p.add_argument("--output", default="atlas_free_multipositive/outputs/eval/peak_metrics.json")
+    p.add_argument("--output", default="experiments/3dcnn/atlas_free_cnn/outputs/eval/peak_metrics.json")
     args = p.parse_args()
     pred = torch.load(args.pred, map_location="cpu", weights_only=False)
     pmids = json.load(open(args.pmids_json))
@@ -74,4 +74,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

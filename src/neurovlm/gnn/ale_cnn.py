@@ -171,8 +171,8 @@ class ALE3DCNNEncoder(nn.Module):
         super().__init__()
         if num_blocks < 1:
             raise ValueError("num_blocks must be >= 1")
-        if num_blocks > 4:
-            raise ValueError("num_blocks > 4 is intentionally unsupported for this lightweight encoder")
+        if num_blocks > 5:
+            raise ValueError("num_blocks > 5 is intentionally unsupported for current ALE volumes")
 
         channels = [base_channels * (2**i) for i in range(num_blocks)]
         blocks = []

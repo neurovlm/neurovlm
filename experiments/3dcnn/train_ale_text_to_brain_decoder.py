@@ -16,13 +16,12 @@ import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from atlas_free_multipositive.evaluation.generation_metrics import generation_metrics
-from atlas_free_multipositive.training.generation_losses import (
+from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
+from atlas_free_cnn.training.generation_losses import (
     GenerationLossConfig,
-    combined_generation_loss,
 )
 from experiments.train_ale_cnn import build_dataset, which_device
 from neurovlm.gnn.ale_cnn import ALE3DCNNAutoEncoder, count_parameters
@@ -62,12 +61,12 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--lambda-recon", type=float, default=1.0)
     p.add_argument("--lambda-latent", type=float, default=1.0)
-    p.add_argument("--lambda-dice", type=float, default=0.5)
-    p.add_argument("--lambda-topk", type=float, default=0.5)
-    p.add_argument("--lambda-corr", type=float, default=0.25)
-    p.add_argument("--recon-alpha", type=float, default=10.0)
+    p.add_argument("--lambda-dice", type=float, default=0.0)
+    p.add_argument("--lambda-topk", type=float, default=0.0)
+    p.add_argument("--lambda-corr", type=float, default=0.0)
+    p.add_argument("--recon-alpha", type=float, default=0.0)
     p.add_argument("--recon-gamma", type=float, default=1.0)
-    p.add_argument("--prediction-activation", choices=["sigmoid", "softplus", "none"], default="sigmoid")
+    p.add_argument("--prediction-activation", choices=["sigmoid", "softplus", "none"], default="none")
 
     p.add_argument("--device", choices=["auto", "cpu", "cuda", "mps"], default="auto")
     p.add_argument("--amp", dest="amp", action="store_true", default=True)
@@ -174,7 +173,8 @@ def preflight_batch_size(autoencoder, text_proj, train_ds, args, device, cfg) ->
                 brain_z = autoencoder.encoder(x)
                 text_z = text_proj(text)
                 pred = autoencoder.decoder(text_z)
-                loss, _ = combined_generation_loss(pred, x, brain_z=brain_z, text_z=text_z, config=cfg)
+                loss = cfg.lambda_latent * (1.0 - F.cosine_similarity(text_z, brain_z.detach(), dim=1, eps=1e-8)).mean()
+                loss = loss + cfg.lambda_recon * F.mse_loss(pred, x)
             loss.backward()
             text_proj.zero_grad(set_to_none=True)
             autoencoder.zero_grad(set_to_none=True)
@@ -210,7 +210,10 @@ def run_epoch(autoencoder, text_proj, loader, optimizer, scaler, args, device, c
                     brain_z = autoencoder.encoder(x)
                 text_z = text_proj(text)
                 pred = autoencoder.decoder(text_z)
-                loss, parts = combined_generation_loss(pred, x, brain_z=brain_z, text_z=text_z, config=cfg)
+                latent = (1.0 - F.cosine_similarity(text_z, brain_z.detach(), dim=1, eps=1e-8)).mean()
+                recon = F.mse_loss(pred, x)
+                loss = cfg.lambda_latent * latent + cfg.lambda_recon * recon
+                parts = {"latent_alignment": latent, "recon_mse": recon, "total": loss}
             if train:
                 optimizer.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()
@@ -220,7 +223,7 @@ def run_epoch(autoencoder, text_proj, loader, optimizer, scaler, args, device, c
                 scaler.update()
         losses.append(float(loss.detach().cpu()))
         parts_rows.append({k: float(v.detach().float().cpu()) for k, v in parts.items()})
-        metric_rows.append(generation_metrics(torch.sigmoid(pred.detach()), x.detach(), include_voxel_auroc=False))
+        metric_rows.append(generation_metrics(pred.detach().clamp(0.0, 1.0), x.detach(), include_voxel_auroc=False))
     out = {k: float(np.mean([row[k] for row in metric_rows])) for k in metric_rows[0]} if metric_rows else {}
     for key in parts_rows[0] if parts_rows else []:
         out[f"loss_{key}"] = float(np.mean([row[key] for row in parts_rows]))
@@ -239,7 +242,7 @@ def save_generation_examples(autoencoder, text_proj, ds, args, device, out_dir: 
     batch = next(iter(loader))
     x = batch["volume"].float().to(device)[:n]
     text = batch["text"].float().to(device)[:n]
-    pred = torch.sigmoid(autoencoder.decoder(text_proj(text))).detach().cpu()
+    pred = autoencoder.decoder(text_proj(text)).detach().clamp(0.0, 1.0).cpu()
     target = x.detach().cpu()
     fig, axes = plt.subplots(n, 2, figsize=(6, 3 * n), squeeze=False)
     for i in range(n):

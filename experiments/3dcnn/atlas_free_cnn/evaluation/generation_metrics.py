@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 
-from atlas_free_multipositive.training.generation_losses import (
+from atlas_free_cnn.training.generation_losses import (
     hard_topk_dice,
     normalize_positive,
     spatial_correlation_loss,
@@ -48,18 +48,33 @@ def generation_metrics(
     mask: torch.Tensor | None = None,
     include_voxel_auroc: bool = True,
 ) -> dict[str, float]:
-    pred = normalize_positive(pred, mask)
-    target = normalize_positive(target, mask)
+    pred_raw = torch.nan_to_num(pred.float(), nan=0.0, posinf=1.0, neginf=0.0)
+    target_raw = torch.nan_to_num(target.float(), nan=0.0, posinf=1.0, neginf=0.0)
+    pred_eval = pred_raw.clamp(0.0, 1.0)
+    target_eval = target_raw.clamp(0.0, 1.0)
+    pred = normalize_positive(pred_eval, mask)
+    target = normalize_positive(target_eval, mask)
+    top1 = hard_topk_dice(pred, target, k_percent=0.01, mask=mask)
+    top5 = hard_topk_dice(pred, target, k_percent=0.05, mask=mask)
+    top10 = hard_topk_dice(pred, target, k_percent=0.10, mask=mask)
     out = {
-        "mse": float((pred - target).pow(2).mean().item()),
+        "mse": float((pred_eval - target_eval).pow(2).mean().item()),
+        "mae": float((pred_eval - target_eval).abs().mean().item()),
         "spatial_corr": float(1.0 - spatial_correlation_loss(pred, target, mask=mask).item()),
-        "top1_dice": float(hard_topk_dice(pred, target, k_percent=0.01, mask=mask).mean().item()),
-        "top5_dice": float(hard_topk_dice(pred, target, k_percent=0.05, mask=mask).mean().item()),
-        "top10_dice": float(hard_topk_dice(pred, target, k_percent=0.10, mask=mask).mean().item()),
+        "top1_dice": float(top1.mean().item()),
+        "top5_dice": float(top5.mean().item()),
+        "top10_dice": float(top10.mean().item()),
+        "top1_overlap": float(top1.mean().item()),
+        "top5_overlap": float(top5.mean().item()),
+        "top10_overlap": float(top10.mean().item()),
+        "target_nonzero_fraction": float((target_eval > 0).float().mean().item()),
+        "pred_nonzero_fraction": float((pred_eval > 0).float().mean().item()),
+        "pred_mean": float(pred_eval.mean().item()),
+        "pred_max": float(pred_eval.max().item()),
     }
     if include_voxel_auroc:
         try:
-            out["voxel_auroc"] = voxel_auroc(pred, target, mask=mask)
+            out["voxel_auroc"] = voxel_auroc(pred_eval, target_eval, mask=mask)
         except Exception:
             out["voxel_auroc"] = float("nan")
     return out

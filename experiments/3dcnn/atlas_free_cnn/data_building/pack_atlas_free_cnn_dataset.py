@@ -28,16 +28,16 @@ import numpy as np
 import pandas as pd
 
 HERE = Path(__file__).resolve()
-REPO_ROOT = HERE.parents[2]
+REPO_ROOT = HERE.parents[4]
 SRC = REPO_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from atlas_free_multipositive.data_building.ingest_neurovault import (  # noqa: E402
+from atlas_free_cnn.data_building.ingest_neurovault import (  # noqa: E402
     NeuroVaultConfig,
     preprocess_neurovault_nifti,
 )
-from atlas_free_multipositive.data_building.text_registry import read_jsonl  # noqa: E402
+from atlas_free_cnn.data_building.text_registry import read_jsonl  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -438,7 +438,7 @@ def main() -> None:
         help="Cap accepted NeuroVault maps per collection during packing. Use 0 for no cap.",
     )
     parser.add_argument("--strong-neurovault-only", action="store_true")
-    parser.add_argument("--output-dir", default="atlas_free_multipositive/cache/hf_atlas_free_cnn")
+    parser.add_argument("--output-dir", default="experiments/3dcnn/atlas_free_cnn/cache/hf_atlas_free_cnn")
     parser.add_argument("--cache-dtype", choices=["float16", "bfloat16", "float32"], default="float16")
     parser.add_argument("--primary-text-only", action="store_true", help="Write only the selected primary text pair per map.")
     parser.add_argument("--no-progress", action="store_true", help="Disable tqdm/progress status output while packing.")

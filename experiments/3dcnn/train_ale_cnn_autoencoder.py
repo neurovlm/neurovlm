@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Pretrain ALE CNN autoencoders with sparse-aware reconstruction losses."""
+"""Pretrain ALE CNN autoencoders with the stable raw-MSE recipe."""
 
 from __future__ import annotations
 
@@ -12,17 +12,15 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from atlas_free_multipositive.evaluation.generation_metrics import generation_metrics
-from atlas_free_multipositive.training.generation_losses import (
-    GenerationLossConfig,
-    combined_generation_loss,
-)
+from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
+from atlas_free_cnn.training.generation_losses import GenerationLossConfig
 from experiments.train_ale_cnn import build_dataset, which_device
 from neurovlm.gnn.ale_cnn import ALE3DCNNAutoEncoder, count_parameters
 
@@ -31,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Pretrain ALE CNN autoencoder on atlas-free volumes.")
     p.add_argument("--mode", choices=["difumo_compatible", "atlas_free"], default="atlas_free")
     p.add_argument("--model", choices=["ale_3dcnn", "ale_3dcnn_resnet"], default="ale_3dcnn")
-    p.add_argument("--epochs", type=int, default=100)
+    p.add_argument("--epochs", type=int, default=200)
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--batch-size-auto", action="store_true")
     p.add_argument("--batch-size-candidates", default="64,32,16,8,4")
@@ -39,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--weight-decay", type=float, default=1e-4)
     p.add_argument("--val-interval", type=int, default=5)
     p.add_argument("--early-stopping-patience", type=int, default=20)
+    p.add_argument("--early-stopping-min-delta", type=float, default=0.0)
 
     p.add_argument("--base-channels", type=int, default=48)
     p.add_argument("--num-blocks", type=int, default=4)
@@ -63,12 +62,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-papers", type=int, default=None)
 
     p.add_argument("--lambda-recon", type=float, default=1.0)
-    p.add_argument("--lambda-dice", type=float, default=0.5)
-    p.add_argument("--lambda-topk", type=float, default=0.5)
-    p.add_argument("--lambda-corr", type=float, default=0.25)
-    p.add_argument("--recon-alpha", type=float, default=10.0)
+    p.add_argument("--lambda-dice", type=float, default=0.0)
+    p.add_argument("--lambda-topk", type=float, default=0.0)
+    p.add_argument("--lambda-corr", type=float, default=0.0)
+    p.add_argument("--recon-alpha", type=float, default=0.0)
     p.add_argument("--recon-gamma", type=float, default=1.0)
-    p.add_argument("--prediction-activation", choices=["sigmoid", "softplus", "none"], default="sigmoid")
+    p.add_argument("--prediction-activation", choices=["sigmoid", "softplus", "none"], default="none")
 
     p.add_argument("--device", choices=["auto", "cpu", "cuda", "mps"], default="auto")
     p.add_argument("--amp", dest="amp", action="store_true", default=True)
@@ -144,7 +143,7 @@ def preflight_batch_size(
             x = batch["volume"].float().to(device)
             model.train()
             pred = model(x)
-            loss, _ = combined_generation_loss(pred, x, config=cfg)
+            loss = F.mse_loss(pred, x)
             loss.backward()
             model.zero_grad(set_to_none=True)
             peak = torch.cuda.max_memory_allocated(device) / 1024**2 if device.type == "cuda" else 0.0
@@ -182,7 +181,7 @@ def run_epoch(
         with torch.set_grad_enabled(train):
             with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
                 pred = model(x)
-                loss, _ = combined_generation_loss(pred, x, config=cfg)
+                loss = F.mse_loss(pred, x)
             if train:
                 optimizer.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()
@@ -191,7 +190,7 @@ def run_epoch(
                 scaler.step(optimizer)
                 scaler.update()
         losses.append(float(loss.detach().cpu()))
-        metric_rows.append(generation_metrics(torch.sigmoid(pred.detach()), x.detach(), include_voxel_auroc=False))
+        metric_rows.append(generation_metrics(pred.detach().clamp(0.0, 1.0), x.detach(), include_voxel_auroc=False))
     out = {k: float(np.mean([row[k] for row in metric_rows])) for k in metric_rows[0]} if metric_rows else {}
     out["loss"] = float(np.mean(losses)) if losses else float("nan")
     return out
@@ -225,7 +224,7 @@ def main() -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scaler = torch.amp.GradScaler("cuda", enabled=bool(args.amp and device.type == "cuda"))
     history: list[dict[str, float]] = []
-    best_score = -float("inf")
+    best_loss = float("inf")
     best_state = None
     bad_checks = 0
 
@@ -243,7 +242,7 @@ def main() -> None:
         if epoch == 0 or epoch % args.val_interval == 0 or epoch == args.epochs - 1:
             with torch.no_grad():
                 val_metrics = run_epoch(model, val_loader, optimizer, scaler, args, device, cfg, train=False)
-            score = val_metrics.get("top5_dice", 0.0) + val_metrics.get("spatial_corr", 0.0)
+            val_loss = float(val_metrics.get("loss", float("inf")))
             state = {
                 "encoder": deepcopy(model.encoder.state_dict()),
                 "decoder": deepcopy(model.decoder.state_dict()),
@@ -254,10 +253,11 @@ def main() -> None:
                 "config": config,
                 "target_shape": ds.input_shape,
             }
-            if score > best_score:
-                best_score = score
+            if val_loss < best_loss - float(args.early_stopping_min_delta):
+                best_loss = val_loss
                 best_state = state
                 torch.save(best_state, ckpt_dir / "best_cnn_autoencoder.pt")
+                torch.save(best_state, ckpt_dir / "best_val_mse.pt")
                 bad_checks = 0
             else:
                 bad_checks += 1
@@ -296,7 +296,7 @@ def main() -> None:
                 "run_dir": str(run_dir),
                 "best_checkpoint": str(ckpt_dir / "best_cnn_autoencoder.pt"),
                 "last_checkpoint": str(ckpt_dir / "last_cnn_autoencoder.pt"),
-                "best_score": best_score,
+                "best_val_mse": best_loss,
             },
             f,
             indent=2,

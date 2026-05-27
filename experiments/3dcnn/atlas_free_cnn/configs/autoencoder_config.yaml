@@ -1,0 +1,57 @@
+# Default Stage 1 AE recipe: previous-good-compatible raw MSE setup.
+train_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/train.jsonl
+val_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/val.jsonl
+test_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/test.jsonl
+output_dir: experiments/3dcnn/atlas_free_cnn/outputs/runs/autoencoder_stable_mixed_base
+checkpoint_dir: experiments/3dcnn/atlas_free_cnn/outputs/runs/autoencoder_stable_mixed_base/checkpoints
+
+device: auto
+seed: 42
+target_shape: [36, 45, 38]
+data_mode: mixed          # pubmed_only | mixed
+source_sampling: temperature
+source_sampling_alpha: 0.5
+
+model_size: base          # base | wide | deeper
+model:
+  latent_dim: 384
+  base_channels: 48
+  num_blocks: 4
+  encoder_arch: plain
+  dropout: 0.1
+  norm: group
+  pooling: max
+
+batch_size: 64
+preflight_batch_size: true
+preflight_vram_reserve_gb: 12.0
+batch_candidates: [1024, 768, 512, 384, 256, 192, 128, 96, 64]
+num_workers: 8
+pin_memory: true
+persistent_workers: true
+prefetch_factor: 4
+epochs: 200
+early_stopping: true
+early_stopping_metric: val_loss
+early_stopping_patience: 25
+early_stopping_min_delta: 0.0
+lr: 0.0003
+weight_decay: 0.0001
+amp: true
+cudnn_benchmark: true
+compile_model: false
+gradient_clipping: 1.0
+val_interval: 1
+max_train_batches:
+max_val_batches:
+
+# Evaluation/diagnostics clamp predictions to [0, 1]. Training loss uses raw decoder output.
+compute_train_metrics: true
+train_metric_batches: 8
+val_metric_batches: 16
+eval_batch_size:
+include_voxel_auroc: true
+final_eval: true
+save_plots: true
+plot_examples_per_source: 3
+progress: true

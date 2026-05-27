@@ -8,7 +8,8 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
-from atlas_free_multipositive.data_building.text_registry import attach_text_ids, read_jsonl, write_jsonl
+from atlas_free_cnn.data_building.pack_atlas_free_cnn_dataset import load_neurovault_rows
+from atlas_free_cnn.data_building.text_registry import attach_text_ids, read_jsonl, write_jsonl
 
 
 def split_group_key(row: dict) -> str:
@@ -50,9 +51,13 @@ def split_rows(rows: list[dict], *, seed: int, val_frac: float, test_frac: float
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--inputs", nargs="+", required=True)
-    p.add_argument("--output", default="atlas_free_multipositive/cache/unified_jsonl/unified_map_text.jsonl")
-    p.add_argument("--text-registry", default="atlas_free_multipositive/cache/unified_jsonl/text_registry.jsonl")
-    p.add_argument("--split-dir", default="atlas_free_multipositive/cache/unified_jsonl/splits")
+    p.add_argument("--neurovault-dir", default=None)
+    p.add_argument("--neurovault-split", default="auto")
+    p.add_argument("--neurovault-max-per-collection", type=int, default=50)
+    p.add_argument("--strong-neurovault-only", action="store_true")
+    p.add_argument("--output", default="experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/unified_map_text.jsonl")
+    p.add_argument("--text-registry", default="experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/text_registry.jsonl")
+    p.add_argument("--split-dir", default="experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--val-frac", type=float, default=0.1)
     p.add_argument("--test-frac", type=float, default=0.1)
@@ -61,6 +66,16 @@ def main() -> None:
     rows = []
     for path in args.inputs:
         rows.extend(read_jsonl(path))
+    if args.neurovault_dir:
+        max_per_collection = None if args.neurovault_max_per_collection <= 0 else args.neurovault_max_per_collection
+        rows.extend(
+            load_neurovault_rows(
+                args.neurovault_dir,
+                include_weak=not args.strong_neurovault_only,
+                split=args.neurovault_split,
+                max_per_collection=max_per_collection,
+            )
+        )
     rows = [r for r in rows if r.get("positive_texts")]
     rows, registry = attach_text_ids(rows)
     write_jsonl(rows, args.output)

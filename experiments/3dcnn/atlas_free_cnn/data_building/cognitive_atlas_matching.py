@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from atlas_free_multipositive.data_building.definitions import POSITIVE_WEIGHTS, normalize_key, text_pair
+from atlas_free_cnn.data_building.definitions import POSITIVE_WEIGHTS, normalize_key, text_pair
 
 
 @dataclass(frozen=True)
