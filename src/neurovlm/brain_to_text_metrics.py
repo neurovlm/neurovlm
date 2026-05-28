@@ -15,7 +15,6 @@ from tqdm.notebook import tqdm
 from neurovlm.data import load_dataset, load_latent
 from neurovlm.metric_utils import as_latent_batch
 from neurovlm.retrieval_metrics import normalized_k_values, normalized_recall_curve_auc
-from neurovlm.semantic_evaluation import multi_positive_ranking_metrics
 
 
 def bleu(references: list[str], hypothesis: str, n: int = 4) -> float:
@@ -699,6 +698,64 @@ def load_pubmed_mesh_gold_annotations_or_none():
         return None
 
 
+def all_target_recall_curve(scores: np.ndarray, true_indices: list[set[int]]) -> np.ndarray:
+    """Average per-query fraction of target terms recovered by each rank."""
+
+    n_queries, n_candidates = scores.shape
+    order = np.argsort(-scores, axis=1)
+    weighted_hits_by_rank = np.zeros(n_candidates, dtype=np.float64)
+    for i, positives in enumerate(true_indices):
+        ranks_by_candidate = np.empty(n_candidates, dtype=np.int64)
+        ranks_by_candidate[order[i]] = np.arange(1, n_candidates + 1)
+        weight = 1.0 / float(len(positives))
+        for j in positives:
+            weighted_hits_by_rank[int(ranks_by_candidate[j]) - 1] += weight
+    return np.cumsum(weighted_hits_by_rank) / float(n_queries)
+
+
+def all_target_ranking_metrics(
+    scores: np.ndarray,
+    true_indices: list[set[int]],
+    *,
+    ks: Iterable[int] = (1, 5, 10, 50),
+) -> dict[str, float]:
+    """Metrics where each query receives fractional credit for every target."""
+
+    n_queries, n_candidates = scores.shape
+    order = np.argsort(-scores, axis=1)
+    target_ranks = []
+    per_query_mean_ranks = []
+    per_query_worst_ranks = []
+    recall_at = {int(k): [] for k in ks}
+
+    for i, positives in enumerate(true_indices):
+        ranks_by_candidate = np.empty(n_candidates, dtype=np.int64)
+        ranks_by_candidate[order[i]] = np.arange(1, n_candidates + 1)
+        ranks = sorted(int(ranks_by_candidate[j]) for j in positives)
+        target_ranks.extend(ranks)
+        per_query_mean_ranks.append(float(np.mean(ranks)))
+        per_query_worst_ranks.append(float(max(ranks)))
+        for k in recall_at:
+            recall_at[k].append(float(sum(r <= k for r in ranks)) / float(len(ranks)))
+
+    curve = all_target_recall_curve(scores, true_indices)
+    out = {
+        "paper_recall_curve_auc": normalized_recall_curve_auc(torch.as_tensor(curve)),
+        "normalized_k_recall_curve_auc": normalized_recall_curve_auc(torch.as_tensor(curve)),
+        "median_target_term_rank": float(np.median(target_ranks)),
+        "mean_target_term_rank": float(np.mean(target_ranks)),
+        "median_query_mean_target_term_rank": float(np.median(per_query_mean_ranks)),
+        "median_query_worst_target_term_rank": float(np.median(per_query_worst_ranks)),
+        "n_queries": int(n_queries),
+        "n_candidates": int(n_candidates),
+        "n_target_terms": int(len(target_ranks)),
+        "mean_target_terms_per_query": float(len(target_ranks) / max(n_queries, 1)),
+    }
+    for k, values in recall_at.items():
+        out[f"recall@{k}"] = float(np.mean(values))
+    return out
+
+
 def run_pubmed_mesh_gold_ranking(
     *,
     nvlm,
@@ -786,39 +843,38 @@ def run_pubmed_mesh_gold_ranking(
     if mesh_records:
         mesh_brain_embeddings = project_brain_latents_to_shared(nvlm, [d["latent"] for d in mesh_records])
         mesh_scores = (mesh_brain_embeddings @ mesh_candidate_embeddings.T).detach().cpu().numpy()
-        mesh_metrics = multi_positive_ranking_metrics(mesh_scores, mesh_true_indices, ks=(1, 5, 10, 50), ndcg_k=10)
+        mesh_metrics = all_target_ranking_metrics(mesh_scores, mesh_true_indices, ks=(1, 5, 10, 50))
         mesh_order = np.argsort(-mesh_scores, axis=1)
         metrics_df = pd.DataFrame(
             [
                 {
                     "dataset": "pubmed_mesh",
+                    "mesh_recall_definition": "mean_fraction_of_all_target_terms_recovered",
                     "n_queries": mesh_metrics["n_queries"],
                     "n_candidates": mesh_metrics["n_candidates"],
+                    "n_target_terms": mesh_metrics["n_target_terms"],
+                    "mean_target_terms_per_query": mesh_metrics["mean_target_terms_per_query"],
                     "mesh_paper_recall_curve_auc": mesh_metrics["paper_recall_curve_auc"],
                     "mesh_normalized_k_recall_curve_auc": mesh_metrics["normalized_k_recall_curve_auc"],
                     "mesh_recall@1": mesh_metrics["recall@1"],
                     "mesh_recall@5": mesh_metrics["recall@5"],
                     "mesh_recall@10": mesh_metrics["recall@10"],
                     "mesh_recall@50": mesh_metrics["recall@50"],
-                    "mesh_map": mesh_metrics["map"],
-                    "mesh_mrr": mesh_metrics["mrr"],
-                    "mesh_ndcg@10": mesh_metrics["ndcg@10"],
-                    "mesh_median_best_true_term_rank": mesh_metrics["median_best_true_term_rank"],
+                    "mesh_median_target_term_rank": mesh_metrics["median_target_term_rank"],
+                    "mesh_mean_target_term_rank": mesh_metrics["mean_target_term_rank"],
+                    "mesh_median_query_mean_target_term_rank": mesh_metrics["median_query_mean_target_term_rank"],
+                    "mesh_median_query_worst_target_term_rank": mesh_metrics["median_query_worst_target_term_rank"],
                     "allowed_node_types": ";".join(mesh_brain_rankable_node_types),
                 }
             ]
         )
 
-        counts = np.zeros(len(mesh_candidate_terms), dtype=np.int64)
-        for i, positives in enumerate(mesh_true_indices):
-            ranks_by_candidate = np.empty(len(mesh_candidate_terms), dtype=np.int64)
-            ranks_by_candidate[mesh_order[i]] = np.arange(1, len(mesh_candidate_terms) + 1)
-            counts[min(int(ranks_by_candidate[j]) for j in positives) - 1] += 1
-        recall_curve = np.cumsum(counts) / float(len(mesh_true_indices))
+        recall_curve = all_target_recall_curve(mesh_scores, mesh_true_indices)
         norm_k = normalized_k_values(len(mesh_candidate_terms)).cpu().numpy()
         curve_df = pd.DataFrame(
             {
                 "dataset": "pubmed_mesh",
+                "mesh_recall_definition": "mean_fraction_of_all_target_terms_recovered",
                 "k": np.arange(1, len(mesh_candidate_terms) + 1),
                 "normalized_k": norm_k,
                 "recall_at_normalized_k": recall_curve,
@@ -831,17 +887,20 @@ def run_pubmed_mesh_gold_ranking(
             positives = mesh_true_indices[i]
             ranks_by_candidate = np.empty(len(mesh_candidate_terms), dtype=np.int64)
             ranks_by_candidate[mesh_order[i]] = np.arange(1, len(mesh_candidate_terms) + 1)
+            target_ranks = sorted(int(ranks_by_candidate[j]) for j in positives)
             top = mesh_order[i, :b2t_term_example_top_k]
             example_rows.append(
                 {
                     "dataset": "pubmed_mesh",
                     "sample": str(d["pmid"]),
                     "true_mesh_terms": "; ".join(mesh_true_terms[i]),
-                    "best_true_term_rank": min(int(ranks_by_candidate[j]) for j in positives),
+                    "target_term_ranks": "; ".join(str(rank) for rank in target_ranks),
+                    "mean_target_term_rank": float(np.mean(target_ranks)),
+                    "worst_target_term_rank": int(max(target_ranks)),
                     "top_terms": "; ".join(mesh_candidate_terms[j] for j in top),
                     "top_scores": "; ".join(f"{mesh_scores[i, j]:.6f}" for j in top),
-                    "hit@5": bool(any(j in positives for j in mesh_order[i, :5])),
-                    "hit@10": bool(any(j in positives for j in mesh_order[i, :10])),
+                    "target_recall@5": sum(rank <= 5 for rank in target_ranks) / float(len(target_ranks)),
+                    "target_recall@10": sum(rank <= 10 for rank in target_ranks) / float(len(target_ranks)),
                 }
             )
         examples_df = pd.DataFrame(example_rows)
@@ -858,6 +917,207 @@ def run_pubmed_mesh_gold_ranking(
     examples_df.to_csv(output_dir / "b2t_pubmed_mesh_gold_term_examples.csv", index=False)
     examples_df.to_json(output_dir / "b2t_pubmed_mesh_gold_term_examples.json", orient="records", indent=2)
     return metrics_df, curve_df, examples_df
+
+
+def run_pubmed_mesh_node_type_rankings(
+    *,
+    nvlm,
+    pubmed_eval: list[dict[str, Any]],
+    pubmed_b2t_dataset: str,
+    mesh_node_types: Iterable[str],
+    b2t_term_example_top_k: int,
+    output_dir,
+    run_pubmed: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Evaluate PubMed MeSH target-term recall separately by MeSH node type."""
+
+    annotations = load_pubmed_mesh_gold_annotations_or_none()
+    node_type_by_term: dict[str, str] = {}
+    if annotations is not None:
+        try:
+            mesh_nodes_for_gold = load_dataset("pubmed_mesh_nodes")
+            if "node_type" in mesh_nodes_for_gold.columns:
+                name_col = "name" if "name" in mesh_nodes_for_gold.columns else "term"
+                node_type_by_term = {
+                    normalize_term_text(row[name_col]): row["node_type"]
+                    for _, row in mesh_nodes_for_gold.iterrows()
+                    if pd.notna(row.get(name_col)) and pd.notna(row.get("node_type"))
+                }
+        except Exception as exc:
+            print(f"Could not load pubmed_mesh_nodes for node-type filtering: {type(exc).__name__}: {exc}")
+
+    if annotations is None or not node_type_by_term:
+        print("PubMed MeSH node-type rankings require MeSH annotations and node types; skipping.")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    requested_node_types = list(dict.fromkeys(str(t) for t in mesh_node_types))
+    requested_type_set = set(requested_node_types)
+    mesh_candidate_df = load_dataset(pubmed_b2t_dataset).copy()
+    mesh_candidate_latents, _mesh_candidate_terms = load_latent(pubmed_b2t_dataset)
+
+    if len(mesh_candidate_df) != len(mesh_candidate_latents):
+        raise ValueError(
+            f"MeSH candidate metadata/latent length mismatch: metadata={len(mesh_candidate_df)} latents={len(mesh_candidate_latents)}"
+        )
+
+    mesh_term_col = next((col for col in ["term", "title", "name", "label"] if col in mesh_candidate_df.columns), None)
+    if mesh_term_col is None:
+        raise KeyError(f"{pubmed_b2t_dataset} must contain one of term/title/name/label columns.")
+
+    mesh_candidate_df["term"] = mesh_candidate_df[mesh_term_col].astype(str).map(mesh_descriptor_name)
+    mesh_candidate_df["normalized_term"] = mesh_candidate_df["term"].map(normalize_term_text)
+    mesh_candidate_df["node_type"] = mesh_candidate_df["normalized_term"].map(node_type_by_term).fillna("")
+    keep_mask = mesh_candidate_df["node_type"].isin(requested_type_set).to_numpy()
+    combined_candidate_df = mesh_candidate_df.loc[keep_mask].copy()
+    combined_candidate_latents = mesh_candidate_latents[keep_mask]
+    unique_mask = ~combined_candidate_df["normalized_term"].duplicated(keep="first").to_numpy()
+    combined_candidate_df = combined_candidate_df.loc[unique_mask].reset_index(drop=True)
+    combined_candidate_latents = combined_candidate_latents[unique_mask]
+    combined_candidate_terms = len(combined_candidate_df)
+
+    metric_rows = []
+    curve_frames = []
+    example_frames = []
+    for node_type in requested_node_types:
+        type_mask = combined_candidate_df["node_type"].eq(node_type).to_numpy()
+        type_candidate_df = combined_candidate_df.loc[type_mask].reset_index(drop=True)
+        type_candidate_latents = combined_candidate_latents[type_mask]
+        if len(type_candidate_df) == 0:
+            metric_rows.append(
+                {
+                    "dataset": f"pubmed_mesh_{node_type}",
+                    "node_type": node_type,
+                    "n_queries": 0,
+                    "n_candidates": 0,
+                    "combined_candidate_terms": combined_candidate_terms,
+                    "n_target_terms": 0,
+                    "mean_target_terms_per_query": np.nan,
+                    "mesh_normalized_k_recall_curve_auc": np.nan,
+                }
+            )
+            continue
+
+        candidate_embeddings = project_text_latents_to_shared(nvlm, type_candidate_latents)
+        candidate_terms = type_candidate_df["term"].astype(str).tolist()
+        norm_to_idx = {norm: i for i, norm in enumerate(type_candidate_df["normalized_term"].astype(str))}
+        candidate_norms = set(norm_to_idx)
+
+        mesh_records = []
+        true_indices = []
+        true_terms = []
+        if run_pubmed:
+            for d in pubmed_eval:
+                positives = []
+                terms = []
+                for term in annotations.get(str(d["pmid"]), []):
+                    base = mesh_descriptor_name(term)
+                    norm = normalize_term_text(base)
+                    if not norm or norm not in candidate_norms:
+                        continue
+                    if node_type_by_term.get(norm) != node_type:
+                        continue
+                    idx = norm_to_idx.get(norm)
+                    if idx is not None:
+                        positives.append(idx)
+                        terms.append(candidate_terms[idx])
+                if positives:
+                    mesh_records.append(d)
+                    true_indices.append(set(positives))
+                    true_terms.append(sorted(set(terms)))
+
+        if not mesh_records:
+            metric_rows.append(
+                {
+                    "dataset": f"pubmed_mesh_{node_type}",
+                    "node_type": node_type,
+                    "n_queries": 0,
+                    "n_candidates": len(candidate_terms),
+                    "combined_candidate_terms": combined_candidate_terms,
+                    "n_target_terms": 0,
+                    "mean_target_terms_per_query": np.nan,
+                    "mesh_normalized_k_recall_curve_auc": np.nan,
+                }
+            )
+            continue
+
+        brain_embeddings = project_brain_latents_to_shared(nvlm, [d["latent"] for d in mesh_records])
+        scores = (brain_embeddings @ candidate_embeddings.T).detach().cpu().numpy()
+        metrics = all_target_ranking_metrics(scores, true_indices, ks=(1, 5, 10, 50))
+        order = np.argsort(-scores, axis=1)
+        metric_rows.append(
+            {
+                "dataset": f"pubmed_mesh_{node_type}",
+                "node_type": node_type,
+                "mesh_recall_definition": "mean_fraction_of_all_target_terms_recovered",
+                "n_queries": metrics["n_queries"],
+                "n_candidates": metrics["n_candidates"],
+                "combined_candidate_terms": combined_candidate_terms,
+                "n_target_terms": metrics["n_target_terms"],
+                "mean_target_terms_per_query": metrics["mean_target_terms_per_query"],
+                "mesh_paper_recall_curve_auc": metrics["paper_recall_curve_auc"],
+                "mesh_normalized_k_recall_curve_auc": metrics["normalized_k_recall_curve_auc"],
+                "mesh_recall@1": metrics["recall@1"],
+                "mesh_recall@5": metrics["recall@5"],
+                "mesh_recall@10": metrics["recall@10"],
+                "mesh_recall@50": metrics["recall@50"],
+                "mesh_median_target_term_rank": metrics["median_target_term_rank"],
+                "mesh_mean_target_term_rank": metrics["mean_target_term_rank"],
+                "mesh_median_query_mean_target_term_rank": metrics["median_query_mean_target_term_rank"],
+                "mesh_median_query_worst_target_term_rank": metrics["median_query_worst_target_term_rank"],
+            }
+        )
+
+        recall_curve = all_target_recall_curve(scores, true_indices)
+        norm_k = normalized_k_values(len(candidate_terms)).cpu().numpy()
+        curve_frames.append(
+            pd.DataFrame(
+                {
+                    "dataset": f"pubmed_mesh_{node_type}",
+                    "node_type": node_type,
+                    "mesh_recall_definition": "mean_fraction_of_all_target_terms_recovered",
+                    "k": np.arange(1, len(candidate_terms) + 1),
+                    "normalized_k": norm_k,
+                    "recall_at_normalized_k": recall_curve,
+                    "expected_random_recall_at_normalized_k": norm_k,
+                }
+            )
+        )
+
+        example_rows = []
+        for i, d in enumerate(mesh_records):
+            positives = true_indices[i]
+            ranks_by_candidate = np.empty(len(candidate_terms), dtype=np.int64)
+            ranks_by_candidate[order[i]] = np.arange(1, len(candidate_terms) + 1)
+            target_ranks = sorted(int(ranks_by_candidate[j]) for j in positives)
+            top = order[i, :b2t_term_example_top_k]
+            example_rows.append(
+                {
+                    "dataset": f"pubmed_mesh_{node_type}",
+                    "node_type": node_type,
+                    "sample": str(d["pmid"]),
+                    "true_mesh_terms": "; ".join(true_terms[i]),
+                    "target_term_ranks": "; ".join(str(rank) for rank in target_ranks),
+                    "mean_target_term_rank": float(np.mean(target_ranks)),
+                    "worst_target_term_rank": int(max(target_ranks)),
+                    "top_terms": "; ".join(candidate_terms[j] for j in top),
+                    "top_scores": "; ".join(f"{scores[i, j]:.6f}" for j in top),
+                    "target_recall@5": sum(rank <= 5 for rank in target_ranks) / float(len(target_ranks)),
+                    "target_recall@10": sum(rank <= 10 for rank in target_ranks) / float(len(target_ranks)),
+                }
+            )
+        example_frames.append(pd.DataFrame(example_rows))
+
+    metrics_df = pd.DataFrame(metric_rows)
+    curves_df = pd.concat(curve_frames, ignore_index=True) if curve_frames else pd.DataFrame()
+    examples_df = pd.concat(example_frames, ignore_index=True) if example_frames else pd.DataFrame()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    metrics_df.to_csv(output_dir / "b2t_pubmed_mesh_node_type_ranking_metrics.csv", index=False)
+    metrics_df.to_json(output_dir / "b2t_pubmed_mesh_node_type_ranking_metrics.json", orient="records", indent=2)
+    curves_df.to_csv(output_dir / "b2t_pubmed_mesh_node_type_recall_curves.csv", index=False)
+    curves_df.to_json(output_dir / "b2t_pubmed_mesh_node_type_recall_curves.json", orient="records", indent=2)
+    examples_df.to_csv(output_dir / "b2t_pubmed_mesh_node_type_examples.csv", index=False)
+    examples_df.to_json(output_dir / "b2t_pubmed_mesh_node_type_examples.json", orient="records", indent=2)
+    return metrics_df, curves_df, examples_df
 
 
 def brain_latents_for_generated_group(
@@ -1169,6 +1429,8 @@ __all__ = [
     "rouge",
     "bleu",
     "add_network_label_accuracy",
+    "all_target_ranking_metrics",
+    "all_target_recall_curve",
     "auc_trapezoid",
     "bertscore_single",
     "brain_latents_for_generated_group",
@@ -1193,6 +1455,7 @@ __all__ = [
     "run_paper_retrieval_eval",
     "run_paper_retrieval_evaluations",
     "run_pubmed_mesh_gold_ranking",
+    "run_pubmed_mesh_node_type_rankings",
     "semantic_similarity",
     "terms_for_dataset",
     "unique_ranked_terms_from_table",
