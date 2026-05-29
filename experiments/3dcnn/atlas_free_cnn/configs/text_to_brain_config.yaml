@@ -13,7 +13,8 @@ seed: 42
 target_shape: [36, 45, 38]
 batch_size: 256
 preflight_batch_size: true
-batch_candidates: [4096, 3072, 2048, 1536, 1024, 768, 512]
+batch_candidates: [4096, 3072, 2048, 1536, 1024, 768, 512, 384, 256, 192, 128, 96, 64]
+runtime_batch_fallback: true
 num_workers: 8
 pin_memory: true
 persistent_workers: true

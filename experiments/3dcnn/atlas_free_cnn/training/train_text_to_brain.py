@@ -46,7 +46,7 @@ from atlas_free_cnn.training.model_wrappers import (
 from neurovlm.gnn.ale_cnn import count_parameters
 
 
-TEXT_TO_BRAIN_BATCH_CANDIDATES = [4096, 3072, 2048, 1536, 1024, 768, 512]
+TEXT_TO_BRAIN_BATCH_CANDIDATES = [4096, 3072, 2048, 1536, 1024, 768, 512, 384, 256, 192, 128, 96, 64]
 
 
 def canonical_source(row: dict[str, Any]) -> str:
@@ -210,6 +210,17 @@ def preflight_batch_size(autoencoder, text_projector, target_shape, cfg, device)
         "peak_vram_gb": selected_peak,
         "parameter_count": count_parameters(text_projector),
     }
+
+
+def _is_cuda_oom(exc: BaseException) -> bool:
+    if isinstance(exc, torch.cuda.OutOfMemoryError):
+        return True
+    return "cuda out of memory" in str(exc).lower()
+
+
+def _fallback_batch_size(current: int, candidates: list[int]) -> int | None:
+    smaller = sorted({int(v) for v in candidates if int(v) < int(current)}, reverse=True)
+    return smaller[0] if smaller else None
 
 
 def run_epoch(
@@ -388,8 +399,12 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     }
     if num_workers > 0:
         loader_kwargs["prefetch_factor"] = int(cfg.get("prefetch_factor", 4))
-    train_loader = DataLoader(train_ds, batch_size=int(cfg.get("batch_size", 4)), shuffle=True, **loader_kwargs)
-    val_loader = DataLoader(val_ds, batch_size=int(cfg.get("batch_size", 4)), shuffle=False, **loader_kwargs)
+    def make_loaders(batch_size: int):
+        train = DataLoader(train_ds, batch_size=int(batch_size), shuffle=True, **loader_kwargs)
+        val = DataLoader(val_ds, batch_size=int(batch_size), shuffle=False, **loader_kwargs)
+        return train, val
+
+    train_loader, val_loader = make_loaders(int(cfg.get("batch_size", 4)))
     text_cache = _load_text_cache(cfg["text_embedding_cache"])
     optimizer = torch.optim.AdamW(text_projector.parameters(), lr=float(cfg.get("lr", 1e-4)), weight_decay=float(cfg.get("weight_decay", 1e-4)))
     loss_cfg = _loss_cfg(cfg)
@@ -415,45 +430,75 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     best_early_value = float("inf")
     bad_val_checks = 0
     stop_reason = "max_epochs"
-    for epoch in range(1, max_epochs + 1):
-        train_metrics = run_epoch(
-            autoencoder,
-            text_projector,
-            train_loader,
-            text_cache,
-            optimizer,
-            device,
-            loss_cfg,
-            train=True,
-            max_batches=cfg.get("max_train_batches"),
-            compute_metrics=bool(cfg.get("compute_train_metrics", True)),
-            metric_max_batches=train_metric_batches,
-            use_amp=use_amp,
-            scaler=scaler,
-            metrics_device=metrics_device,
-            include_voxel_auroc=include_voxel_auroc,
-            show_progress=bool(cfg.get("progress", True)),
-            progress_desc=f"epoch {epoch} train",
-        )
-        if epoch == 1 or epoch % val_interval == 0 or epoch == max_epochs:
-            last_val_metrics = run_epoch(
+    runtime_candidates = sorted(
+        {int(v) for v in cfg.get("batch_candidates", TEXT_TO_BRAIN_BATCH_CANDIDATES)} | {int(cfg["batch_size"])},
+        reverse=True,
+    )
+    runtime_batch_fallback = bool(cfg.get("runtime_batch_fallback", True))
+    epoch = 1
+    while epoch <= max_epochs:
+        try:
+            train_metrics = run_epoch(
                 autoencoder,
                 text_projector,
-                val_loader,
+                train_loader,
                 text_cache,
                 optimizer,
                 device,
                 loss_cfg,
-                train=False,
-                max_batches=cfg.get("max_val_batches"),
-                compute_metrics=True,
-                metric_max_batches=val_metric_batches,
+                train=True,
+                max_batches=cfg.get("max_train_batches"),
+                compute_metrics=bool(cfg.get("compute_train_metrics", True)),
+                metric_max_batches=train_metric_batches,
                 use_amp=use_amp,
+                scaler=scaler,
                 metrics_device=metrics_device,
                 include_voxel_auroc=include_voxel_auroc,
                 show_progress=bool(cfg.get("progress", True)),
-                progress_desc=f"epoch {epoch} val",
+                progress_desc=f"epoch {epoch} train",
             )
+            if epoch == 1 or epoch % val_interval == 0 or epoch == max_epochs:
+                last_val_metrics = run_epoch(
+                    autoencoder,
+                    text_projector,
+                    val_loader,
+                    text_cache,
+                    optimizer,
+                    device,
+                    loss_cfg,
+                    train=False,
+                    max_batches=cfg.get("max_val_batches"),
+                    compute_metrics=True,
+                    metric_max_batches=val_metric_batches,
+                    use_amp=use_amp,
+                    metrics_device=metrics_device,
+                    include_voxel_auroc=include_voxel_auroc,
+                    show_progress=bool(cfg.get("progress", True)),
+                    progress_desc=f"epoch {epoch} val",
+                )
+        except BaseException as exc:
+            if not (runtime_batch_fallback and device.type == "cuda" and _is_cuda_oom(exc)):
+                raise
+            current_batch_size = int(cfg["batch_size"])
+            next_batch_size = _fallback_batch_size(current_batch_size, runtime_candidates)
+            if next_batch_size is None:
+                raise
+            print({
+                "runtime_batch_fallback": True,
+                "epoch": epoch,
+                "failed_batch_size": current_batch_size,
+                "next_batch_size": next_batch_size,
+                "reason": "cuda_out_of_memory",
+            })
+            optimizer.zero_grad(set_to_none=True)
+            text_projector.zero_grad(set_to_none=True)
+            torch.cuda.empty_cache()
+            cfg["batch_size"] = int(next_batch_size)
+            cfg.setdefault("runtime_batch_fallbacks", []).append(
+                {"epoch": epoch, "failed_batch_size": current_batch_size, "next_batch_size": int(next_batch_size)}
+            )
+            train_loader, val_loader = make_loaders(int(next_batch_size))
+            continue
         val_metrics = dict(last_val_metrics)
         row = {"epoch": epoch, **{f"train_{k}": v for k, v in train_metrics.items()}, **{f"val_{k}": v for k, v in val_metrics.items()}}
         history.append(row)
@@ -497,6 +542,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                     })
                     break
         print(row)
+        epoch += 1
     out_dir = Path(cfg.get("output_dir", "experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain"))
     out_dir.mkdir(parents=True, exist_ok=True)
     json.dump(cfg, open(out_dir / "text_to_brain_config.json", "w"), indent=2)
@@ -512,6 +558,8 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 "early_stopping_patience": early_patience,
                 "early_stopping_min_delta": early_min_delta,
                 "best_early_value": best_early_value,
+                "final_batch_size": int(cfg.get("batch_size", 0)),
+                "runtime_batch_fallbacks": cfg.get("runtime_batch_fallbacks", []),
             },
             f,
             indent=2,
