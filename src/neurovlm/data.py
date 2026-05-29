@@ -13,6 +13,11 @@ from huggingface_hub import hf_hub_download, snapshot_download
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 import pandas as pd
 from neurovlm.retrieval_resources import (
+    NEURO_ADAPTER_REPO_ID,
+    NEURO_AUTOENCODER_REPO_ID,
+    NEURO_QFORMER_REPO_ID,
+    NEURO_QWEN_REPO_ID,
+    PROJECTION_HEADS_REPO_ID,
     _load_pubmed_dataframe,
     _load_pubmed_summaries_dataframe,
     _load_pubmed_coordinates,
@@ -73,11 +78,11 @@ REPO_DATASETS = {
 }
 
 REPO_MODELS = {
-    "NeuroQwen3-0.6B": "neurovlm/NeuroQwen3-0.6B",
-    "NeuroAutoEncoder": "neurovlm/NeuroAutoEncoder",
-    "ProjectionHeads": "neurovlm/ProjectionHeads",
-    "NeuroQformer": "neurovlm/NeuroQformer",
-    "NeuroAdapter": "neurovlm/NeuroAdapter",
+    "NeuroQwen3-0.6B": NEURO_QWEN_REPO_ID,
+    "NeuroAutoEncoder": NEURO_AUTOENCODER_REPO_ID,
+    "ProjectionHeads": PROJECTION_HEADS_REPO_ID,
+    "NeuroQformer": NEURO_QFORMER_REPO_ID,
+    "NeuroAdapter": NEURO_ADAPTER_REPO_ID,
 }
 
 # SPECTER2 model and adapter repos (downloaded separately from neurovlm repos)

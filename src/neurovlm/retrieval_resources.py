@@ -842,7 +842,8 @@ def _load_kg_mesh_dataset() -> pd.DataFrame:
 @lru_cache(maxsize=1)
 def _load_mesh_kg_nodes() -> pd.DataFrame:
     """Load MeSH KG node metadata, including node_type, from HuggingFace."""
-    parquet_path = _download_from_hf(
+    local_path = Path("experiments/data/mesh_kg/mesh_kg_nodes.parquet")
+    parquet_path = str(local_path) if local_path.exists() else _download_from_hf(
         "neurovlm/mesh_kg",
         "mesh_kg_nodes.parquet"
     )
@@ -852,7 +853,8 @@ def _load_mesh_kg_nodes() -> pd.DataFrame:
 @lru_cache(maxsize=1)
 def _load_mesh_kg_descriptors() -> pd.DataFrame:
     """Load MeSH descriptor metadata from HuggingFace."""
-    parquet_path = _download_from_hf(
+    local_path = Path("experiments/data/mesh_kg/mesh_descriptors.parquet")
+    parquet_path = str(local_path) if local_path.exists() else _download_from_hf(
         "neurovlm/mesh_kg",
         "mesh_descriptors.parquet"
     )

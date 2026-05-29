@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from neurovlm.data import (
+    REPO_MODELS,
     load_dataset,
     load_latent,
     load_masker,
@@ -110,6 +111,16 @@ class TestGetDataDir:
         expected_parent = Path.home() / ".cache"
         assert data_dir.parent == expected_parent
         assert data_dir.name == "neurovlm"
+
+
+class TestModelRepositories:
+    """Tests for public Hugging Face model repository configuration."""
+
+    def test_model_repos_use_split_checkpoint_repositories(self):
+        """Autoencoder and projection heads should not use the retired combined repo."""
+        assert REPO_MODELS["NeuroAutoEncoder"] == "neurovlm/NeuroAutoEncoder"
+        assert REPO_MODELS["ProjectionHeads"] == "neurovlm/ProjectionHeads"
+        assert "neurovlm/encoder_and_proj_head" not in REPO_MODELS.values()
 
 
 class TestLoadDataset:

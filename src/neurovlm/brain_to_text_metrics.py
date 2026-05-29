@@ -765,6 +765,7 @@ def run_pubmed_mesh_gold_ranking(
     b2t_term_example_top_k: int,
     output_dir,
     run_pubmed: bool = True,
+    mesh_candidate_normalized_terms: set[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     annotations = load_pubmed_mesh_gold_annotations_or_none()
     node_type_by_term: dict[str, str] = {}
@@ -803,6 +804,14 @@ def run_pubmed_mesh_gold_ranking(
     unique_mask = ~mesh_candidate_df["normalized_term"].duplicated(keep="first").to_numpy()
     mesh_candidate_df = mesh_candidate_df.loc[unique_mask].reset_index(drop=True)
     mesh_candidate_latents = mesh_candidate_latents[unique_mask]
+    if mesh_candidate_normalized_terms is not None:
+        filter_terms = set(mesh_candidate_normalized_terms)
+        candidate_filter_mask = mesh_candidate_df["normalized_term"].isin(filter_terms).to_numpy()
+        mesh_candidate_df = mesh_candidate_df.loc[candidate_filter_mask].reset_index(drop=True)
+        mesh_candidate_latents = mesh_candidate_latents[candidate_filter_mask]
+    if len(mesh_candidate_df) == 0:
+        print("No PubMed MeSH candidate terms remain after filtering; skipping MeSH term-ranking diagnostics.")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     mesh_candidate_embeddings = project_text_latents_to_shared(nvlm, mesh_candidate_latents)
     mesh_candidate_terms = mesh_candidate_df["term"].astype(str).tolist()
@@ -852,6 +861,7 @@ def run_pubmed_mesh_gold_ranking(
                     "mesh_recall_definition": "mean_fraction_of_all_target_terms_recovered",
                     "n_queries": mesh_metrics["n_queries"],
                     "n_candidates": mesh_metrics["n_candidates"],
+                    "candidate_filter": "topk_discovered" if mesh_candidate_normalized_terms is not None else "node_type_only",
                     "n_target_terms": mesh_metrics["n_target_terms"],
                     "mean_target_terms_per_query": mesh_metrics["mean_target_terms_per_query"],
                     "mesh_paper_recall_curve_auc": mesh_metrics["paper_recall_curve_auc"],
@@ -928,6 +938,7 @@ def run_pubmed_mesh_node_type_rankings(
     b2t_term_example_top_k: int,
     output_dir,
     run_pubmed: bool = True,
+    mesh_candidate_normalized_terms: set[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Evaluate PubMed MeSH target-term recall separately by MeSH node type."""
 
@@ -973,6 +984,11 @@ def run_pubmed_mesh_node_type_rankings(
     unique_mask = ~combined_candidate_df["normalized_term"].duplicated(keep="first").to_numpy()
     combined_candidate_df = combined_candidate_df.loc[unique_mask].reset_index(drop=True)
     combined_candidate_latents = combined_candidate_latents[unique_mask]
+    if mesh_candidate_normalized_terms is not None:
+        filter_terms = set(mesh_candidate_normalized_terms)
+        candidate_filter_mask = combined_candidate_df["normalized_term"].isin(filter_terms).to_numpy()
+        combined_candidate_df = combined_candidate_df.loc[candidate_filter_mask].reset_index(drop=True)
+        combined_candidate_latents = combined_candidate_latents[candidate_filter_mask]
     combined_candidate_terms = len(combined_candidate_df)
 
     metric_rows = []
@@ -1052,6 +1068,7 @@ def run_pubmed_mesh_node_type_rankings(
                 "n_queries": metrics["n_queries"],
                 "n_candidates": metrics["n_candidates"],
                 "combined_candidate_terms": combined_candidate_terms,
+                "candidate_filter": "topk_discovered" if mesh_candidate_normalized_terms is not None else "node_type_only",
                 "n_target_terms": metrics["n_target_terms"],
                 "mean_target_terms_per_query": metrics["mean_target_terms_per_query"],
                 "mesh_paper_recall_curve_auc": metrics["paper_recall_curve_auc"],
