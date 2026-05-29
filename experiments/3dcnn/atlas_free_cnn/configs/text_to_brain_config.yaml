@@ -18,7 +18,11 @@ num_workers: 8
 pin_memory: true
 persistent_workers: true
 prefetch_factor: 4
-epochs: 100
+epochs: 300
+early_stopping: true
+early_stopping_metric: val_loss
+early_stopping_patience: 25
+early_stopping_min_delta: 0.0
 lr: 0.0001
 weight_decay: 0.0001
 positive_texts_per_map: 1
@@ -60,7 +64,7 @@ model:
 
 text_to_brain_projection:
   hidden_dim: 512   # ablate 512, 1024, 2048
-  depth: 2          # ablate 2 or 3
+  depth: 2
   dropout: 0.1
 
 weighted_recon:

@@ -30,7 +30,7 @@ num_workers: 8
 pin_memory: true
 persistent_workers: true
 prefetch_factor: 4
-epochs: 200
+epochs: 300
 early_stopping: true
 early_stopping_metric: val_loss
 early_stopping_patience: 25

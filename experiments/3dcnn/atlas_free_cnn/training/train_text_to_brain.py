@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -406,7 +407,15 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     metrics_device = torch.device(device if metrics_device_name == "cuda" and device.type == "cuda" else "cpu")
     include_voxel_auroc = bool(cfg.get("include_voxel_auroc", False))
     last_val_metrics: dict[str, float] = {}
-    for epoch in range(1, int(cfg.get("epochs", 3)) + 1):
+    max_epochs = int(cfg.get("epochs", 3))
+    early_stopping = bool(cfg.get("early_stopping", True))
+    early_metric = str(cfg.get("early_stopping_metric", "val_loss"))
+    early_patience = int(cfg.get("early_stopping_patience", 25))
+    early_min_delta = float(cfg.get("early_stopping_min_delta", 0.0))
+    best_early_value = float("inf")
+    bad_val_checks = 0
+    stop_reason = "max_epochs"
+    for epoch in range(1, max_epochs + 1):
         train_metrics = run_epoch(
             autoencoder,
             text_projector,
@@ -426,7 +435,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             show_progress=bool(cfg.get("progress", True)),
             progress_desc=f"epoch {epoch} train",
         )
-        if epoch == 1 or epoch % val_interval == 0 or epoch == int(cfg.get("epochs", 3)):
+        if epoch == 1 or epoch % val_interval == 0 or epoch == max_epochs:
             last_val_metrics = run_epoch(
                 autoencoder,
                 text_projector,
@@ -448,18 +457,65 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         val_metrics = dict(last_val_metrics)
         row = {"epoch": epoch, **{f"train_{k}": v for k, v in train_metrics.items()}, **{f"val_{k}": v for k, v in val_metrics.items()}}
         history.append(row)
-        payload = {"text_projector": text_projector.state_dict(), "config": cfg, "history": history, "epoch": epoch, "target_shape": target_shape}
+        payload = {
+            "text_projector": text_projector.state_dict(),
+            "config": cfg,
+            "history": history,
+            "epoch": epoch,
+            "target_shape": target_shape,
+            "early_stopping": {
+                "enabled": early_stopping,
+                "metric": early_metric,
+                "patience": early_patience,
+                "min_delta": early_min_delta,
+                "bad_val_checks": bad_val_checks,
+                "best_value": best_early_value,
+            },
+        }
         ckpt.save_last(payload)
         if val_metrics:
             ckpt.maybe_save_best("val_loss", val_metrics.get("loss", float("inf")), payload)
             ckpt.maybe_save_best("generation_top5_dice", val_metrics.get("top5_dice", 0.0), payload)
             ckpt.maybe_save_best("generation_spatial_correlation", val_metrics.get("spatial_corr", -1.0), payload)
+            if early_stopping:
+                metric_key = early_metric[4:] if early_metric.startswith("val_") else early_metric
+                current = float(val_metrics.get(metric_key, math.inf))
+                if current < best_early_value - early_min_delta:
+                    best_early_value = current
+                    bad_val_checks = 0
+                else:
+                    bad_val_checks += 1
+                if bad_val_checks >= early_patience:
+                    stop_reason = f"early_stopping:{early_metric}"
+                    print({
+                        "early_stopping": True,
+                        "epoch": epoch,
+                        "metric": early_metric,
+                        "best_value": best_early_value,
+                        "current_value": current,
+                        "bad_val_checks": bad_val_checks,
+                    })
+                    break
         print(row)
     out_dir = Path(cfg.get("output_dir", "experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain"))
     out_dir.mkdir(parents=True, exist_ok=True)
     json.dump(cfg, open(out_dir / "text_to_brain_config.json", "w"), indent=2)
     json.dump(preflight, open(out_dir / "preflight.json", "w"), indent=2)
     json.dump(history, open(out_dir / "history.json", "w"), indent=2)
+    with (out_dir / "training_stop.json").open("w") as f:
+        json.dump(
+            {
+                "stop_reason": stop_reason,
+                "epochs_completed": len(history),
+                "early_stopping": early_stopping,
+                "early_stopping_metric": early_metric,
+                "early_stopping_patience": early_patience,
+                "early_stopping_min_delta": early_min_delta,
+                "best_early_value": best_early_value,
+            },
+            f,
+            indent=2,
+        )
     best_path = ckpt.out_dir / "best_val_loss.pt"
     if best_path.exists():
         best_payload = torch.load(best_path, map_location=device, weights_only=False)

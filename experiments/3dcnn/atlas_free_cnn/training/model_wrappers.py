@@ -41,12 +41,12 @@ class TextToBrainProjectionHead(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
-        if depth not in {2, 3}:
-            raise ValueError("depth must be 2 or 3")
+        if depth < 2:
+            raise ValueError("depth must be >= 2")
         layers: list[nn.Module] = [nn.Linear(in_dim, hidden_dim), nn.ReLU()]
         if dropout:
             layers.append(nn.Dropout(dropout))
-        if depth == 3:
+        for _ in range(depth - 2):
             layers.extend([nn.Linear(hidden_dim, hidden_dim), nn.ReLU()])
             if dropout:
                 layers.append(nn.Dropout(dropout))
