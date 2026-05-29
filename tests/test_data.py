@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from neurovlm.data import (
+    REPO_MODELS,
     load_dataset,
     load_latent,
     load_masker,
@@ -112,6 +113,16 @@ class TestGetDataDir:
         assert data_dir.name == "neurovlm"
 
 
+class TestModelRepositories:
+    """Tests for public Hugging Face model repository configuration."""
+
+    def test_model_repos_use_split_checkpoint_repositories(self):
+        """Autoencoder and projection heads should not use the retired combined repo."""
+        assert REPO_MODELS["NeuroAutoEncoder"] == "neurovlm/NeuroAutoEncoder"
+        assert REPO_MODELS["ProjectionHeads"] == "neurovlm/ProjectionHeads"
+        assert "neurovlm/encoder_and_proj_head" not in REPO_MODELS.values()
+
+
 class TestLoadDataset:
     """Tests for load_dataset function.
 
@@ -124,12 +135,17 @@ class TestLoadDataset:
         with pytest.raises(ValueError):
             load_dataset("invalid_dataset_name")
 
+    @pytest.mark.parametrize("dataset_name", ["kg_mesh", "llm_terms", "llm_extracted_neuro_terms", "neurowiki"])
+    def test_load_dataset_old_aliases_are_invalid(self, dataset_name):
+        """Dataset loaders use one canonical public name per dataset."""
+        with pytest.raises(ValueError):
+            load_dataset(dataset_name)
+
     @pytest.mark.parametrize(
         "dataset_name",
         [
             "pubmed_text",
             "wiki",
-            "neurowiki",
             "cogatlas",
             "cogatlas_task",
             "cogatlas_disorder",
@@ -161,14 +177,6 @@ class TestLoadDataset:
         assert isinstance(result, dict)
 
 
-    def test_load_dataset_alias_wiki(self):
-        """Test that 'wiki' and 'neurowiki' are aliases."""
-        result1 = load_dataset("wiki")
-        result2 = load_dataset("neurowiki")
-        # Should return same type
-        assert type(result1) == type(result2)
-
-
 class TestLoadLatent:
     """Tests for load_latent function.
 
@@ -180,13 +188,18 @@ class TestLoadLatent:
         with pytest.raises(ValueError):
             load_latent("invalid_latent_name")
 
+    @pytest.mark.parametrize("latent_name", ["kg_mesh", "llm_terms", "llm_extracted_neuro_terms", "neurowiki"])
+    def test_load_latent_old_aliases_are_invalid(self, latent_name):
+        """Latent loaders use one canonical public name per dataset."""
+        with pytest.raises(ValueError):
+            load_latent(latent_name)
+
     @pytest.mark.parametrize(
         "latent_name",
         [
             "pubmed_text",
             "pubmed_images",
             "wiki",
-            "neurowiki",
             "cogatlas",
             "cogatlas_task",
             "cogatlas_disorder",
@@ -228,14 +241,6 @@ class TestLoadLatent:
         result = load_latent("networks_neuro")
         # Should be a nested dict
         assert isinstance(result, dict)
-
-    def test_load_latent_alias_wiki(self):
-        """Test that 'wiki' and 'neurowiki' are aliases for latents."""
-        result1 = load_latent("wiki")
-        result2 = load_latent("neurowiki")
-        # Should return same type
-        assert type(result1) == type(result2)
-
 class TestLoadMasker:
     """Tests for load_masker function."""
 
