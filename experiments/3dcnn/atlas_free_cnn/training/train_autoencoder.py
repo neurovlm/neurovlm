@@ -54,7 +54,10 @@ MODEL_SIZE_PRESETS = {
     "deeper": {"base_channels": 48, "num_blocks": 5, "latent_dim": 384},
 }
 
-PREVIOUS_GOOD_COMPATIBLE_DEFAULTS = {
+BASELINE_RAW_MSE_RECIPE = "baseline_raw_mse"
+LEGACY_BASELINE_RECIPE = "previous_good_compatible"
+
+BASELINE_RAW_MSE_DEFAULTS = {
     "lr": 3e-4,
     "weight_decay": 1e-4,
     "amp": True,
@@ -105,10 +108,15 @@ def source_counts(dataset: UnifiedMapTextDataset) -> dict[str, int]:
 
 def apply_ae_recipe_defaults(cfg: dict[str, Any]) -> dict[str, Any]:
     cfg = dict(cfg)
-    recipe = str(cfg.get("ae_training_recipe", cfg.get("AE_TRAINING_RECIPE", "previous_good_compatible")))
+    recipe = str(cfg.get("ae_training_recipe", cfg.get("AE_TRAINING_RECIPE", BASELINE_RAW_MSE_RECIPE)))
+    legacy_alias_used = recipe == LEGACY_BASELINE_RECIPE
+    if legacy_alias_used:
+        recipe = BASELINE_RAW_MSE_RECIPE
     cfg["ae_training_recipe"] = recipe
-    if recipe == "previous_good_compatible":
-        for key, value in PREVIOUS_GOOD_COMPATIBLE_DEFAULTS.items():
+    if legacy_alias_used:
+        cfg["ae_training_recipe_alias"] = LEGACY_BASELINE_RECIPE
+    if recipe == BASELINE_RAW_MSE_RECIPE:
+        for key, value in BASELINE_RAW_MSE_DEFAULTS.items():
             if key == "model":
                 model = dict(value)
                 model.update(dict(cfg.get("model") or {}))
@@ -742,7 +750,7 @@ def train_stage1b_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     if mode not in {"mixed_pretrain_to_pubmed", "mixed_pretrain_to_statmaps"}:
         raise ValueError("stage1b_mode must be mixed_pretrain_to_pubmed or mixed_pretrain_to_statmaps")
     ft_cfg = dict(cfg)
-    ft_cfg["ae_training_recipe"] = cfg.get("ae_training_recipe", "previous_good_compatible")
+    ft_cfg["ae_training_recipe"] = cfg.get("ae_training_recipe", BASELINE_RAW_MSE_RECIPE)
     ft_cfg["init_checkpoint"] = cfg.get("init_checkpoint") or cfg.get("mixed_pretrain_checkpoint")
     if not ft_cfg.get("init_checkpoint"):
         raise ValueError("Stage 1B fine-tuning requires init_checkpoint or mixed_pretrain_checkpoint")

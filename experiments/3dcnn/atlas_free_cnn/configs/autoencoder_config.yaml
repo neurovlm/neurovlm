@@ -1,11 +1,12 @@
-# Default Stage 1 AE recipe: previous_good_compatible raw-MSE baseline.
+# Default Stage 1 AE recipe: baseline_raw_mse.
+# `previous_good_compatible` remains accepted as a legacy alias.
 train_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/train.jsonl
 val_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/val.jsonl
 test_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/test.jsonl
 output_dir: experiments/3dcnn/atlas_free_cnn/outputs/runs/autoencoder_stable_mixed_base
 checkpoint_dir: experiments/3dcnn/atlas_free_cnn/outputs/runs/autoencoder_stable_mixed_base/checkpoints
 
-ae_training_recipe: previous_good_compatible
+ae_training_recipe: baseline_raw_mse
 ae_variant: mixed_baseline_raw_mse
 checkpoint_selection_metric: best_val_loss
 device: auto
