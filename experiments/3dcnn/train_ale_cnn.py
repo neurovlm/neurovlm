@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shutil
 import sys
 import time
 import traceback
@@ -31,6 +32,7 @@ from torch import nn
 from torch.utils.data import DataLoader, Subset
 import torch.nn.functional as F
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
@@ -45,6 +47,8 @@ from neurovlm.metrics import (
     recall_curve,
     retrieval_ranks,
 )
+
+from atlas_free_cnn.pipeline_outputs import select_ae_checkpoint
 
 
 def parse_args() -> argparse.Namespace:
@@ -111,6 +115,18 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--encoder-init", choices=["random", "autoencoder_pretrained"], default="random")
     p.add_argument("--autoencoder-checkpoint", default=None)
+    p.add_argument(
+        "--ae-init-variant",
+        default=None,
+        help="Named AE initialization variant, e.g. mixed_baseline, mixed_balanced, mixed_hybrid, mixed_to_pubmed, mixed_to_statmaps.",
+    )
+    p.add_argument(
+        "--ae-checkpoint-selection",
+        default="best_val_loss",
+        choices=["best_val_loss", "best_spatial_corr", "best_top1_dice", "best_top5_dice", "best_foreground_mse", "last"],
+    )
+    p.add_argument("--ae-ckpt-path", default=None, help="Explicit AE checkpoint path; overrides variant/selection.")
+    p.add_argument("--ae-checkpoint-dir", default=None, help="Directory containing Stage 1 AE checkpoint files.")
     p.add_argument("--text-proj-init", choices=["random", "pretrained_infonce"], default="pretrained_infonce")
     p.add_argument("--freeze-text-proj", action="store_true")
     p.add_argument("--device", choices=["auto", "cpu", "cuda", "mps"], default="auto")
@@ -295,6 +311,42 @@ def _load_encoder_from_autoencoder_checkpoint(brain_encoder: nn.Module, checkpoi
             "or a 'model' state_dict with encoder.* keys"
         )
     brain_encoder.load_state_dict(state, strict=True)
+
+
+def resolve_autoencoder_initialization(args: argparse.Namespace) -> dict:
+    if args.encoder_init != "autoencoder_pretrained":
+        return {"encoder_init": args.encoder_init, "ae_checkpoint_path": None}
+    explicit = args.ae_ckpt_path or args.autoencoder_checkpoint
+    selection = args.ae_checkpoint_selection
+    if explicit:
+        selected = select_ae_checkpoint(explicit_path=explicit, selection=selection)
+    else:
+        if not args.ae_checkpoint_dir:
+            raise ValueError(
+                "--encoder-init autoencoder_pretrained requires --autoencoder-checkpoint, "
+                "--ae-ckpt-path, or --ae-checkpoint-dir"
+            )
+        selected = select_ae_checkpoint(
+            checkpoint_dir=args.ae_checkpoint_dir,
+            selection=selection,
+        )
+    if not selected["exists"]:
+        raise FileNotFoundError(f"Selected AE checkpoint does not exist: {selected['ae_checkpoint_path']}")
+    args.autoencoder_checkpoint = selected["ae_checkpoint_path"]
+    payload = torch.load(args.autoencoder_checkpoint, map_location="cpu", weights_only=False)
+    report = {
+        "encoder_init": args.encoder_init,
+        "ae_init_variant": args.ae_init_variant or payload.get("ae_variant") or payload.get("config", {}).get("ae_variant", ""),
+        "ae_checkpoint_selection": selected["ae_checkpoint_selection"],
+        "ae_checkpoint_path": args.autoencoder_checkpoint,
+        "ae_checkpoint_epoch": payload.get("epoch"),
+        "ae_training_config": payload.get("config", {}),
+        "ae_source_wise_reconstruction_metrics": payload.get("source_wise_validation_metrics", {}),
+        "ae_validation_metrics": payload.get("validation_metrics", payload.get("metrics", {})),
+    }
+    print("AE encoder initialization:", flush=True)
+    print(json.dumps({k: v for k, v in report.items() if k not in {"ae_training_config"}}, indent=2, default=str), flush=True)
+    return report
 
 
 def build_model(args: argparse.Namespace, input_shape: tuple[int, ...]):
@@ -1037,6 +1089,7 @@ def main() -> None:
         build_cache_only(args)
         return
 
+    ae_init_report = resolve_autoencoder_initialization(args)
     ds, train_ds, val_ds, test_ds, payload, preprocess_config = build_dataset(args)
     brain_encoder, text_proj = build_model(args, ds.input_shape)
     device = which_device(args.device)
@@ -1046,6 +1099,17 @@ def main() -> None:
 
     with (run_dir / "config.json").open("w") as f:
         json.dump(vars(args), f, indent=2)
+    with (run_dir / "selected_ae_checkpoint.json").open("w") as f:
+        json.dump(ae_init_report, f, indent=2, default=str)
+    with (run_dir / "encoder_init_report.json").open("w") as f:
+        json.dump(ae_init_report, f, indent=2, default=str)
+    stage2_dir = run_dir.parent / "03_stage2_encoder_initialization" if run_dir.name == "04_stage3_contrastive" else None
+    if stage2_dir is not None:
+        stage2_dir.mkdir(parents=True, exist_ok=True)
+        with (stage2_dir / "selected_ae_checkpoint.json").open("w") as f:
+            json.dump(ae_init_report, f, indent=2, default=str)
+        with (stage2_dir / "encoder_init_report.json").open("w") as f:
+            json.dump(ae_init_report, f, indent=2, default=str)
     with (run_dir / "preprocessing_config.json").open("w") as f:
         json.dump({**payload["config"], "metadata": payload["metadata"]}, f, indent=2)
     with (run_dir / "model_config.json").open("w") as f:
@@ -1122,6 +1186,23 @@ def main() -> None:
         json.dump(trainer.history, f, indent=2)
     with (run_dir / "eval_results.json").open("w") as f:
         json.dump(all_metrics, f, indent=2)
+    metrics_dir = run_dir / "metrics"
+    config_dir = run_dir / "config"
+    ckpt_stage_dir = run_dir / "checkpoints"
+    for path in [metrics_dir, config_dir, ckpt_stage_dir]:
+        path.mkdir(parents=True, exist_ok=True)
+    with (metrics_dir / "test_metrics.json").open("w") as f:
+        json.dump(all_metrics.get("test", {}), f, indent=2)
+    with (config_dir / "contrastive_config.json").open("w") as f:
+        json.dump(vars(args), f, indent=2)
+    with (config_dir / "ae_init_config.json").open("w") as f:
+        json.dump(ae_init_report, f, indent=2, default=str)
+    best_src = Path(args.checkpoint_dir) / "best_ale_cnn.pt"
+    last_src = Path(args.checkpoint_dir) / "last_ale_cnn.pt"
+    if best_src.exists():
+        shutil.copy2(best_src, ckpt_stage_dir / "best_contrastive.pt")
+    if last_src.exists():
+        shutil.copy2(last_src, ckpt_stage_dir / "last_contrastive.pt")
 
     curve_frames = {}
     for split_name, (_, brain_emb, text_emb) in eval_payloads.items():

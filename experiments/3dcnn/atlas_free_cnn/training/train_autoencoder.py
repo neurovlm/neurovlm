@@ -19,7 +19,7 @@ from typing import Any
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader
 
 try:
     from tqdm.auto import tqdm
@@ -32,9 +32,18 @@ except ImportError:  # pragma: no cover
     yaml = None
 
 from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
+from atlas_free_cnn.pipeline_outputs import git_info
+from atlas_free_cnn.training.autoencoder_losses import AutoencoderLossConfig, reconstruction_loss
 from atlas_free_cnn.training.checkpointing import CheckpointManager
 from atlas_free_cnn.training.datasets import UnifiedMapTextDataset
 from atlas_free_cnn.training.model_wrappers import build_cnn_autoencoder
+from atlas_free_cnn.training.source_sampling import (
+    build_source_sampler,
+    canonical_source,
+    epoch_source_exposure,
+    source_counts as count_sources,
+    source_detail,
+)
 from neurovlm.gnn.ale_cnn import count_parameters
 
 
@@ -43,6 +52,29 @@ MODEL_SIZE_PRESETS = {
     "base": {"base_channels": 48, "num_blocks": 4, "latent_dim": 384},
     "wide": {"base_channels": 64, "num_blocks": 4, "latent_dim": 384},
     "deeper": {"base_channels": 48, "num_blocks": 5, "latent_dim": 384},
+}
+
+PREVIOUS_GOOD_COMPATIBLE_DEFAULTS = {
+    "lr": 3e-4,
+    "weight_decay": 1e-4,
+    "amp": True,
+    "gradient_clipping": 1.0,
+    "target_shape": [36, 45, 38],
+    "source_sampling": "natural",
+    "loss": {
+        "type": "raw_mse",
+        "lambda_foreground": 0.0,
+        "lambda_topk": 0.0,
+        "prediction_activation": "none",
+    },
+    "model": {
+        "latent_dim": 384,
+        "base_channels": 64,
+        "num_blocks": 4,
+        "dropout": 0.1,
+        "norm": "group",
+        "pooling": "max",
+    },
 }
 
 
@@ -57,31 +89,55 @@ def _target_shape(cfg: dict[str, Any]) -> tuple[int, int, int]:
     return tuple(int(v) for v in cfg.get("target_shape", [36, 45, 38]))
 
 
-def canonical_source(row: dict[str, Any]) -> str:
-    source = str(row.get("source", "")).lower()
-    if source == "pubmed" or row.get("pmid"):
-        return "pubmed"
-    if source.startswith("neurovault"):
-        return "neurovault"
-    if source.startswith("nilearn"):
-        return "nilearn"
-    return source or "unknown"
-
-
-def source_detail(row: dict[str, Any]) -> str:
-    return str(row.get("source") or canonical_source(row))
-
-
 def filter_data_mode(dataset: UnifiedMapTextDataset, data_mode: str) -> UnifiedMapTextDataset:
-    if data_mode not in {"pubmed_only", "mixed"}:
-        raise ValueError("DATA_MODE/data_mode must be 'pubmed_only' or 'mixed'")
+    if data_mode not in {"pubmed_only", "mixed", "statmaps_only"}:
+        raise ValueError("DATA_MODE/data_mode must be 'pubmed_only', 'mixed', or 'statmaps_only'")
     if data_mode == "pubmed_only":
         dataset.rows = [row for row in dataset.rows if canonical_source(row) == "pubmed"]
+    elif data_mode == "statmaps_only":
+        dataset.rows = [row for row in dataset.rows if canonical_source(row) in {"neurovault", "nilearn"}]
     return dataset
 
 
 def source_counts(dataset: UnifiedMapTextDataset) -> dict[str, int]:
-    return dict(Counter(canonical_source(row) for row in dataset.rows))
+    return count_sources(dataset.rows)
+
+
+def apply_ae_recipe_defaults(cfg: dict[str, Any]) -> dict[str, Any]:
+    cfg = dict(cfg)
+    recipe = str(cfg.get("ae_training_recipe", cfg.get("AE_TRAINING_RECIPE", "previous_good_compatible")))
+    cfg["ae_training_recipe"] = recipe
+    if recipe == "previous_good_compatible":
+        for key, value in PREVIOUS_GOOD_COMPATIBLE_DEFAULTS.items():
+            if key == "model":
+                model = dict(value)
+                model.update(dict(cfg.get("model") or {}))
+                cfg["model"] = model
+            elif key == "loss":
+                loss = dict(value)
+                loss.update(dict(cfg.get("loss") or {}))
+                cfg["loss"] = loss
+            else:
+                cfg.setdefault(key, value)
+        cfg.setdefault("checkpoint_selection_metric", "best_val_loss")
+    elif recipe in {"mixed_balanced_raw_mse", "mixed_balanced_hybrid_loss", "mixed_hybrid"}:
+        cfg.setdefault("data_mode", "mixed")
+        cfg.setdefault("source_sampling", "balanced")
+        if recipe == "mixed_balanced_raw_mse":
+            cfg.setdefault("loss", {"type": "raw_mse"})
+        else:
+            cfg.setdefault(
+                "loss",
+                {
+                    "type": "hybrid_recon",
+                    "lambda_foreground": 0.10,
+                    "lambda_topk": 0.05,
+                    "topk_percent": 5,
+                    "prediction_activation": "none",
+                },
+            )
+        cfg.setdefault("checkpoint_selection_metric", "best_top5_dice")
+    return cfg
 
 
 class VolumeCollator:
@@ -108,23 +164,6 @@ class VolumeCollator:
             "source": [canonical_source(m) for m in metadata],
             "source_detail": [source_detail(m) for m in metadata],
         }
-
-
-def build_source_sampler(dataset: UnifiedMapTextDataset, cfg: dict[str, Any]):
-    mode = str(cfg.get("source_sampling", cfg.get("SOURCE_SAMPLING", "temperature"))).lower()
-    alpha = float(cfg.get("source_sampling_alpha", cfg.get("SOURCE_SAMPLING_ALPHA", 0.5)))
-    if mode not in {"natural", "temperature", "balanced"}:
-        raise ValueError("SOURCE_SAMPLING/source_sampling must be natural, temperature, or balanced")
-    if mode == "natural":
-        return None
-    counts = Counter(canonical_source(row) for row in dataset.rows)
-    if mode == "balanced":
-        source_probs = {src: 1.0 / max(1, len(counts)) for src in counts}
-    else:
-        denom = sum(float(n) ** alpha for n in counts.values())
-        source_probs = {src: (float(n) ** alpha) / denom for src, n in counts.items()}
-    weights = [source_probs[canonical_source(row)] / counts[canonical_source(row)] for row in dataset.rows]
-    return WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
 
 
 def model_config(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -215,6 +254,42 @@ def _avg_metric_rows(rows: list[dict[str, float]]) -> dict[str, float]:
     return {k: float(sum(r[k] for r in rows) / max(1, len(rows))) for k in keys}
 
 
+def _json_ready(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _json_ready(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(v) for v in value]
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        path.write_text("")
+        return
+    keys: list[str] = []
+    for row in rows:
+        for key in row:
+            if key not in keys:
+                keys.append(key)
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=keys)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _flatten_history_row(row: dict[str, Any]) -> dict[str, Any]:
+    flat = {}
+    for key, value in row.items():
+        if isinstance(value, (dict, list, tuple)):
+            flat[key] = json.dumps(_json_ready(value))
+        else:
+            flat[key] = value
+    return flat
+
+
 def run_epoch(
     model,
     loader,
@@ -223,7 +298,9 @@ def run_epoch(
     *,
     train: bool,
     use_amp: bool,
+    loss_config: AutoencoderLossConfig | None = None,
     scaler: torch.cuda.amp.GradScaler | None = None,
+    grad_clip: float = 1.0,
     max_batches: int | None = None,
     compute_metrics: bool = True,
     metric_max_batches: int | None = None,
@@ -233,7 +310,9 @@ def run_epoch(
 ) -> dict[str, Any]:
     model.train(train)
     losses: list[float] = []
+    loss_parts: dict[str, list[float]] = defaultdict(list)
     metric_rows: list[dict[str, float]] = []
+    source_metric_rows: dict[str, list[dict[str, float]]] = defaultdict(list)
     source_counter: Counter[str] = Counter()
     total = min(len(loader), int(max_batches)) if max_batches is not None else len(loader)
     iterator = loader
@@ -248,28 +327,45 @@ def run_epoch(
         with torch.set_grad_enabled(train):
             with torch.cuda.amp.autocast(enabled=bool(use_amp and device.type == "cuda")):
                 pred = model(x)
-                loss = F.mse_loss(pred, x)
+                loss, parts = reconstruction_loss(pred, x, loss_config)
             if train:
                 optimizer.zero_grad(set_to_none=True)
                 if scaler is not None and use_amp and device.type == "cuda":
                     scaler.scale(loss).backward()
                     scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), float(grad_clip))
                     scaler.step(optimizer)
                     scaler.update()
                 else:
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), float(grad_clip))
                     optimizer.step()
         losses.append(float(loss.detach().cpu()))
+        for key, value in parts.items():
+            loss_parts[key].append(float(value.detach().cpu()))
         if compute_metrics and (metric_max_batches is None or len(metric_rows) < int(metric_max_batches)):
-            metric_rows.append(generation_metrics(pred.detach().clamp(0.0, 1.0).cpu(), x.detach().cpu(), include_voxel_auroc=include_voxel_auroc))
+            pred_cpu = pred.detach().clamp(0.0, 1.0).cpu()
+            x_cpu = x.detach().cpu()
+            metric_rows.append(generation_metrics(pred_cpu, x_cpu, include_voxel_auroc=include_voxel_auroc))
+            for i, src in enumerate(batch["source"]):
+                source_metric_rows[src].append(
+                    generation_metrics(
+                        pred_cpu[i : i + 1],
+                        x_cpu[i : i + 1],
+                        include_voxel_auroc=include_voxel_auroc,
+                    )
+                )
         if show_progress and tqdm is not None:
             iterator.set_postfix(mse=f"{losses[-1]:.5f}")
     metrics = _avg_metric_rows(metric_rows)
     metrics["loss"] = float(sum(losses) / max(1, len(losses)))
+    for key, values in loss_parts.items():
+        metrics[f"loss_component_{key}"] = float(sum(values) / max(1, len(values)))
     metrics["epoch_time_sec"] = float(time.time() - start)
     metrics["source_counts"] = dict(source_counter)
+    metrics["source_metrics"] = {
+        src: _avg_metric_rows(rows) for src, rows in sorted(source_metric_rows.items())
+    }
     if device.type == "cuda":
         metrics["peak_vram_gb"] = float(torch.cuda.max_memory_allocated(device) / 1024**3)
     return metrics
@@ -300,6 +396,7 @@ def evaluate_by_source(
         target = x.cpu()
         for i, (src, detail) in enumerate(zip(batch["source"], batch["source_detail"])):
             metrics = generation_metrics(pred[i : i + 1], target[i : i + 1], include_voxel_auroc=bool(cfg.get("include_voxel_auroc", True)))
+            rows_by_key[("all", "ALL_DETAILS")].append(metrics)
             rows_by_key[(src, detail)].append(metrics)
             rows_by_key[(src, "ALL_DETAILS")].append(metrics)
     out = []
@@ -350,6 +447,7 @@ def save_qualitative_plots(model, dataset, cfg: dict[str, Any], device: torch.de
 
 
 def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    cfg = apply_ae_recipe_defaults(cfg)
     device_name = cfg.get("device", "auto")
     device = torch.device("cuda" if device_name == "auto" and torch.cuda.is_available() else "cpu" if device_name == "auto" else device_name)
     if device.type == "cuda":
@@ -358,6 +456,12 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     data_mode = str(cfg.get("data_mode", cfg.get("DATA_MODE", "mixed"))).lower()
     out_dir = Path(cfg.get("output_dir", "experiments/3dcnn/atlas_free_cnn/outputs/runs/autoencoder_stable"))
     out_dir.mkdir(parents=True, exist_ok=True)
+    config_dir = out_dir / "config"
+    metrics_dir = out_dir / "metrics"
+    plots_dir = out_dir / "plots"
+    checkpoint_dir = Path(cfg.get("checkpoint_dir", str(out_dir / "checkpoints")))
+    for path in [config_dir, metrics_dir, plots_dir, checkpoint_dir]:
+        path.mkdir(parents=True, exist_ok=True)
     train_ds = filter_data_mode(UnifiedMapTextDataset(cfg["train_jsonl"]), data_mode)
     val_ds = filter_data_mode(UnifiedMapTextDataset(cfg["val_jsonl"]), data_mode)
     test_ds = filter_data_mode(UnifiedMapTextDataset(cfg["test_jsonl"]), data_mode) if cfg.get("test_jsonl") else None
@@ -368,6 +472,11 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     }
     with (out_dir / "source_counts_by_split.json").open("w") as f:
         json.dump(split_counts, f, indent=2)
+    split_rows = []
+    for split, counts in split_counts.items():
+        for src, n in counts.items():
+            split_rows.append({"split": split, "source": src, "n": n})
+    _write_csv(metrics_dir / "source_counts_by_split.csv", split_rows)
     print({"data_mode": data_mode, "source_counts_by_split": split_counts})
 
     model = build_model(cfg, target_shape, device)
@@ -375,13 +484,19 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     batch_size = int(preflight["selected_batch_size"])
     cfg = dict(cfg)
     cfg["batch_size"] = batch_size
-    cfg["loss"] = {"type": "raw_mse"}
-    cfg["prediction_activation"] = "none"
+    loss_cfg = AutoencoderLossConfig.from_config(cfg)
+    cfg["loss"] = loss_cfg.to_dict()
+    cfg["prediction_activation"] = loss_cfg.prediction_activation
     cfg["model"] = model_config(cfg)
     cfg["data_mode"] = data_mode
     cfg["preflight"] = preflight
+    cfg["git_info"] = git_info(Path(__file__).resolve().parents[4])
     with (out_dir / "autoencoder_config.json").open("w") as f:
         json.dump(cfg, f, indent=2)
+    with (config_dir / "ae_config.json").open("w") as f:
+        json.dump(cfg, f, indent=2)
+    with (config_dir / "loss_config.json").open("w") as f:
+        json.dump(loss_cfg.to_dict(), f, indent=2)
     with (out_dir / "preflight.json").open("w") as f:
         json.dump(preflight, f, indent=2)
 
@@ -395,14 +510,47 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     }
     if num_workers > 0:
         loader_kwargs["prefetch_factor"] = int(cfg.get("prefetch_factor", 4))
-    sampler = build_source_sampler(train_ds, cfg) if data_mode == "mixed" else None
+    sampler, sampler_cfg = build_source_sampler(train_ds.rows, cfg) if data_mode == "mixed" else (None, {})
+    with (config_dir / "sampler_config.json").open("w") as f:
+        json.dump(sampler_cfg, f, indent=2)
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=sampler is None, sampler=sampler, **loader_kwargs)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, **loader_kwargs)
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(cfg.get("lr", 3e-4)), weight_decay=float(cfg.get("weight_decay", 1e-4)))
-    ckpt = CheckpointManager(cfg.get("checkpoint_dir", str(out_dir / "checkpoints")), maximize={"val_loss": False})
+    init_checkpoint = cfg.get("init_checkpoint") or cfg.get("ae_init_checkpoint")
+    if init_checkpoint:
+        payload = torch.load(init_checkpoint, map_location="cpu", weights_only=False)
+        state = payload.get("model") or payload.get("autoencoder") or payload.get("state_dict")
+        if state is None:
+            raise KeyError("init_checkpoint must contain model, autoencoder, or state_dict")
+        model.load_state_dict(state, strict=True)
+        freeze = str(cfg.get("freeze_mode", "none")).lower()
+        if freeze == "encoder":
+            for p in model.encoder.parameters():
+                p.requires_grad_(False)
+        elif freeze == "decoder":
+            for p in model.decoder.parameters():
+                p.requires_grad_(False)
+        elif freeze == "all_but_decoder":
+            for p in model.encoder.parameters():
+                p.requires_grad_(False)
+        elif freeze in {"none", "train_all", "encoder_decoder"}:
+            pass
+        else:
+            raise ValueError("freeze_mode must be none, encoder, decoder, all_but_decoder, train_all, or encoder_decoder")
+    ckpt = CheckpointManager(
+        checkpoint_dir,
+        maximize={
+            "val_loss": False,
+            "spatial_corr": True,
+            "top1_dice": True,
+            "top5_dice": True,
+            "foreground_mse": False,
+        },
+    )
     use_amp = bool(cfg.get("amp", device.type == "cuda"))
     scaler = torch.cuda.amp.GradScaler(enabled=bool(use_amp and device.type == "cuda"))
     history: list[dict[str, Any]] = []
+    sampling_history: list[dict[str, Any]] = []
     last_val_metrics: dict[str, Any] = {}
     max_epochs = int(cfg.get("epochs", 200))
     early_stopping = bool(cfg.get("early_stopping", True))
@@ -422,7 +570,9 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             device,
             train=True,
             use_amp=use_amp,
+            loss_config=loss_cfg,
             scaler=scaler,
+            grad_clip=float(cfg.get("gradient_clipping", 1.0)),
             max_batches=cfg.get("max_train_batches"),
             compute_metrics=bool(cfg.get("compute_train_metrics", True)),
             metric_max_batches=cfg.get("train_metric_batches"),
@@ -438,6 +588,8 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 device,
                 train=False,
                 use_amp=use_amp,
+                loss_config=loss_cfg,
+                grad_clip=float(cfg.get("gradient_clipping", 1.0)),
                 max_batches=cfg.get("max_val_batches"),
                 compute_metrics=True,
                 metric_max_batches=cfg.get("val_metric_batches"),
@@ -448,12 +600,21 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         val_metrics = dict(last_val_metrics)
         row = {"epoch": epoch, **{f"train_{k}": v for k, v in train_metrics.items()}, **{f"val_{k}": v for k, v in val_metrics.items()}}
         history.append(row)
+        sampling_history.append(epoch_source_exposure(epoch, train_metrics.get("source_counts", {}), sampler_cfg))
         payload = {
             "model": model.state_dict(),
             "config": cfg,
             "history": history,
             "epoch": epoch,
+            "train_loss": train_metrics.get("loss"),
+            "validation_metrics": val_metrics,
+            "source_wise_validation_metrics": val_metrics.get("source_metrics", {}),
             "target_shape": target_shape,
+            "model_architecture": cfg["model"],
+            "checkpoint_selection_metric": cfg.get("checkpoint_selection_metric", "best_val_loss"),
+            "git_info": cfg.get("git_info", {}),
+            "data_mode": data_mode,
+            "ae_variant": cfg.get("ae_variant", cfg.get("AE_VARIANT", cfg.get("ae_training_recipe"))),
             "source_counts_by_split": split_counts,
             "early_stopping": {
                 "enabled": early_stopping,
@@ -467,10 +628,25 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         ckpt.save_last(payload)
         ckpt.save("last_cnn_autoencoder.pt", payload)
         if val_metrics:
-            if ckpt.maybe_save_best("val_loss", float(val_metrics.get("loss", math.inf)), payload):
-                ckpt.save("best_cnn_autoencoder.pt", payload)
+            ckpt.maybe_save_best("val_loss", float(val_metrics.get("loss", math.inf)), payload)
             ckpt.maybe_save_best("spatial_corr", float(val_metrics.get("spatial_corr", -1.0)), payload)
+            ckpt.maybe_save_best("top1_dice", float(val_metrics.get("top1_dice", 0.0)), payload)
             ckpt.maybe_save_best("top5_dice", float(val_metrics.get("top5_dice", 0.0)), payload)
+            ckpt.maybe_save_best("foreground_mse", float(val_metrics.get("foreground_mse", math.inf)), payload)
+            selection = str(cfg.get("checkpoint_selection_metric", "best_val_loss"))
+            metric_name = selection.removeprefix("best_")
+            if metric_name == "last":
+                ckpt.save("best_cnn_autoencoder.pt", payload)
+            elif metric_name in ckpt.best:
+                selected_value = {
+                    "val_loss": float(val_metrics.get("loss", math.inf)),
+                    "spatial_corr": float(val_metrics.get("spatial_corr", -1.0)),
+                    "top1_dice": float(val_metrics.get("top1_dice", 0.0)),
+                    "top5_dice": float(val_metrics.get("top5_dice", 0.0)),
+                    "foreground_mse": float(val_metrics.get("foreground_mse", math.inf)),
+                }.get(metric_name)
+                if selected_value is not None and float(ckpt.best[metric_name]) == float(selected_value):
+                    ckpt.save("best_cnn_autoencoder.pt", payload)
             if early_stopping:
                 metric_key = early_metric[4:] if early_metric.startswith("val_") else early_metric
                 current = float(val_metrics.get(metric_key, math.inf))
@@ -493,6 +669,9 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         print(row)
     with (out_dir / "history.json").open("w") as f:
         json.dump(history, f, indent=2)
+    _write_csv(metrics_dir / "train_history.csv", [_flatten_history_row(row) for row in history])
+    _write_csv(metrics_dir / "val_history.csv", [_flatten_history_row(row) for row in history])
+    _write_csv(metrics_dir / "source_sampling_history.csv", sampling_history)
     with (out_dir / "training_stop.json").open("w") as f:
         json.dump(
             {
@@ -519,24 +698,74 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             writer = csv.DictWriter(f, fieldnames=list(eval_rows[0].keys()))
             writer.writeheader()
             writer.writerows(eval_rows)
+        _write_csv(metrics_dir / "reconstruction_metrics_all_rows.csv", eval_rows)
+        _write_csv(metrics_dir / "reconstruction_summary_by_source.csv", eval_rows)
+        checkpoint_rows = []
+        for row in eval_rows:
+            checkpoint_rows.append(
+                {
+                    "checkpoint": "last",
+                    "ae_variant": cfg.get("ae_variant", cfg.get("ae_training_recipe")),
+                    **row,
+                }
+            )
+        _write_csv(metrics_dir / "reconstruction_summary_by_checkpoint_source.csv", checkpoint_rows)
+    leaderboard_rows = []
+    for name, value in sorted(ckpt.best.items()):
+        leaderboard_rows.append(
+            {
+                "metric": name,
+                "best_value": value,
+                "checkpoint_path": str(ckpt.out_dir / f"best_{name}.pt"),
+                "maximize": ckpt.maximize.get(name, True),
+            }
+        )
+    _write_csv(metrics_dir / "checkpoint_leaderboard.csv", leaderboard_rows)
     if bool(cfg.get("save_plots", True)):
         plot_ds = test_ds or val_ds
         for src in ["pubmed", "neurovault", "nilearn"]:
-            save_qualitative_plots(model, plot_ds, cfg, device, out_dir / "plots", src)
+            save_qualitative_plots(model, plot_ds, cfg, device, plots_dir / "recon_examples" / src, src)
     return {
         "history": history,
         "checkpoint_dir": str(ckpt.out_dir),
         "best_checkpoint": str(ckpt.out_dir / "best_cnn_autoencoder.pt"),
+        "checkpoint_leaderboard": leaderboard_rows,
         "preflight": preflight,
         "source_counts_by_split": split_counts,
     }
+
+
+def train_stage1b_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Run domain-specific AE fine-tuning from a mixed pretraining checkpoint."""
+
+    mode = str(cfg.get("stage1b_mode", cfg.get("STAGE1B_MODE", ""))).lower()
+    if mode not in {"mixed_pretrain_to_pubmed", "mixed_pretrain_to_statmaps"}:
+        raise ValueError("stage1b_mode must be mixed_pretrain_to_pubmed or mixed_pretrain_to_statmaps")
+    ft_cfg = dict(cfg)
+    ft_cfg["ae_training_recipe"] = cfg.get("ae_training_recipe", "previous_good_compatible")
+    ft_cfg["init_checkpoint"] = cfg.get("init_checkpoint") or cfg.get("mixed_pretrain_checkpoint")
+    if not ft_cfg.get("init_checkpoint"):
+        raise ValueError("Stage 1B fine-tuning requires init_checkpoint or mixed_pretrain_checkpoint")
+    ft_cfg.setdefault("lr", 1e-4)
+    ft_cfg.setdefault("freeze_mode", "none")
+    ft_cfg["data_mode"] = "pubmed_only" if mode == "mixed_pretrain_to_pubmed" else "statmaps_only"
+    ft_cfg["ae_variant"] = cfg.get(
+        "ae_variant",
+        "mixed_to_pubmed" if mode == "mixed_pretrain_to_pubmed" else "mixed_to_statmaps",
+    )
+    ft_cfg["stage1b_mode"] = mode
+    return train_from_config(ft_cfg)
 
 
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="experiments/3dcnn/atlas_free_cnn/configs/autoencoder_config.yaml")
     args = p.parse_args()
-    train_from_config(load_yaml(args.config))
+    cfg = load_yaml(args.config)
+    if cfg.get("stage1b_mode") or cfg.get("STAGE1B_MODE"):
+        train_stage1b_from_config(cfg)
+    else:
+        train_from_config(cfg)
 
 
 if __name__ == "__main__":

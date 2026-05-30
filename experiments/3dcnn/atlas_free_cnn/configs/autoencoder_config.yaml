@@ -1,26 +1,38 @@
-# Default Stage 1 AE recipe: previous-good-compatible raw MSE setup.
+# Default Stage 1 AE recipe: previous_good_compatible raw-MSE baseline.
 train_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/train.jsonl
 val_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/val.jsonl
 test_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/test.jsonl
 output_dir: experiments/3dcnn/atlas_free_cnn/outputs/runs/autoencoder_stable_mixed_base
 checkpoint_dir: experiments/3dcnn/atlas_free_cnn/outputs/runs/autoencoder_stable_mixed_base/checkpoints
 
+ae_training_recipe: previous_good_compatible
+ae_variant: mixed_baseline_raw_mse
+checkpoint_selection_metric: best_val_loss
 device: auto
 seed: 42
 target_shape: [36, 45, 38]
 data_mode: mixed          # pubmed_only | mixed
-source_sampling: temperature
+source_sampling: natural  # natural | balanced | temperature | manual
 source_sampling_alpha: 0.5
+source_sampling_weights:
 
 model_size: base          # base | wide | deeper
 model:
   latent_dim: 384
-  base_channels: 48
+  base_channels: 64
   num_blocks: 4
   encoder_arch: plain
   dropout: 0.1
   norm: group
   pooling: max
+
+loss:
+  type: raw_mse           # raw_mse | hybrid_recon
+  lambda_foreground: 0.0
+  lambda_topk: 0.0
+  foreground_threshold:
+  topk_percent: 5
+  prediction_activation: none
 
 batch_size: 64
 preflight_batch_size: true

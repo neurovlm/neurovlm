@@ -57,9 +57,17 @@ def generation_metrics(
     top1 = hard_topk_dice(pred, target, k_percent=0.01, mask=mask)
     top5 = hard_topk_dice(pred, target, k_percent=0.05, mask=mask)
     top10 = hard_topk_dice(pred, target, k_percent=0.10, mask=mask)
+    mse = float((pred_eval - target_eval).pow(2).mean().item())
+    foreground = target_eval > 0
+    if bool(foreground.any()):
+        foreground_mse = float((pred_eval[foreground] - target_eval[foreground]).pow(2).mean().item())
+    else:
+        foreground_mse = mse
     out = {
-        "mse": float((pred_eval - target_eval).pow(2).mean().item()),
+        "mse": mse,
+        "reconstruction_mse": mse,
         "mae": float((pred_eval - target_eval).abs().mean().item()),
+        "foreground_mse": foreground_mse,
         "spatial_corr": float(1.0 - spatial_correlation_loss(pred, target, mask=mask).item()),
         "top1_dice": float(top1.mean().item()),
         "top5_dice": float(top5.mean().item()),
