@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -19,12 +20,43 @@ class UnifiedMapTextDataset(Dataset):
             self.rows = [json.loads(line) for line in f if line.strip()]
         self.load_volumes = load_volumes
         self._tensor_cache: dict[str, Any] = {}
+        self.path_roots = self._path_roots()
+
+    def _path_roots(self) -> list[Path]:
+        roots: list[Path] = [Path.cwd()]
+        roots.extend(self.path.resolve().parents)
+        for env_name in ["NEUROVLM_DATA_ROOT", "NEUROVLM_DRIVE_ROOT", "NEUROVLM_REPO_DIR"]:
+            value = os.environ.get(env_name)
+            if value:
+                roots.append(Path(value))
+        out: list[Path] = []
+        seen: set[str] = set()
+        for root in roots:
+            key = str(root)
+            if key not in seen:
+                seen.add(key)
+                out.append(root)
+        return out
+
+    def _resolve_path(self, value: str | Path | None) -> Path:
+        if not value:
+            raise ValueError("Empty data path")
+        path = Path(value)
+        if path.is_absolute() and path.exists():
+            return path
+        if path.exists():
+            return path
+        for root in self.path_roots:
+            candidate = root / path
+            if candidate.exists():
+                return candidate
+        return path
 
     def __len__(self) -> int:
         return len(self.rows)
 
     def _load_from_tensor_cache(self, row: dict) -> torch.Tensor:
-        tensor_path = row.get("tensor_path")
+        tensor_path = str(self._resolve_path(row.get("tensor_path")))
         if tensor_path not in self._tensor_cache:
             self._tensor_cache[tensor_path] = torch.load(tensor_path, map_location="cpu", weights_only=False)
         payload = self._tensor_cache[tensor_path]
@@ -41,7 +73,7 @@ class UnifiedMapTextDataset(Dataset):
         import nibabel as nib
         import numpy as np
 
-        data = np.nan_to_num(nib.load(row["nifti_path"]).get_fdata().astype("float32"))
+        data = np.nan_to_num(nib.load(self._resolve_path(row["nifti_path"])).get_fdata().astype("float32"))
         return torch.from_numpy(data).unsqueeze(0)
 
     def __getitem__(self, idx: int) -> dict:
@@ -65,4 +97,3 @@ class UnifiedMapTextDataset(Dataset):
 def load_text_registry(path: str | Path) -> dict[str, dict]:
     with Path(path).open() as f:
         return {row["text_id"]: row for row in (json.loads(line) for line in f if line.strip())}
-
