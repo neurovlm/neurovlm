@@ -221,6 +221,9 @@ def preflight_batch_size(
         return {"selected_batch_size": requested, "peak_vram_gb": None, "parameter_count": count_parameters(model)}
     reserve_gb = float(cfg.get("preflight_vram_reserve_gb", 12.0))
     candidates = [int(v) for v in cfg.get("batch_candidates", AUTOENCODER_BATCH_CANDIDATES)]
+    if cfg.get("max_batch_size") is not None:
+        max_batch_size = int(cfg["max_batch_size"])
+        candidates = [v for v in candidates if v <= max_batch_size]
     candidates = [v for v in candidates if v >= requested] + [v for v in candidates if v < requested]
     candidates = sorted(set(candidates), reverse=True)
     param_count = count_parameters(model)
