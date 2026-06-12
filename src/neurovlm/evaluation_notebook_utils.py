@@ -242,8 +242,17 @@ def build_neurovault_b2t_eval(nvlm, output_dir, max_samples: int | None = None) 
     return (records[:max_samples] if max_samples else records), selection_df
 
 
-def build_pubmed_t2b_eval(max_samples: int | None = None) -> list[dict[str, Any]]:
-    df_pubs = load_dataset("pubmed_text")
+def build_pubmed_t2b_eval(max_samples: int | None = None, use_summaries: bool = False) -> list[dict[str, Any]]:
+
+
+    if use_summaries:
+        df_pubs = load_dataset("pubmed_summaries")
+        df_pubs = df_pubs[["pmid", "name", "summary", "test"]]
+        df_pubs = df_pubs.rename({"summary": "description"})
+        df_pubs["pmid"] = df_pubs["pmid"].astype(int)
+    else:
+        df_pubs = load_dataset("pubmed_text")
+
     if "test" not in df_pubs.columns:
         raise ValueError("pubmed_text must include a boolean 'test' column for PubMed evaluation.")
     df_test = df_pubs[df_pubs["test"].fillna(False).astype(bool)].reset_index(drop=True)
@@ -251,7 +260,14 @@ def build_pubmed_t2b_eval(max_samples: int | None = None) -> list[dict[str, Any]
     pmid_col = "pmid" if "pmid" in df_test.columns else df_test.columns[0]
     title_col = "name" if "name" in df_test.columns else "title"
     abstract_col = "description" if "description" in df_test.columns else "abstract"
+
     pubmed_latents, pubmed_pmids = load_latent("pubmed_images")
+    if use_summaries:
+        df_pubs = df_pubs[df_pubs["pmid"].isin(pubmed_pmids)]
+        df_pubs = df_pubs.sort_values("pmid")
+        df_pubs.reset_index(inplace=True, drop=True)
+        assert (df_pubs["pmid"] == pubmed_pmids).all()
+
     pubmed_pmids = np.asarray(pubmed_pmids)
     mask = np.isin(pubmed_pmids, df_test[pmid_col].values)
     aligned_latents = pubmed_latents[mask]

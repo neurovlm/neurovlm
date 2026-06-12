@@ -653,18 +653,26 @@ class _QueryBuilder:
         head: Literal["mse", "infonce"] = "mse",
         project: bool = True,
         dataset: Optional[Union[str, Sequence[str]]] = None,
+        adapter: bool = False,
     ) -> BrainSearchResult:
         """Run text/brain query against the brain target space."""
-        return self.parent.to_brain(self.payload, head=head, project=project, dataset=dataset)
+        return self.parent.to_brain(
+            self.payload,
+            head=head,
+            project=project,
+            dataset=dataset,
+            adapter=adapter,
+        )
 
     def generate_brain(
         self,
         project: bool = True,
+        adapter: bool = False,
     ) -> BrainSearchResult:
         """Generate brain maps from text with the MSE decoder path."""
         if self.source != "text":
             raise ValueError("generate_brain is only available for text(...) queries.")
-        return self.parent.generate_brain(self.payload, project=project)
+        return self.parent.generate_brain(self.payload, project=project, adapter=adapter)
 
     def retrieve_brain(
         self,
@@ -693,6 +701,7 @@ class _QueryBuilder:
         *,
         basis: str | None = "network",
         prefix_text: str | None = None,
+        canonical_basis: str | None = None,
         max_new_tokens: int = 256,
         num_beams: int = 3,
         do_sample: bool = False,
@@ -711,6 +720,7 @@ class _QueryBuilder:
             self.payload,
             basis=basis,
             prefix_text=prefix_text,
+            canonical_basis=canonical_basis,
             max_new_tokens=max_new_tokens,
             num_beams=num_beams,
             do_sample=do_sample,
@@ -754,6 +764,7 @@ class NeuroVLM:
         self._neuro_qwen_model = None
         self._neuro_qwen_tokenizer = None
         self._neuro_qwen_token_norm: Optional[float] = None
+        self._neuro_adapter = None
 
         self._text_raw_embeddings: Dict[str, torch.Tensor] = {}
         self._text_shared_embeddings: Dict[str, torch.Tensor] = {}
@@ -867,6 +878,7 @@ class NeuroVLM:
         *,
         basis: str | None = "network",
         prefix_text: str | None = None,
+        canonical_basis: str | None = None,
         max_new_tokens: int = 256,
         num_beams: int = 3,
         do_sample: bool = False,
@@ -887,6 +899,7 @@ class NeuroVLM:
             X,
             basis=basis,
             prefix_text=prefix_text,
+            canonical_basis=canonical_basis,
             max_new_tokens=max_new_tokens,
             num_beams=num_beams,
             do_sample=do_sample,
@@ -905,6 +918,7 @@ class NeuroVLM:
         head: Literal["mse", "infonce"] = "mse",
         project: bool = True,
         dataset: Optional[Union[str, Sequence[str]]] = None,
+        adapter: bool = False,
     ) -> BrainSearchResult:
         """Retrieve brain results for one or many queries.
 
@@ -921,6 +935,11 @@ class NeuroVLM:
             Defaults to ``("pubmed", "networks", "neurovault")`` for InfoNCE.
             Ignored when ``head="mse"`` because MSE directly generates
             brain maps from projected text.
+        adapter : bool, optional
+            If ``True`` with ``head="mse"``, generate flat brain maps with the
+            packaged ``neuro_adapter`` instead of the legacy
+            text-projection-head plus autoencoder decoder path. Only text
+            payloads and 768-d SPECTER embeddings are supported.
 
         Returns
         -------
@@ -940,6 +959,37 @@ class NeuroVLM:
             self._last_text_query = None
 
         self._validate_head(head)
+        if adapter and head != "mse":
+            raise ValueError("adapter=True is only supported with head='mse'.")
+
+        if adapter:
+            text_embedding = self._prepare_adapter_text_embedding(X)
+            self._ensure_neuro_adapter()
+            self._ensure_autoencoder()
+            self._ensure_masker()
+
+            assert self._neuro_adapter is not None
+            with torch.no_grad():
+                flatmaps = torch.sigmoid(
+                    self._neuro_adapter(_l2_normalize(text_embedding.to(self.device)))
+                ).detach().cpu()
+
+            self.last_generated_brain_flat = flatmaps
+            result = BrainSearchResult(
+                scores=None,
+                metadata=None,
+                latents=None,
+                query_embeddings=text_embedding.detach().cpu(),
+                retrieval_space="mse",
+                generated_flatmaps=flatmaps,
+                masker=self._masker,
+                decoder=self._autoencoder.decoder,
+                dataset_image_getter=self._get_dataset_nifti,
+            )
+            self.last_brain_result = result
+            self._last_result = result
+            return result
+
         query, retrieval_space = self._prepare_brain_query(X, head=head, project=project)
 
         # MSE path: decode projected text latents directly to brain flatmaps.
@@ -1039,9 +1089,10 @@ class NeuroVLM:
         self,
         X: Any,
         project: bool = True,
+        adapter: bool = False,
     ) -> BrainSearchResult:
         """Alias for text-to-brain generation via ``to_brain(head='mse')``."""
-        return self.to_brain(X, head="mse", project=project)
+        return self.to_brain(X, head="mse", project=project, adapter=adapter)
 
     def retrieve_brain(
         self,
@@ -1231,6 +1282,22 @@ class NeuroVLM:
         raise ValueError(
             f"Unsupported embedding dim {dim}. Expected {TEXT_EMBED_DIM}, {LATENT_DIM}, or {BRAIN_FLAT_DIM}."
         )
+
+    def _prepare_adapter_text_embedding(self, X: Any) -> torch.Tensor:
+        """Prepare a raw 768-d SPECTER embedding for the neuro-adapter."""
+        if self._is_text_payload(X):
+            return _l2_normalize(self._encode_text(X).to(self.device))
+
+        tensor = self._coerce_numeric_query(X)
+        if tensor is None:
+            raise TypeError("adapter=True expects text or a 768-d SPECTER text embedding.")
+
+        dim = int(tensor.shape[1])
+        if dim != TEXT_EMBED_DIM:
+            raise ValueError(
+                f"adapter=True expects a {TEXT_EMBED_DIM}-d text embedding, got dim {dim}."
+            )
+        return _l2_normalize(tensor.to(self.device))
 
     def _project_text_to_brain_space(
         self,
@@ -1794,6 +1861,11 @@ class NeuroVLM:
         if self._autoencoder is None:
             self._autoencoder = load_model("autoencoder").to(self.device).eval()
 
+    def _ensure_neuro_adapter(self) -> None:
+        """Lazy-load the packaged text-to-brain adapter."""
+        if self._neuro_adapter is None:
+            self._neuro_adapter = load_model("neuro_adapter").to(self.device).eval()
+
     def _ensure_masker(self) -> None:
         """Lazy-load NIfTI masker."""
         if self._masker is None:
@@ -1905,6 +1977,7 @@ class NeuroVLM:
         *,
         basis: str | None = "network",
         prefix_text: str | None = None,
+        canonical_basis: str | None = None,
         max_new_tokens: int = 256,
         num_beams: int = 3,
         do_sample: bool = False,
@@ -1917,9 +1990,10 @@ class NeuroVLM:
         no_repeat_ngram_size: int = 4,
     ) -> str | list[str]:
         """Internal QFormer/Qwen generation path for brain inputs."""
+        canonical_basis = basis if canonical_basis is None else canonical_basis
         self._ensure_generative_text_model(
             projection_temp=projection_temp,
-            canonical_basis=basis,
+            canonical_basis=canonical_basis,
             use_canonical_projection=use_canonical_projection,
         )
         raw_latent = self._prepare_brain_latent_for_generation(X)
@@ -1937,7 +2011,7 @@ class NeuroVLM:
         ):
             vis = self._neuro_qformer(
                 raw_latent,
-                basis=basis,
+                basis=canonical_basis,
                 projection_temp=projection_temp,
                 use_canonical_projection=use_canonical_projection,
             )

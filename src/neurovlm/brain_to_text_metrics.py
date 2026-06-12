@@ -1166,11 +1166,18 @@ def generated_text_retrieval_curve(
     networks_data: dict[str, dict[str, Any]],
     pubmed_eval: list[dict[str, Any]],
     neurovault_eval: list[dict[str, Any]],
+    text_latents: Any | None = None,
 ) -> tuple[float, pd.DataFrame]:
     if len(df) < 2:
         return np.nan, pd.DataFrame()
-    generated = df["generated"].astype(str).tolist()
-    z_text = project_text_latents_to_shared(nvlm, nvlm._encode_text(generated))
+    if text_latents is None:
+        generated = df["generated"].astype(str).tolist()
+        text_latents = nvlm._encode_text(generated)
+    else:
+        text_latents = as_latent_batch(text_latents)
+        if len(text_latents) != len(df):
+            raise ValueError(f"text_latents length {len(text_latents)} does not match df length {len(df)}.")
+    z_text = project_text_latents_to_shared(nvlm, text_latents)
     z_brain = project_brain_latents_to_shared(
         nvlm,
         brain_latents_for_generated_group(df, networks_data=networks_data, pubmed_eval=pubmed_eval, neurovault_eval=neurovault_eval),
@@ -1202,17 +1209,32 @@ def generated_text_metric_summary(
     pubmed_eval: list[dict[str, Any]],
     neurovault_eval: list[dict[str, Any]],
     output_dir,
+    text_latents: Any | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    all_text_latents = None
+    if text_latents is not None:
+        all_text_latents = as_latent_batch(text_latents)
+        if len(all_text_latents) != len(b2t_all):
+            raise ValueError(
+                f"text_latents length {len(all_text_latents)} does not match b2t_all length {len(b2t_all)}."
+            )
+
     generated_text_recall_rows = []
     generated_text_curve_rows = []
-    for (dataset, mode), sub in b2t_all.groupby(["dataset", "mode"]):
-        sub = sub.reset_index(drop=True)
+    b2t_work = b2t_all.copy()
+    b2t_work["_row_pos"] = np.arange(len(b2t_work), dtype=np.int64)
+    for (dataset, mode), sub in b2t_work.groupby(["dataset", "mode"]):
+        group_text_latents = None
+        if all_text_latents is not None:
+            group_text_latents = all_text_latents[sub["_row_pos"].to_numpy(dtype=np.int64, copy=True)]
+        sub = sub.drop(columns="_row_pos").reset_index(drop=True)
         auc, curve_df = generated_text_retrieval_curve(
             nvlm,
             sub,
             networks_data=networks_data,
             pubmed_eval=pubmed_eval,
             neurovault_eval=neurovault_eval,
+            text_latents=group_text_latents,
         )
         generated_text_recall_rows.append(
             {
