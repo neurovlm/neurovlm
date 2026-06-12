@@ -35,6 +35,8 @@ license-files = ["LICENSE"]
 
 [project.optional-dependencies]
 metrics = [
+  "nltk",
+  "rouge-score",
   "scikit-learn",
   "scikit-image",
 ]
@@ -71,6 +73,8 @@ docs = [
   "sphinx-copybutton>=0.5,<1",
 ]
 full = [
+  "nltk",
+  "rouge-score",
   "scikit-learn",
   "scikit-image",
   "nimare",

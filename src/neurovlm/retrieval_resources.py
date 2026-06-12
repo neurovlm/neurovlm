@@ -10,6 +10,7 @@ Files are now loaded from HuggingFace repositories under the neurovlm organizati
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Tuple
 import gzip, json, pickle
 
@@ -28,6 +29,7 @@ from neurovlm.qformer import NeuroQFormer
 
 __all__ = [
     "_load_pubmed_dataframe",
+    "_load_pubmed_summaries_dataframe",
     "_load_neuro_wiki",
     "_load_pubmed_coordinates",
     "_load_latent_neuro",
@@ -41,6 +43,7 @@ __all__ = [
     "_load_threshold_analysis_text_cache",
     "_load_specter",
     "_load_latent_text",
+    "_load_latent_neuro_summaries",
     "_load_latent_wiki",
     "_load_latent_cogatlas",
     "_load_latent_cogatlas_disorder",
@@ -48,6 +51,8 @@ __all__ = [
     "_load_autoencoder",
     "_load_masker",
     "_load_networks",
+    "_load_network_test_set_labels",
+    "_load_pubmed_mesh_annotations",
     "_proj_head_image_infonce",
     "_proj_head_text_mse",
     "_proj_head_text_infonce",
@@ -59,6 +64,16 @@ __all__ = [
     "_load_latent_neurovault_text",
     "_load_neurovault_images",
     "_load_pubmed_images",
+    "_load_latent_ngram",
+    "_load_ngram",
+    "_load_kg_mesh_dataset",
+    "_load_mesh_kg_nodes",
+    "_load_mesh_kg_descriptors",
+    "_load_kg_mesh_brain_rankable_dataset",
+    "_load_latent_kg_mesh",
+    "_load_latent_kg_mesh_brain_rankable",
+    "_load_llm_neuro_terms_dataset",
+    "_load_latent_llm_neuro_terms",
 ]
 
 NEURO_QWEN_REPO_ID = "neurovlm/NeuroQwen3-0.6B"
@@ -124,6 +139,27 @@ def _load_pubmed_dataframe() -> pd.DataFrame:
         return pd.read_parquet(parquet_path, engine="fastparquet")
 
 
+@lru_cache(maxsize=1)
+def _load_pubmed_summaries_dataframe() -> pd.DataFrame:
+    """Load NeuroVLM PubMed summary text from HuggingFace.
+
+    The table is expected to contain at least ``pmid`` and ``summary`` columns.
+    Boolean ``train``, ``val``, and ``test`` columns may be present after
+    running the preparation script that aligns summaries with
+    ``publications.parquet``.
+    """
+    parquet_path = _download_from_hf(
+        "neurovlm/neuro_image_papers",
+        "neuro_summaries.parquet"
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
 def _load_pubmed_coordinates() -> pd.DataFrame:
     """Load the x, y, z coordinates DataFrame from HuggingFace."""
     parquet_path = _download_from_hf(
@@ -390,6 +426,25 @@ def _load_latent_text() -> Tuple[torch.Tensor, np.ndarray]:
     return latent, latent_pmid
 
 
+@lru_cache(maxsize=1)
+def _load_latent_neuro_summaries() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load SPECTER embeddings for PubMed neuro summaries from HuggingFace."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_neuro_summaries.pt"
+    )
+    latent_payload = torch.load(
+        latent_path,
+        weights_only=False,
+        map_location="cpu"
+    )
+
+    latent = latent_payload["latent"]
+    latent_pmid = np.asarray(latent_payload["pmid"])
+    return latent, latent_pmid
+
+
+@lru_cache(maxsize=1)
 def _load_latent_wiki() -> Tuple[torch.Tensor, np.ndarray]:
     """Load unit-normalized latent wiki embeddings from HuggingFace."""
     latent_path = _download_from_hf(
@@ -628,6 +683,27 @@ def _load_networks_canonical() -> pd.DataFrame:
     return pd.read_parquet(networks_path)
 
 
+@lru_cache(maxsize=1)
+def _load_network_test_set_labels() -> pd.DataFrame:
+    """Load labeled network evaluation rows from HuggingFace."""
+    labels_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "network_test_set_labels.csv"
+    )
+    return pd.read_csv(labels_path)
+
+
+@lru_cache(maxsize=1)
+def _load_pubmed_mesh_annotations() -> dict:
+    """Load PubMed PMID-to-MeSH gold annotations from HuggingFace."""
+    annotations_path = _download_from_hf(
+        "neurovlm/mesh_kg",
+        "mesh_annotations.json"
+    )
+    with open(annotations_path, "r") as f:
+        return json.load(f)
+
+
 def _proj_head_image_infonce() -> torch.nn.Module:
     """Load and return the image projection head from HuggingFace."""
     model_path = _download_from_hf(
@@ -747,3 +823,130 @@ def _load_ngram() -> Tuple[torch.Tensor, np.ndarray]:
         labels_path
     )
     return labels
+
+
+@lru_cache(maxsize=1)
+def _load_kg_mesh_dataset() -> pd.DataFrame:
+    """Load the KG-MeSH term/definition DataFrame from HuggingFace."""
+    parquet_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "kg_mesh.parquet"
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_mesh_kg_nodes() -> pd.DataFrame:
+    """Load MeSH KG node metadata, including node_type, from HuggingFace."""
+    local_path = Path("experiments/data/mesh_kg/mesh_kg_nodes.parquet")
+    parquet_path = str(local_path) if local_path.exists() else _download_from_hf(
+        "neurovlm/mesh_kg",
+        "mesh_kg_nodes.parquet"
+    )
+    return pd.read_parquet(parquet_path)
+
+
+@lru_cache(maxsize=1)
+def _load_mesh_kg_descriptors() -> pd.DataFrame:
+    """Load MeSH descriptor metadata from HuggingFace."""
+    local_path = Path("experiments/data/mesh_kg/mesh_descriptors.parquet")
+    parquet_path = str(local_path) if local_path.exists() else _download_from_hf(
+        "neurovlm/mesh_kg",
+        "mesh_descriptors.parquet"
+    )
+    return pd.read_parquet(parquet_path)
+
+
+def _normalize_mesh_term(text: str) -> str:
+    text = str(text or "").lower().split("/")[0]
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in text).split())
+
+
+def _brain_rankable_mesh_terms(include_molecular: bool = False) -> set[str]:
+    allowed = {
+        "disorder",
+        "anatomical_region",
+        "biological_process",
+        "cognitive_construct",
+    }
+    if include_molecular:
+        allowed.add("molecular")
+    nodes = _load_mesh_kg_nodes()
+    node_type_col = "node_type" if "node_type" in nodes.columns else None
+    name_col = "name" if "name" in nodes.columns else "term"
+    if node_type_col is None or name_col not in nodes.columns:
+        raise ValueError("mesh_kg_nodes.parquet must include name and node_type columns.")
+    keep = nodes[nodes[node_type_col].isin(allowed)]
+    return {_normalize_mesh_term(x) for x in keep[name_col].dropna().astype(str)}
+
+
+@lru_cache(maxsize=2)
+def _load_kg_mesh_brain_rankable_dataset(include_molecular: bool = False) -> pd.DataFrame:
+    """Load KG-MeSH terms filtered to brain-rankable node types."""
+    df = _load_kg_mesh_dataset().copy()
+    allowed_terms = _brain_rankable_mesh_terms(include_molecular=include_molecular)
+    keep = df["term"].map(_normalize_mesh_term).isin(allowed_terms)
+    return df.loc[keep].reset_index(drop=True)
+
+
+@lru_cache(maxsize=1)
+def _load_latent_kg_mesh() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load KG-MeSH SPECTER2 embeddings from HuggingFace."""
+    latent_path = _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_kg_mesh.pt"
+    )
+    latent_payload = torch.load(
+        latent_path,
+        weights_only=False,
+        map_location=torch.device("cpu"),
+    )
+    latent = latent_payload["latent"]
+    terms  = np.asarray(latent_payload["term"])
+    return latent, terms
+
+
+@lru_cache(maxsize=2)
+def _load_latent_kg_mesh_brain_rankable(include_molecular: bool = False) -> Tuple[torch.Tensor, np.ndarray]:
+    """Load KG-MeSH embeddings filtered to brain-rankable node types."""
+    latent, terms = _load_latent_kg_mesh()
+    allowed_terms = _brain_rankable_mesh_terms(include_molecular=include_molecular)
+    mask = np.asarray([_normalize_mesh_term(term) in allowed_terms for term in terms], dtype=bool)
+    return latent[mask], terms[mask]
+
+
+@lru_cache(maxsize=1)
+def _load_llm_neuro_terms_dataset() -> pd.DataFrame:
+    """Load novel LLM-extracted neuroscience terms."""
+    local_path = Path("artifacts/llm_extracted_neuro_terms/llm_neuro_terms.parquet")
+    parquet_path = str(local_path) if local_path.exists() else _download_from_hf(
+        "neurovlm/neuro_image_papers",
+        "llm_neuro_terms.parquet"
+    )
+    try:
+        return pd.read_parquet(parquet_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(parquet_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_latent_llm_neuro_terms() -> Tuple[torch.Tensor, np.ndarray]:
+    """Load SPECTER2 embeddings for novel LLM-extracted neuroscience terms."""
+    local_path = Path("artifacts/llm_extracted_neuro_terms/latent_llm_neuro_terms.pt")
+    latent_path = str(local_path) if local_path.exists() else _download_from_hf(
+        "neurovlm/embedded_text",
+        "latent_llm_neuro_terms.pt"
+    )
+    latent_payload = torch.load(
+        latent_path,
+        weights_only=False,
+        map_location=torch.device("cpu"),
+    )
+    latent = latent_payload["latent"]
+    terms = np.asarray(latent_payload["term"])
+    return latent, terms
