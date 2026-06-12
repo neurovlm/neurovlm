@@ -11,10 +11,12 @@ from typing import Any, Iterable, Optional
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from scipy.stats import rankdata, spearmanr
 from tqdm.notebook import tqdm
 
 from neurovlm.metric_utils import as_latent_batch
+from neurovlm.retrieval_metrics import normalized_k_values, normalized_recall_curve_auc
 
 
 def pearson_correlation(
@@ -481,6 +483,253 @@ def decode_latents_to_brain(latents, decoder, batch_size: int = 64) -> np.ndarra
     return torch.cat(chunks, dim=0).numpy().astype("float32")
 
 
+def as_flatmap_batch(flatmaps) -> torch.Tensor:
+    """Convert flat brain maps into a 2D CPU float tensor batch."""
+
+    if isinstance(flatmaps, torch.Tensor):
+        batch = flatmaps.detach().cpu()
+    elif isinstance(flatmaps, np.ndarray) and flatmaps.dtype != object:
+        batch = torch.as_tensor(flatmaps)
+    else:
+        batch = torch.stack([torch.as_tensor(np.asarray(x)) for x in flatmaps])
+    if batch.dim() == 1:
+        batch = batch.unsqueeze(0)
+    return batch.float()
+
+
+def project_brain_latents_to_shared(nvlm, brain_latents, batch_size: int = 4096) -> torch.Tensor:
+    """Project autoencoder brain latents into the InfoNCE shared image space."""
+
+    nvlm._ensure_projection_heads()
+    batch = as_latent_batch(brain_latents).float()
+    chunks = []
+    with torch.no_grad():
+        for start in range(0, len(batch), batch_size):
+            z = nvlm._proj_head_image_infonce(batch[start : start + batch_size].to(nvlm.device))
+            chunks.append(F.normalize(z.float(), dim=1, eps=1e-8).detach().cpu())
+    return torch.cat(chunks, dim=0)
+
+
+def project_text_latents_to_shared(nvlm, text_latents, batch_size: int = 4096) -> torch.Tensor:
+    """Project SPECTER text latents into the InfoNCE shared text space."""
+
+    nvlm._ensure_projection_heads()
+    batch = as_latent_batch(text_latents).float()
+    chunks = []
+    with torch.no_grad():
+        for start in range(0, len(batch), batch_size):
+            text_batch = F.normalize(batch[start : start + batch_size].to(nvlm.device), dim=1, eps=1e-8)
+            z = nvlm._proj_head_text_infonce(text_batch)
+            chunks.append(F.normalize(z.float(), dim=1, eps=1e-8).detach().cpu())
+    return torch.cat(chunks, dim=0)
+
+
+def encode_text_batched(nvlm, texts: Iterable[str], batch_size: int = 32) -> torch.Tensor:
+    """Encode raw texts with NeuroVLM's SPECTER encoder in VRAM-safe batches."""
+
+    texts = [str(text) for text in texts]
+    chunks = []
+    for start in range(0, len(texts), int(batch_size)):
+        chunks.append(nvlm._encode_text(texts[start : start + int(batch_size)]).detach().cpu())
+    return torch.cat(chunks, dim=0) if chunks else torch.empty((0, 768))
+
+
+def project_flatmaps_to_shared(
+    nvlm,
+    flatmaps,
+    *,
+    batch_size: int = 256,
+    threshold: float | None = None,
+) -> torch.Tensor:
+    """Encode flat brain maps, then project them with the contrastive image head.
+
+    Text-to-brain generation produces voxel maps, while retrieval metrics should
+    compare images in the same shared contrastive space used by
+    ``to_brain(head="infonce")``. This helper performs the missing
+    ``autoencoder.encoder -> proj_head_image_infonce -> L2 normalize`` path.
+    """
+
+    nvlm._ensure_autoencoder()
+    nvlm._ensure_projection_heads()
+    batch = as_flatmap_batch(flatmaps)
+    chunks = []
+    with torch.no_grad():
+        for start in range(0, len(batch), batch_size):
+            flat = batch[start : start + batch_size].to(nvlm.device)
+            if threshold is not None:
+                flat = (flat > float(threshold)).float()
+            latent = nvlm._autoencoder.encoder(flat)
+            z = nvlm._proj_head_image_infonce(latent)
+            chunks.append(F.normalize(z.float(), dim=1, eps=1e-8).detach().cpu())
+    return torch.cat(chunks, dim=0)
+
+
+def generated_image_text_retrieval_curve(
+    nvlm,
+    pred_flatmaps,
+    texts: Iterable[str],
+    *,
+    text_latents: Any | None = None,
+    image_batch_size: int = 256,
+    text_encode_batch_size: int = 32,
+    text_batch_size: int = 4096,
+    threshold: float | None = None,
+    seed: int = 13,
+) -> tuple[float, pd.DataFrame, pd.DataFrame]:
+    """Compute generated-image -> source-text retrieval in shared contrastive space."""
+
+    texts = [str(text) for text in texts]
+    n = len(texts)
+    if n < 2:
+        return np.nan, pd.DataFrame(), pd.DataFrame()
+    if len(pred_flatmaps) != n:
+        raise ValueError(f"pred_flatmaps length {len(pred_flatmaps)} does not match texts length {n}.")
+
+    if text_latents is None:
+        text_latents = encode_text_batched(nvlm, texts, batch_size=text_encode_batch_size)
+    else:
+        text_latents = as_latent_batch(text_latents)
+        if len(text_latents) != n:
+            raise ValueError(f"text_latents length {len(text_latents)} does not match texts length {n}.")
+
+    z_image = project_flatmaps_to_shared(
+        nvlm,
+        pred_flatmaps,
+        batch_size=image_batch_size,
+        threshold=threshold,
+    )
+    z_text = project_text_latents_to_shared(nvlm, text_latents, batch_size=text_batch_size)
+    scores = z_image @ z_text.T
+    matched = scores.diag()
+    rng = np.random.default_rng(seed)
+    null_idx = rng.permutation(n)
+    fixed = np.flatnonzero(null_idx == np.arange(n))
+    if len(fixed) > 1:
+        null_idx[fixed] = np.roll(null_idx[fixed], 1)
+    elif len(fixed) == 1:
+        i = fixed[0]
+        j = (i + 1) % n
+        null_idx[i], null_idx[j] = null_idx[j], null_idx[i]
+    null = scores[torch.arange(n), torch.as_tensor(null_idx)]
+    ranks = 1 + (scores > matched[:, None]).sum(dim=1)
+    ranks = ranks.cpu()
+    hit_counts = torch.bincount(ranks - 1, minlength=n).float()
+    recall_curve = torch.cumsum(hit_counts, dim=0) / float(n)
+    normalized_k = normalized_k_values(n).cpu().numpy()
+    auc = normalized_recall_curve_auc(recall_curve)
+    curve_df = pd.DataFrame(
+        {
+            "k": np.arange(1, n + 1),
+            "normalized_k": normalized_k,
+            "recall_at_normalized_k": recall_curve.cpu().numpy(),
+            "expected_random_recall_at_normalized_k": normalized_k,
+        }
+    )
+    rank_df = pd.DataFrame(
+        {
+            "rank": ranks.numpy().astype(int),
+            "matched_contrastive_sim": matched.cpu().numpy(),
+            "null_contrastive_sim": null.cpu().numpy(),
+            "null_index": null_idx.astype(int),
+        }
+    )
+    return auc, curve_df, rank_df
+
+
+def generated_image_retrieval_curve(
+    nvlm,
+    pred_flatmaps,
+    true_flatmaps,
+    *,
+    batch_size: int = 256,
+    threshold: float | None = None,
+    seed: int = 13,
+) -> tuple[float, pd.DataFrame, pd.DataFrame]:
+    """Compute exact generated-image retrieval in contrastive image space.
+
+    Rows are generated text-to-brain maps; columns are the aligned true brain
+    maps. The diagonal is treated as the correct pair.
+    """
+
+    n = len(pred_flatmaps)
+    if n < 2:
+        return np.nan, pd.DataFrame(), pd.DataFrame()
+
+    z_pred = project_flatmaps_to_shared(nvlm, pred_flatmaps, batch_size=batch_size, threshold=threshold)
+    z_true = project_flatmaps_to_shared(nvlm, true_flatmaps, batch_size=batch_size, threshold=threshold)
+    scores = z_pred @ z_true.T
+    matched = scores.diag()
+    rng = np.random.default_rng(seed)
+    null_idx = rng.permutation(n)
+    fixed = np.flatnonzero(null_idx == np.arange(n))
+    if len(fixed) > 1:
+        null_idx[fixed] = np.roll(null_idx[fixed], 1)
+    elif len(fixed) == 1:
+        i = fixed[0]
+        j = (i + 1) % n
+        null_idx[i], null_idx[j] = null_idx[j], null_idx[i]
+    null = scores[torch.arange(n), torch.as_tensor(null_idx)]
+    ranks = 1 + (scores > matched[:, None]).sum(dim=1)
+    ranks = ranks.cpu()
+    hit_counts = torch.bincount(ranks - 1, minlength=n).float()
+    recall_curve = torch.cumsum(hit_counts, dim=0) / float(n)
+    normalized_k = normalized_k_values(n).cpu().numpy()
+    auc = normalized_recall_curve_auc(recall_curve)
+    curve_df = pd.DataFrame(
+        {
+            "k": np.arange(1, n + 1),
+            "normalized_k": normalized_k,
+            "recall_at_normalized_k": recall_curve.cpu().numpy(),
+            "expected_random_recall_at_normalized_k": normalized_k,
+        }
+    )
+    rank_df = pd.DataFrame(
+        {
+            "rank": ranks.numpy().astype(int),
+            "matched_contrastive_sim": matched.cpu().numpy(),
+            "null_contrastive_sim": null.cpu().numpy(),
+            "null_index": null_idx.astype(int),
+        }
+    )
+    return auc, curve_df, rank_df
+
+
+def contrastive_pair_baseline(
+    nvlm,
+    pred_flatmaps,
+    true_flatmaps,
+    *,
+    batch_size: int = 256,
+    threshold: float | None = None,
+    seed: int = 13,
+) -> pd.DataFrame:
+    """Return matched and deranged-null contrastive similarities."""
+
+    z_pred = project_flatmaps_to_shared(nvlm, pred_flatmaps, batch_size=batch_size, threshold=threshold)
+    z_true = project_flatmaps_to_shared(nvlm, true_flatmaps, batch_size=batch_size, threshold=threshold)
+    n = len(z_pred)
+    rng = np.random.default_rng(seed)
+    if n < 2:
+        null_idx = np.arange(n)
+    else:
+        null_idx = rng.permutation(n)
+        fixed = np.flatnonzero(null_idx == np.arange(n))
+        if len(fixed) > 1:
+            null_idx[fixed] = np.roll(null_idx[fixed], 1)
+        elif len(fixed) == 1:
+            i = fixed[0]
+            j = (i + 1) % n
+            null_idx[i], null_idx[j] = null_idx[j], null_idx[i]
+    matched = (z_pred * z_true).sum(dim=1).cpu().numpy()
+    null = (z_pred * z_true[torch.as_tensor(null_idx)]).sum(dim=1).cpu().numpy()
+    return pd.DataFrame(
+        {
+            "kind": np.repeat(["Match", "Null"], [n, n]),
+            "contrastive_sim": np.concatenate([matched, null]),
+        }
+    )
+
+
 def build_surface_eligibility_mask(masker):
     """Return a cortical/surface-oriented mask vector aligned to masker output."""
 
@@ -590,9 +839,10 @@ def evaluate_t2b_sample(
     spin_test_random_state: int = 13,
     spin_fsaverage_density: str = "41k",
     spin_transform_method: str = "linear",
+    adapter: bool = False,
 ) -> dict[str, Any] | None:
     try:
-        gen_result = nvlm.text(text_input).to_brain(head="mse")
+        gen_result = nvlm.text(text_input).to_brain(head="mse", adapter=adapter)
         nifti_pred = gen_result.to_nifti(index=0)
         brain_pred = masker.transform(nifti_pred).ravel().astype("float32")
 
@@ -808,6 +1058,76 @@ def finite_sem(values: Iterable[float]) -> float:
     return float(series.std() / np.sqrt(max(series.count(), 1)))
 
 
+def _sensitivity_rows_for_record(
+    row: dict[str, Any],
+    dataset: str,
+    *,
+    pcts: tuple[float, ...],
+    spin_test_n_perm: int,
+    spin_test_random_state: int,
+    spin_fsaverage_density: str,
+    spin_use_neuromaps: bool,
+    spin_require_neuromaps: bool,
+) -> list[dict[str, Any]]:
+    rows = []
+    for pct in pcts:
+        if not bool(row.get("surface_metric_eligible", True)):
+            rows.append(
+                {
+                    "dataset": dataset,
+                    "sample": row["name"],
+                    "pct": pct,
+                    "top_fraction": (100 - pct) / 100,
+                    "dice": np.nan,
+                    "spin_p_value": np.nan,
+                    "spin_significant": False,
+                    "method": "not_run_surface_ineligible",
+                }
+            )
+            continue
+        has_surface = spin_use_neuromaps and all(
+            row.get(k) is not None for k in ["_pred_lh", "_pred_rh", "_true_lh", "_true_rh"]
+        )
+        spin_p = np.nan
+        spin_sig = False
+        method = "volume_masker_percentile"
+        if has_surface:
+            try:
+                nct = nct_dice_spin_test_surface(
+                    row["_pred_lh"],
+                    row["_pred_rh"],
+                    row["_true_lh"],
+                    row["_true_rh"],
+                    pct=pct,
+                    n_perm=spin_test_n_perm,
+                    random_state=spin_test_random_state,
+                    density=spin_fsaverage_density,
+                )
+                dice_val = nct.dice_pct
+                spin_p = nct.spin_p_value
+                spin_sig = nct.spin_significant
+                method = "surface_fsaverage_percentile_nct"
+            except Exception:
+                if spin_require_neuromaps:
+                    raise
+                dice_val = dice_percentile(row["_brain_pred"], row["_brain_true"], pct=pct)
+        else:
+            dice_val = dice_percentile(row["_brain_pred"], row["_brain_true"], pct=pct)
+        rows.append(
+            {
+                "dataset": dataset,
+                "sample": row["name"],
+                "pct": pct,
+                "top_fraction": (100 - pct) / 100,
+                "dice": float(dice_val),
+                "spin_p_value": float(spin_p) if np.isfinite(spin_p) else np.nan,
+                "spin_significant": bool(spin_sig),
+                "method": method,
+            }
+        )
+    return rows
+
+
 def sensitivity_rows_for_df(
     df: pd.DataFrame,
     dataset: str,
@@ -816,63 +1136,43 @@ def sensitivity_rows_for_df(
     spin_test_n_perm: int,
     spin_test_random_state: int,
     spin_fsaverage_density: str,
+    spin_use_neuromaps: bool = True,
     spin_require_neuromaps: bool = False,
+    n_jobs: int = 1,
 ) -> list[dict[str, Any]]:
+    pcts = tuple(float(pct) for pct in pcts)
+    records = [row.to_dict() for _, row in df.iterrows()]
+    n_jobs = max(1, int(n_jobs))
     rows = []
-    for _, row in tqdm(df.iterrows(), total=len(df), desc=f"{dataset} Dice sensitivity"):
-        for pct in pcts:
-            if not bool(row.get("surface_metric_eligible", True)):
-                rows.append(
-                    {
-                        "dataset": dataset,
-                        "sample": row["name"],
-                        "pct": pct,
-                        "top_fraction": (100 - pct) / 100,
-                        "dice": np.nan,
-                        "spin_p_value": np.nan,
-                        "spin_significant": False,
-                        "method": "not_run_surface_ineligible",
-                    }
-                )
-                continue
-            has_surface = all(row.get(k) is not None for k in ["_pred_lh", "_pred_rh", "_true_lh", "_true_rh"])
-            spin_p = np.nan
-            spin_sig = False
-            method = "volume_masker_percentile"
-            if has_surface:
-                try:
-                    nct = nct_dice_spin_test_surface(
-                        row["_pred_lh"],
-                        row["_pred_rh"],
-                        row["_true_lh"],
-                        row["_true_rh"],
-                        pct=pct,
-                        n_perm=spin_test_n_perm,
-                        random_state=spin_test_random_state,
-                        density=spin_fsaverage_density,
-                    )
-                    dice_val = nct.dice_pct
-                    spin_p = nct.spin_p_value
-                    spin_sig = nct.spin_significant
-                    method = "surface_fsaverage_percentile_nct"
-                except Exception:
-                    if spin_require_neuromaps:
-                        raise
-                    dice_val = dice_percentile(row["_brain_pred"], row["_brain_true"], pct=pct)
-            else:
-                dice_val = dice_percentile(row["_brain_pred"], row["_brain_true"], pct=pct)
-            rows.append(
-                {
-                    "dataset": dataset,
-                    "sample": row["name"],
-                    "pct": pct,
-                    "top_fraction": (100 - pct) / 100,
-                    "dice": float(dice_val),
-                    "spin_p_value": float(spin_p) if np.isfinite(spin_p) else np.nan,
-                    "spin_significant": bool(spin_sig),
-                    "method": method,
-                }
-            )
+
+    def _run(record):
+        return _sensitivity_rows_for_record(
+            record,
+            dataset,
+            pcts=pcts,
+            spin_test_n_perm=spin_test_n_perm,
+            spin_test_random_state=spin_test_random_state,
+            spin_fsaverage_density=spin_fsaverage_density,
+            spin_use_neuromaps=spin_use_neuromaps,
+            spin_require_neuromaps=spin_require_neuromaps,
+        )
+
+    if n_jobs == 1 or len(records) <= 1:
+        iterator = map(_run, records)
+        for chunk in tqdm(iterator, total=len(records), desc=f"{dataset} Dice sensitivity"):
+            rows.extend(chunk)
+    else:
+        from joblib import Parallel, delayed, parallel_config
+
+        tasks = (delayed(_run)(record) for record in records)
+        with parallel_config(backend="loky", inner_max_num_threads=1):
+            iterator = Parallel(n_jobs=n_jobs, return_as="generator")(tasks)
+            for chunk in tqdm(
+                iterator,
+                total=len(records),
+                desc=f"{dataset} Dice sensitivity ({n_jobs} processes)",
+            ):
+                rows.extend(chunk)
     return rows
 
 __all__ = [
@@ -888,17 +1188,25 @@ __all__ = [
     "bernoulli_bce",
     "add_random_correlation_baseline",
     "build_surface_eligibility_mask",
+    "contrastive_pair_baseline",
     "cortical_top_mass_fraction",
+    "as_flatmap_batch",
     "decode_latents_to_brain",
     "dice_percentile",
+    "encode_text_batched",
     "evaluate_t2b_sample",
     "finite_box_values",
     "finite_sem",
+    "generated_image_retrieval_curve",
+    "generated_image_text_retrieval_curve",
     "make_t2b_runner",
     "mni152_to_fsaverage_arrays",
     "nct_dice_spin_test_nifti",
     "nct_dice_spin_test_surface",
     "pearson_correlation",
+    "project_brain_latents_to_shared",
+    "project_flatmaps_to_shared",
+    "project_text_latents_to_shared",
     "select_true_brain_for_eval",
     "sensitivity_rows_for_df",
     "surface_metric_eligibility",
