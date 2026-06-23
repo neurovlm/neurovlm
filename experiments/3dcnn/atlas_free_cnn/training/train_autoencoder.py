@@ -314,7 +314,9 @@ def run_epoch(
     grad_clip: float = 1.0,
     max_batches: int | None = None,
     compute_metrics: bool = True,
+    compute_source_metrics: bool = True,
     metric_max_batches: int | None = None,
+    metrics_device: torch.device | None = None,
     include_voxel_auroc: bool = False,
     show_progress: bool = True,
     progress_desc: str | None = None,
@@ -355,17 +357,24 @@ def run_epoch(
         for key, value in parts.items():
             loss_parts[key].append(float(value.detach().cpu()))
         if compute_metrics and (metric_max_batches is None or len(metric_rows) < int(metric_max_batches)):
-            pred_cpu = pred.detach().clamp(0.0, 1.0).cpu()
-            x_cpu = x.detach().cpu()
-            metric_rows.append(generation_metrics(pred_cpu, x_cpu, include_voxel_auroc=include_voxel_auroc))
-            for i, src in enumerate(batch["source"]):
-                source_metric_rows[src].append(
-                    generation_metrics(
-                        pred_cpu[i : i + 1],
-                        x_cpu[i : i + 1],
-                        include_voxel_auroc=include_voxel_auroc,
+            pred_metric = pred.detach().clamp(0.0, 1.0)
+            x_metric = x.detach()
+            if metrics_device is None:
+                pred_metric = pred_metric.cpu()
+                x_metric = x_metric.cpu()
+            else:
+                pred_metric = pred_metric.to(metrics_device, non_blocking=True)
+                x_metric = x_metric.to(metrics_device, non_blocking=True)
+            metric_rows.append(generation_metrics(pred_metric, x_metric, include_voxel_auroc=include_voxel_auroc))
+            if compute_source_metrics:
+                for i, src in enumerate(batch["source"]):
+                    source_metric_rows[src].append(
+                        generation_metrics(
+                            pred_metric[i : i + 1],
+                            x_metric[i : i + 1],
+                            include_voxel_auroc=include_voxel_auroc,
+                        )
                     )
-                )
         if show_progress and tqdm is not None:
             iterator.set_postfix(mse=f"{losses[-1]:.5f}")
     metrics = _avg_metric_rows(metric_rows)
@@ -391,20 +400,29 @@ def evaluate_by_source(
     split_name: str,
 ) -> list[dict[str, Any]]:
     collate = VolumeCollator(_target_shape(cfg))
+    num_workers = int(cfg.get("eval_num_workers", cfg.get("num_workers", 0)))
+    loader_kwargs = {
+        "batch_size": int(cfg.get("eval_batch_size", cfg.get("batch_size", 64))),
+        "shuffle": False,
+        "num_workers": num_workers,
+        "collate_fn": collate,
+        "pin_memory": bool(cfg.get("pin_memory", device.type == "cuda") and device.type == "cuda"),
+        "persistent_workers": bool(cfg.get("persistent_workers", num_workers > 0)) if num_workers > 0 else False,
+    }
+    if num_workers > 0:
+        loader_kwargs["prefetch_factor"] = int(cfg.get("prefetch_factor", 4))
     loader = DataLoader(
         dataset,
-        batch_size=int(cfg.get("eval_batch_size", cfg.get("batch_size", 64))),
-        shuffle=False,
-        num_workers=int(cfg.get("num_workers", 0)),
-        collate_fn=collate,
-        pin_memory=bool(cfg.get("pin_memory", device.type == "cuda")),
+        **loader_kwargs,
     )
+    metrics_device_name = str(cfg.get("metrics_device", "cpu")).lower()
+    metrics_device = device if metrics_device_name == "cuda" and device.type == "cuda" else torch.device("cpu")
     rows_by_key: dict[tuple[str, str], list[dict[str, float]]] = defaultdict(list)
     model.eval()
     for batch in loader:
         x = batch["volume"].to(device, non_blocking=True)
-        pred = model(x).clamp(0.0, 1.0).cpu()
-        target = x.cpu()
+        pred = model(x).clamp(0.0, 1.0).to(metrics_device, non_blocking=True)
+        target = x.to(metrics_device, non_blocking=True)
         for i, (src, detail) in enumerate(zip(batch["source"], batch["source_detail"])):
             metrics = generation_metrics(pred[i : i + 1], target[i : i + 1], include_voxel_auroc=bool(cfg.get("include_voxel_auroc", True)))
             rows_by_key[("all", "ALL_DETAILS")].append(metrics)
@@ -516,7 +534,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     loader_kwargs = {
         "num_workers": num_workers,
         "collate_fn": collate,
-        "pin_memory": bool(cfg.get("pin_memory", device.type == "cuda")),
+        "pin_memory": bool(cfg.get("pin_memory", device.type == "cuda") and device.type == "cuda"),
         "persistent_workers": bool(cfg.get("persistent_workers", num_workers > 0)) if num_workers > 0 else False,
     }
     if num_workers > 0:
@@ -563,6 +581,8 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     history: list[dict[str, Any]] = []
     sampling_history: list[dict[str, Any]] = []
     last_val_metrics: dict[str, Any] = {}
+    metrics_device_name = str(cfg.get("metrics_device", "cpu")).lower()
+    metrics_device = device if metrics_device_name == "cuda" and device.type == "cuda" else torch.device("cpu")
     max_epochs = int(cfg.get("epochs", 200))
     early_stopping = bool(cfg.get("early_stopping", True))
     early_metric = str(cfg.get("early_stopping_metric", "val_loss"))
@@ -586,7 +606,9 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             grad_clip=float(cfg.get("gradient_clipping", 1.0)),
             max_batches=cfg.get("max_train_batches"),
             compute_metrics=bool(cfg.get("compute_train_metrics", True)),
+            compute_source_metrics=bool(cfg.get("compute_epoch_source_metrics", False)),
             metric_max_batches=cfg.get("train_metric_batches"),
+            metrics_device=metrics_device,
             include_voxel_auroc=bool(cfg.get("include_voxel_auroc", False)),
             show_progress=bool(cfg.get("progress", True)),
             progress_desc=f"epoch {epoch} train",
@@ -603,7 +625,9 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 grad_clip=float(cfg.get("gradient_clipping", 1.0)),
                 max_batches=cfg.get("max_val_batches"),
                 compute_metrics=True,
+                compute_source_metrics=bool(cfg.get("compute_epoch_source_metrics", False)),
                 metric_max_batches=cfg.get("val_metric_batches"),
+                metrics_device=metrics_device,
                 include_voxel_auroc=bool(cfg.get("include_voxel_auroc", False)),
                 show_progress=bool(cfg.get("progress", True)),
                 progress_desc=f"epoch {epoch} val",
