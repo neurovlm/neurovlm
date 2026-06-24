@@ -14,6 +14,7 @@ import json
 import math
 import os
 import random
+import shutil
 import sys
 import time
 from collections import Counter, defaultdict
@@ -38,6 +39,7 @@ except ImportError:  # pragma: no cover
 
 REPO_DIR = Path(__file__).resolve().parents[2]
 THREEDCNN_DIR = Path(__file__).resolve().parent
+DRIVE_ROOT = Path(os.environ.get("NEUROVLM_DRIVE_ROOT", "/content/drive/MyDrive/neurovlm"))
 for path in [REPO_DIR / "src", THREEDCNN_DIR]:
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
@@ -209,6 +211,83 @@ def read_csv_rows(path: Path) -> list[dict[str, Any]]:
         return list(csv.DictReader(f))
 
 
+def split_dir_has_jsonl(path: Path) -> bool:
+    return all((path / name).exists() for name in ["train.jsonl", "val.jsonl", "test.jsonl"])
+
+
+def hf_download_first_available(filenames: list[str], local_dir: Path) -> Path:
+    from huggingface_hub import hf_hub_download
+
+    repo_id = os.environ.get("NEUROVLM_ATLAS_FREE_HF_REPO", "neurovlm/atlas_free_cnn_dataset")
+    local_dir.mkdir(parents=True, exist_ok=True)
+    errors = []
+    for filename in filenames:
+        try:
+            path = hf_hub_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                filename=filename,
+                local_dir=str(local_dir),
+                local_dir_use_symlinks=False,
+            )
+            return Path(path)
+        except Exception as exc:
+            errors.append(f"{filename}: {exc}")
+    raise FileNotFoundError("Could not download any candidate from HF:\n" + "\n".join(errors))
+
+
+def ensure_hf_unified_splits() -> Path:
+    """Mirror notebook 6's fixed split fallback."""
+
+    repo_id = os.environ.get("NEUROVLM_ATLAS_FREE_HF_REPO", "neurovlm/atlas_free_cnn_dataset")
+    local_unified_cache_dir = REPO_DIR / "experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl_rebuild"
+    local_split_dir = local_unified_cache_dir / "splits"
+    local_pack_dir = REPO_DIR / "experiments/3dcnn/atlas_free_cnn/cache/hf_atlas_free_cnn_rebuild"
+    print(f"Downloading atlas-free CNN split JSONLs from Hugging Face: {repo_id}")
+    local_split_dir.mkdir(parents=True, exist_ok=True)
+    for split in ["train", "val", "test"]:
+        downloaded = hf_download_first_available(
+            [f"splits/{split}.jsonl", f"unified_jsonl_rebuild/splits/{split}.jsonl", f"{split}.jsonl"],
+            local_unified_cache_dir,
+        )
+        target = local_split_dir / f"{split}.jsonl"
+        if downloaded.resolve() != target.resolve():
+            shutil.copy2(downloaded, target)
+    for name in ["train_map_ids.json", "val_map_ids.json", "test_map_ids.json"]:
+        try:
+            downloaded = hf_download_first_available(
+                [f"splits/{name}", f"unified_jsonl_rebuild/splits/{name}", name],
+                local_unified_cache_dir,
+            )
+            target = local_split_dir / name
+            if downloaded.resolve() != target.resolve():
+                shutil.copy2(downloaded, target)
+        except Exception as exc:
+            print(f"Optional split sidecar not downloaded ({name}): {exc}")
+    try:
+        downloaded_volume = hf_download_first_available(
+            [
+                "atlas_free_cnn_volumes.pt",
+                "hf_atlas_free_cnn/atlas_free_cnn_volumes.pt",
+                "hf_atlas_free_cnn_rebuild/atlas_free_cnn_volumes.pt",
+            ],
+            local_pack_dir,
+        )
+        target_volume = local_pack_dir / "atlas_free_cnn_volumes.pt"
+        if downloaded_volume.resolve() != target_volume.resolve():
+            try:
+                if target_volume.exists() or target_volume.is_symlink():
+                    target_volume.unlink()
+                os.symlink(downloaded_volume, target_volume)
+            except Exception:
+                shutil.copy2(downloaded_volume, target_volume)
+        print("Volume tensor available at:", target_volume)
+    except Exception as exc:
+        print("WARNING: split JSONLs downloaded, but volume tensor was not prepared:", exc)
+        print("Evaluation will fail unless tensor_path values inside JSONL resolve to an accessible tensor file.")
+    return local_split_dir
+
+
 def discover_split_dir() -> Path:
     override = os.environ.get("NEUROVLM_UNIFIED_SPLIT_DIR")
     candidates = []
@@ -218,15 +297,38 @@ def discover_split_dir() -> Path:
         [
             REPO_DIR / "experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl_rebuild/splits",
             REPO_DIR / "experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits",
+            DRIVE_ROOT / "experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl_rebuild/splits",
+            DRIVE_ROOT / "experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits",
+            DRIVE_ROOT / "atlas_free_cnn/cache/unified_jsonl_rebuild/splits",
+            DRIVE_ROOT / "atlas_free_cnn/cache/unified_jsonl/splits",
+            DRIVE_ROOT / "cache/unified_jsonl_rebuild/splits",
+            DRIVE_ROOT / "cache/unified_jsonl/splits",
+            DRIVE_ROOT / "data_atlas_free_cnn/unified_jsonl_rebuild/splits",
+            DRIVE_ROOT / "data_atlas_free_cnn/unified_jsonl/splits",
+            DRIVE_ROOT / "data_atlas_free_cnn/cache/unified_jsonl_rebuild/splits",
+            DRIVE_ROOT / "data_atlas_free_cnn/cache/unified_jsonl/splits",
+            DRIVE_ROOT / "data_ale_3dcnn/unified_jsonl_rebuild/splits",
+            DRIVE_ROOT / "data_ale_3dcnn/unified_jsonl/splits",
         ]
     )
     for candidate in candidates:
-        if all((candidate / f"{split}.jsonl").exists() for split in ["train", "val", "test"]):
+        if split_dir_has_jsonl(candidate):
             return candidate
+    try:
+        hf_split_dir = ensure_hf_unified_splits()
+        if split_dir_has_jsonl(hf_split_dir):
+            return hf_split_dir
+    except Exception as exc:
+        hf_error = exc
+    else:
+        hf_error = None
     checked = "\n".join(f"- {p}" for p in candidates)
     raise FileNotFoundError(
-        "Could not find fixed unified split JSONLs. Set NEUROVLM_UNIFIED_SPLIT_DIR "
-        f"or pass --test-jsonl. Checked:\n{checked}"
+        "Could not find fixed unified split JSONLs locally, and Hugging Face fallback did not produce them. "
+        "Set NEUROVLM_UNIFIED_SPLIT_DIR or pass --test-jsonl. Expected train.jsonl, val.jsonl, and test.jsonl in one of:\n"
+        f"{checked}\n\n"
+        f"HF dataset repo tried: {os.environ.get('NEUROVLM_ATLAS_FREE_HF_REPO', 'neurovlm/atlas_free_cnn_dataset')}\n"
+        f"HF fallback error: {hf_error}"
     )
 
 
