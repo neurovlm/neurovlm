@@ -93,12 +93,18 @@ def _target_shape(cfg: dict[str, Any]) -> tuple[int, int, int]:
 
 
 def filter_data_mode(dataset: UnifiedMapTextDataset, data_mode: str) -> UnifiedMapTextDataset:
-    if data_mode not in {"pubmed_only", "mixed", "statmaps_only"}:
-        raise ValueError("DATA_MODE/data_mode must be 'pubmed_only', 'mixed', or 'statmaps_only'")
+    if data_mode not in {"pubmed_only", "mixed", "statmaps_only", "neurovault_only", "nilearn_only"}:
+        raise ValueError(
+            "DATA_MODE/data_mode must be 'pubmed_only', 'mixed', 'statmaps_only', 'neurovault_only', or 'nilearn_only'"
+        )
     if data_mode == "pubmed_only":
         dataset.rows = [row for row in dataset.rows if canonical_source(row) == "pubmed"]
     elif data_mode == "statmaps_only":
         dataset.rows = [row for row in dataset.rows if canonical_source(row) in {"neurovault", "nilearn"}]
+    elif data_mode == "neurovault_only":
+        dataset.rows = [row for row in dataset.rows if canonical_source(row) == "neurovault"]
+    elif data_mode == "nilearn_only":
+        dataset.rows = [row for row in dataset.rows if canonical_source(row) == "nilearn"]
     return dataset
 
 
@@ -475,6 +481,86 @@ def save_qualitative_plots(model, dataset, cfg: dict[str, Any], device: torch.de
         plt.close(fig)
 
 
+def _checkpoint_eval_specs(checkpoint_dir: Path, cfg: dict[str, Any]) -> list[tuple[str, Path]]:
+    default_names = [
+        "last",
+        "best_val_loss",
+        "best_spatial_corr",
+        "best_top1_dice",
+        "best_top5_dice",
+        "best_foreground_mse",
+    ]
+    names = [str(v) for v in cfg.get("eval_checkpoint_names", default_names)]
+    specs: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
+    for name in names:
+        path = checkpoint_dir / (name if name.endswith(".pt") else f"{name}.pt")
+        if path.exists() and path not in seen:
+            specs.append((path.stem, path))
+            seen.add(path)
+    return specs
+
+
+def _load_model_checkpoint_for_eval(model, checkpoint_path: Path, device: torch.device) -> None:
+    payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    state = payload.get("model") or payload.get("autoencoder") or payload.get("state_dict")
+    if state is None:
+        raise KeyError(f"Checkpoint has no model, autoencoder, or state_dict: {checkpoint_path}")
+    model.load_state_dict(state, strict=True)
+    model.eval()
+
+
+def evaluate_saved_checkpoints_from_config(cfg: dict[str, Any] | str | Path) -> list[dict[str, Any]]:
+    """Evaluate every saved AE checkpoint for an existing run without retraining."""
+
+    if isinstance(cfg, (str, Path)):
+        path = Path(cfg)
+        if path.is_dir():
+            config_path = path / "autoencoder_config.json"
+            if not config_path.exists():
+                config_path = path / "config" / "ae_config.json"
+        else:
+            config_path = path
+        with config_path.open() as f:
+            cfg = json.load(f)
+    cfg = apply_ae_recipe_defaults(dict(cfg))
+    device_name = cfg.get("device", "auto")
+    device = torch.device("cuda" if device_name == "auto" and torch.cuda.is_available() else "cpu" if device_name == "auto" else device_name)
+    target_shape = _target_shape(cfg)
+    data_mode = str(cfg.get("data_mode", cfg.get("DATA_MODE", "mixed"))).lower()
+    out_dir = Path(cfg.get("output_dir", "experiments/3dcnn/atlas_free_cnn/outputs/runs/autoencoder_stable"))
+    checkpoint_dir = Path(cfg.get("checkpoint_dir", str(out_dir / "checkpoints")))
+    metrics_dir = out_dir / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+
+    train_ds = filter_data_mode(UnifiedMapTextDataset(cfg["train_jsonl"]), data_mode)
+    val_ds = filter_data_mode(UnifiedMapTextDataset(cfg["val_jsonl"]), data_mode)
+    test_ds = filter_data_mode(UnifiedMapTextDataset(cfg["test_jsonl"]), data_mode) if cfg.get("test_jsonl") else None
+    split_map = {"train": train_ds, "val": val_ds, "test": test_ds}
+    model = build_model(cfg, target_shape, device)
+    eval_checkpoint_splits = [str(v) for v in cfg.get("eval_checkpoint_splits", ["val", "test"])]
+    rows: list[dict[str, Any]] = []
+    for checkpoint_name, checkpoint_path in _checkpoint_eval_specs(checkpoint_dir, cfg):
+        _load_model_checkpoint_for_eval(model, checkpoint_path, device)
+        for split_name in eval_checkpoint_splits:
+            ds = split_map.get(split_name)
+            if ds is None:
+                continue
+            for row in evaluate_by_source(model, ds, cfg, device, split_name):
+                rows.append(
+                    {
+                        "checkpoint": checkpoint_name,
+                        "checkpoint_path": str(checkpoint_path),
+                        "ae_variant": cfg.get("ae_variant", cfg.get("ae_training_recipe")),
+                        **row,
+                    }
+                )
+    if rows:
+        _write_csv(metrics_dir / "reconstruction_summary_by_checkpoint_source.csv", rows)
+        _write_csv(metrics_dir / "checkpoint_reconstruction_metrics.csv", rows)
+    return rows
+
+
 def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     cfg = apply_ae_recipe_defaults(cfg)
     device_name = cfg.get("device", "auto")
@@ -735,16 +821,31 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             writer.writerows(eval_rows)
         _write_csv(metrics_dir / "reconstruction_metrics_all_rows.csv", eval_rows)
         _write_csv(metrics_dir / "reconstruction_summary_by_source.csv", eval_rows)
-        checkpoint_rows = []
-        for row in eval_rows:
-            checkpoint_rows.append(
-                {
-                    "checkpoint": "last",
-                    "ae_variant": cfg.get("ae_variant", cfg.get("ae_training_recipe")),
-                    **row,
-                }
-            )
-        _write_csv(metrics_dir / "reconstruction_summary_by_checkpoint_source.csv", checkpoint_rows)
+    checkpoint_rows = []
+    if bool(cfg.get("final_eval", True)) and bool(cfg.get("eval_all_checkpoints", True)):
+        split_map = {"train": train_ds, "val": val_ds, "test": test_ds}
+        eval_checkpoint_splits = [str(v) for v in cfg.get("eval_checkpoint_splits", ["val", "test"])]
+        for checkpoint_name, checkpoint_path in _checkpoint_eval_specs(checkpoint_dir, cfg):
+            _load_model_checkpoint_for_eval(model, checkpoint_path, device)
+            for split_name in eval_checkpoint_splits:
+                ds = split_map.get(split_name)
+                if ds is None:
+                    continue
+                for row in evaluate_by_source(model, ds, cfg, device, split_name):
+                    checkpoint_rows.append(
+                        {
+                            "checkpoint": checkpoint_name,
+                            "checkpoint_path": str(checkpoint_path),
+                            "ae_variant": cfg.get("ae_variant", cfg.get("ae_training_recipe")),
+                            **row,
+                        }
+                    )
+        if checkpoint_rows:
+            _write_csv(metrics_dir / "reconstruction_summary_by_checkpoint_source.csv", checkpoint_rows)
+            _write_csv(metrics_dir / "checkpoint_reconstruction_metrics.csv", checkpoint_rows)
+        last_path = checkpoint_dir / "last.pt"
+        if last_path.exists():
+            _load_model_checkpoint_for_eval(model, last_path, device)
     leaderboard_rows = []
     for name, value in sorted(ckpt.best.items()):
         leaderboard_rows.append(
@@ -774,8 +875,23 @@ def train_stage1b_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     """Run domain-specific AE fine-tuning from a mixed pretraining checkpoint."""
 
     mode = str(cfg.get("stage1b_mode", cfg.get("STAGE1B_MODE", ""))).lower()
-    if mode not in {"mixed_pretrain_to_pubmed", "mixed_pretrain_to_statmaps"}:
-        raise ValueError("stage1b_mode must be mixed_pretrain_to_pubmed or mixed_pretrain_to_statmaps")
+    mode_to_data = {
+        "mixed_pretrain_to_pubmed": "pubmed_only",
+        "mixed_pretrain_to_statmaps": "statmaps_only",
+        "mixed_pretrain_to_neurovault": "neurovault_only",
+        "mixed_pretrain_to_nilearn": "nilearn_only",
+    }
+    mode_to_variant = {
+        "mixed_pretrain_to_pubmed": "mixed_to_pubmed",
+        "mixed_pretrain_to_statmaps": "mixed_to_statmaps",
+        "mixed_pretrain_to_neurovault": "mixed_to_neurovault",
+        "mixed_pretrain_to_nilearn": "mixed_to_nilearn",
+    }
+    if mode not in mode_to_data:
+        raise ValueError(
+            "stage1b_mode must be mixed_pretrain_to_pubmed, mixed_pretrain_to_statmaps, "
+            "mixed_pretrain_to_neurovault, or mixed_pretrain_to_nilearn"
+        )
     ft_cfg = dict(cfg)
     ft_cfg["ae_training_recipe"] = cfg.get("ae_training_recipe", BASELINE_RAW_MSE_RECIPE)
     ft_cfg["init_checkpoint"] = cfg.get("init_checkpoint") or cfg.get("mixed_pretrain_checkpoint")
@@ -783,11 +899,8 @@ def train_stage1b_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Stage 1B fine-tuning requires init_checkpoint or mixed_pretrain_checkpoint")
     ft_cfg.setdefault("lr", 1e-4)
     ft_cfg.setdefault("freeze_mode", "none")
-    ft_cfg["data_mode"] = "pubmed_only" if mode == "mixed_pretrain_to_pubmed" else "statmaps_only"
-    ft_cfg["ae_variant"] = cfg.get(
-        "ae_variant",
-        "mixed_to_pubmed" if mode == "mixed_pretrain_to_pubmed" else "mixed_to_statmaps",
-    )
+    ft_cfg["data_mode"] = mode_to_data[mode]
+    ft_cfg["ae_variant"] = cfg.get("ae_variant", mode_to_variant[mode])
     ft_cfg["stage1b_mode"] = mode
     return train_from_config(ft_cfg)
 
