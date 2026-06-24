@@ -127,21 +127,21 @@ AE_RUN_REGISTRY: dict[str, dict[str, Any]] = {
         "test_domains": ["mixed", "pubmed", "nilearn", "neurovault"],
     },
     "mixed_to_pubmed": {
-        "run_dir": str(AE_RUN_ROOT / "02_stage1b_domain_finetune/pubmed/mixed_to_pubmed"),
+        "run_dir": str(AE_RUN_ROOT / "02_stage1b_ae_finetuning/pubmed"),
         "stage": "stage1b",
         "training_domain": "pubmed",
         "test_domains": ["pubmed"],
         "cross_domain_test_domains": ["mixed", "nilearn", "neurovault"],
     },
     "mixed_to_nilearn": {
-        "run_dir": str(AE_RUN_ROOT / "02_stage1b_domain_finetune/nilearn/mixed_to_nilearn"),
+        "run_dir": str(AE_RUN_ROOT / "02_stage1b_ae_finetuning/nilearn"),
         "stage": "stage1b",
         "training_domain": "nilearn",
         "test_domains": ["nilearn"],
         "cross_domain_test_domains": ["mixed", "pubmed", "neurovault"],
     },
     "mixed_to_neurovault": {
-        "run_dir": str(AE_RUN_ROOT / "02_stage1b_domain_finetune/neurovault/mixed_to_neurovault"),
+        "run_dir": str(AE_RUN_ROOT / "02_stage1b_ae_finetuning/neurovault"),
         "stage": "stage1b",
         "training_domain": "neurovault",
         "test_domains": ["neurovault"],
@@ -1556,16 +1556,22 @@ def registry_from_root(run_root: str) -> dict[str, dict[str, Any]]:
     if str(root):
         replacements = {
             "mixed_to_pubmed": [
-                root / "02_stage1b_domain_finetune/pubmed/mixed_to_pubmed",
+                root / "02_stage1b_ae_finetuning/pubmed",
+                root / "02_stage1b_domain_finetune/pubmed",
                 root / "02_stage1b_domain_finetune/pubmed/mixed_baseline_to_pubmed",
+                root / "02_stage1b_domain_finetune/pubmed/mixed_to_pubmed",
             ],
             "mixed_to_nilearn": [
-                root / "02_stage1b_domain_finetune/nilearn/mixed_to_nilearn",
+                root / "02_stage1b_ae_finetuning/nilearn",
+                root / "02_stage1b_domain_finetune/nilearn",
                 root / "02_stage1b_domain_finetune/nilearn/mixed_baseline_to_nilearn",
+                root / "02_stage1b_domain_finetune/nilearn/mixed_to_nilearn",
             ],
             "mixed_to_neurovault": [
-                root / "02_stage1b_domain_finetune/neurovault/mixed_to_neurovault",
+                root / "02_stage1b_ae_finetuning/neurovault",
+                root / "02_stage1b_domain_finetune/neurovault",
                 root / "02_stage1b_domain_finetune/neurovault/mixed_baseline_to_neurovault",
+                root / "02_stage1b_domain_finetune/neurovault/mixed_to_neurovault",
             ],
         }
         for variant in ["mixed_baseline_raw_mse", "mixed_balanced_raw_mse", "mixed_balanced_hybrid_loss"]:
