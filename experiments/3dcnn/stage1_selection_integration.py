@@ -553,6 +553,16 @@ def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str,
         if row["status"] not in {"completed", "completed_with_warnings"}
         or not row.get("checkpoint_path")
     ]
+    blocking_summary = [
+        {
+            "key": row.get("key", ""),
+            "status": row.get("status", ""),
+            "checkpoint_path": row.get("checkpoint_path", ""),
+            "checkpoint_name": row.get("checkpoint_name", ""),
+            "warnings": row.get("warnings", ""),
+        }
+        for row in blocking
+    ]
     if blocking:
         run_status = "missing_checkpoint" if any(row["status"] == "missing_checkpoint" for row in blocking) else "incompatible_checkpoint"
         unified_manifest["evaluation_state"] = run_status
@@ -584,11 +594,17 @@ def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str,
             "status": run_status,
             "output_dir": str(output_dir),
             "all_selected_checkpoint_entries_valid": not blocking,
+            "blocking_checkpoints": blocking_summary,
             "table_copies": table_copy_rows,
             "rerun_stage1_checkpoint_evaluation": False,
         },
     )
-    return {"status": run_status, "output_dir": str(output_dir), "manifest": unified_manifest}
+    return {
+        "status": run_status,
+        "output_dir": str(output_dir),
+        "manifest": unified_manifest,
+        "blocking_checkpoints": blocking_summary,
+    }
 
 
 def parse_args() -> argparse.Namespace:
