@@ -1,10 +1,11 @@
-"""Integrate completed Stage 1 checkpoint-evaluation outputs for downstream runs.
+"""Integrate selected Stage 1 AE checkpoints for downstream runs.
 
-This module is intentionally evaluation-results-only. It loads the completed
-Stage 1A/1B checkpoint-evaluation tables produced by notebook 7, validates the
-empirically selected checkpoint files, and writes a downstream manifest for the
-Stage 2/3/4 controlled experiments. It never trains, fine-tunes, resumes, or
-runs checkpoint inference by default.
+This module is intentionally load/validation-only. The empirically selected
+checkpoint names are fixed by the completed held-out evaluation decision. The
+required inputs are the explicit checkpoint paths to load. Completed evaluation
+folders are optional provenance sources for metrics, checksums, and copied
+tables. This module never trains, fine-tunes, resumes, or runs checkpoint
+inference by default.
 """
 
 from __future__ import annotations
@@ -71,9 +72,10 @@ SIX_RUNS = [
 
 @dataclass(frozen=True)
 class IntegrationConfig:
-    stage1a_evaluation_dir: Path
-    stage1b_evaluation_dir: Path
     output_root: Path
+    selected_checkpoints: dict[str, Any]
+    stage1a_evaluation_dir: Path | None = None
+    stage1b_evaluation_dir: Path | None = None
     rerun_stage1_checkpoint_evaluation: bool = False
 
 
@@ -122,10 +124,19 @@ def json_ready(value: Any) -> Any:
     return value
 
 
-def source_dir_for(config: IntegrationConfig, spec: dict[str, str]) -> Path:
+def valid_optional_dir(path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    path = path.expanduser()
+    if "EDIT_ME" in str(path) or not path.exists():
+        return None
+    return path
+
+
+def source_dir_for(config: IntegrationConfig, spec: dict[str, str]) -> Path | None:
     if spec["source_kind"] == "stage1a":
-        return config.stage1a_evaluation_dir.expanduser()
-    return config.stage1b_evaluation_dir.expanduser()
+        return valid_optional_dir(config.stage1a_evaluation_dir)
+    return valid_optional_dir(config.stage1b_evaluation_dir)
 
 
 def selection_manifest_path(source_dir: Path) -> Path:
@@ -157,8 +168,10 @@ def completed_row_for(selection_csv: Path, checkpoint_name: str) -> dict[str, st
     return {}
 
 
-def selected_checkpoint_path(source_dir: Path, key: str, spec: dict[str, str]) -> tuple[Path | None, dict[str, Any], list[str]]:
+def selected_checkpoint_path(source_dir: Path | None, key: str, spec: dict[str, str]) -> tuple[Path | None, dict[str, Any], list[str]]:
     warnings: list[str] = []
+    if source_dir is None:
+        return None, {}, warnings
     selected = read_json(selection_manifest_path(source_dir)).get(key, {})
     selection_csv = source_dir / spec["selection_csv"]
     csv_row = completed_row_for(selection_csv, spec["checkpoint_name"])
@@ -181,6 +194,18 @@ def selected_checkpoint_path(source_dir: Path, key: str, spec: dict[str, str]) -
     if path.name != spec["checkpoint_name"]:
         warnings.append(f"selection table path points to {path.name}, expected {spec['checkpoint_name']}")
     return path, csv_row or selected, warnings
+
+
+def configured_checkpoint_path(config: IntegrationConfig, key: str, spec: dict[str, str]) -> tuple[Path | None, list[str]]:
+    warnings: list[str] = []
+    entry = (config.selected_checkpoints or {}).get(key, {})
+    path_value = entry.get("path") or entry.get("checkpoint_path")
+    if not path_value:
+        return None, [f"missing explicit checkpoint path for {key}"]
+    path = Path(str(path_value)).expanduser()
+    if path.name != spec["checkpoint_name"]:
+        warnings.append(f"configured path points to {path.name}, expected {spec['checkpoint_name']}")
+    return path, warnings
 
 
 def state_checksum(state: dict[str, Any], prefix: str | None = None) -> str:
@@ -301,7 +326,6 @@ def validate_checkpoint(
                 return row
         else:
             row["checksum_matches_manifest"] = "not_available"
-            warnings.append("checkpoint_manifest.csv did not provide a checksum for this selected checkpoint")
         if str(row["latent_dim"]) == str(LATENT_DIM) and observed_target_shape == TARGET_SHAPE:
             row["status"] = "completed" if not warnings else "completed_with_warnings"
         else:
@@ -320,7 +344,9 @@ def held_out_metrics(source: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in source.items() if k not in skip}
 
 
-def split_fingerprint(source_dir: Path, training_domain: str) -> Any:
+def split_fingerprint(source_dir: Path | None, training_domain: str) -> Any:
+    if source_dir is None:
+        return {}
     data = read_json(split_fingerprint_path(source_dir))
     if training_domain == "mixed":
         return data
@@ -345,9 +371,9 @@ def write_readme(path: Path) -> None:
 
 Stage 1 training is complete. Stage 1 checkpoint evaluation is complete.
 
-Notebook 5 does not train, fine-tune, resume, optimize, or rerun checkpoint inference for the autoencoders. It loads the completed checkpoint-evaluation outputs from notebooks 6 and 7, validates the selected checkpoint files, and writes the downstream manifests used by Stage 2/3/4.
+This downstream notebook does not train, fine-tune, resume, optimize, or rerun checkpoint inference for the autoencoders. It validates the explicit selected checkpoint paths and writes the downstream manifests used by Stage 2/3/4.
 
-The Stage 1A and Stage 1B evaluations may come from separate timestamped folders. The integration output records both source directories and preserves the original selection tables.
+Completed Stage 1A and Stage 1B evaluation folders are optional provenance inputs. When provided, the integration output records the source directories and preserves the original selection tables. They are not used to decide the checkpoint names; the empirical choices are fixed in the downstream registry.
 
 Selected checkpoints:
 
@@ -390,8 +416,9 @@ def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str,
     write_json(
         metadata_dir / "source_evaluation_directories.json",
         {
-            "stage1a_evaluation_dir": str(config.stage1a_evaluation_dir),
-            "stage1b_evaluation_dir": str(config.stage1b_evaluation_dir),
+            "stage1a_evaluation_dir": str(config.stage1a_evaluation_dir or ""),
+            "stage1b_evaluation_dir": str(config.stage1b_evaluation_dir or ""),
+            "required_for_selection": False,
         },
     )
 
@@ -403,21 +430,26 @@ def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str,
 
     for key, spec in REQUIRED_SELECTIONS.items():
         source_dir = source_dir_for(config, spec)
-        selection_csv = source_dir / spec["selection_csv"]
-        selected_path, source_row, selection_warnings = selected_checkpoint_path(source_dir, key, spec)
-        manifest_rows = read_csv_rows(checkpoint_manifest_path(source_dir))
+        selection_csv = source_dir / spec["selection_csv"] if source_dir else None
+        selected_path, path_warnings = configured_checkpoint_path(config, key, spec)
+        eval_selected_path, source_row, selection_warnings = selected_checkpoint_path(source_dir, key, spec)
+        if eval_selected_path and selected_path and eval_selected_path.resolve() != selected_path.resolve():
+            selection_warnings.append(
+                f"optional evaluation manifest path {eval_selected_path} differs from configured path {selected_path}; configured path is authoritative"
+            )
+        manifest_rows = read_csv_rows(checkpoint_manifest_path(source_dir)) if source_dir else []
         manifest_row = find_manifest_row(manifest_rows, selected_path, spec["checkpoint_name"]) if selected_path else {}
         validation = validate_checkpoint(selected_path, spec["checkpoint_name"], manifest_row)
-        if selection_warnings:
-            validation["warnings"] = "; ".join([w for w in [validation.get("warnings"), *selection_warnings] if w])
+        all_warnings = [validation.get("warnings"), *path_warnings, *selection_warnings]
+        validation["warnings"] = "; ".join([w for w in all_warnings if w])
         validation.update(
             {
                 "key": key,
                 "stage": spec["stage"],
                 "training_domain": spec["training_domain"],
                 "selection_reason": spec["selection_reason"],
-                "source_evaluation_dir": str(source_dir),
-                "source_selection_csv": str(selection_csv),
+                "source_evaluation_dir": str(source_dir or ""),
+                "source_selection_csv": str(selection_csv or ""),
             }
         )
         validation_rows.append(validation)
@@ -439,8 +471,8 @@ def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str,
             "stage": spec["stage"],
             "training_domain": spec["training_domain"],
             "selection_reason": spec["selection_reason"],
-            "source_evaluation_dir": str(source_dir),
-            "source_selection_csv": str(selection_csv),
+            "source_evaluation_dir": str(source_dir or ""),
+            "source_selection_csv": str(selection_csv or ""),
             "checkpoint_epoch": validation["checkpoint_epoch"],
             "model_state_checksum": validation["model_state_checksum"],
             "encoder_checksum": validation["encoder_checksum"],
@@ -461,13 +493,17 @@ def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str,
             "evaluation_status": "completed",
         }
 
-        copied = copy_if_exists(selection_csv, existing_tables_dir / Path(spec["selection_csv"]).name)
-        table_copy_rows.append({"source": str(selection_csv), "copied": copied})
+        copied = copy_if_exists(selection_csv, existing_tables_dir / Path(spec["selection_csv"]).name) if selection_csv else False
+        table_copy_rows.append({"source": str(selection_csv or ""), "copied": copied})
 
     for source_kind, source_dir in [
         ("stage1a", config.stage1a_evaluation_dir),
         ("stage1b", config.stage1b_evaluation_dir),
     ]:
+        source_dir = valid_optional_dir(source_dir)
+        if source_dir is None:
+            table_copy_rows.append({"source": source_kind, "copied": False, "reason": "optional evaluation directory not provided"})
+            continue
         copied = copy_if_exists(
             source_dir / "04_final_selection/all_checkpoint_leaderboard.csv",
             existing_tables_dir / f"{source_kind}_all_checkpoint_leaderboard.csv",
@@ -557,8 +593,9 @@ def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str,
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage1a-evaluation-dir", required=True, type=Path)
-    parser.add_argument("--stage1b-evaluation-dir", required=True, type=Path)
+    parser.add_argument("--selected-checkpoints-json", required=True, type=Path)
+    parser.add_argument("--stage1a-evaluation-dir", default=None, type=Path)
+    parser.add_argument("--stage1b-evaluation-dir", default=None, type=Path)
     parser.add_argument("--output-root", required=True, type=Path)
     parser.add_argument("--rerun-stage1-checkpoint-evaluation", action="store_true")
     return parser.parse_args()
@@ -568,9 +605,10 @@ def main() -> None:
     args = parse_args()
     result = integrate_completed_stage1_selection(
         IntegrationConfig(
+            output_root=args.output_root,
+            selected_checkpoints=read_json(args.selected_checkpoints_json),
             stage1a_evaluation_dir=args.stage1a_evaluation_dir,
             stage1b_evaluation_dir=args.stage1b_evaluation_dir,
-            output_root=args.output_root,
             rerun_stage1_checkpoint_evaluation=args.rerun_stage1_checkpoint_evaluation,
         )
     )
