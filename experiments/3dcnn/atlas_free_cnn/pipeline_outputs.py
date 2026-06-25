@@ -99,7 +99,8 @@ def create_stage2_stage3_stage4_run_dir(
         "metadata": run_dir / "00_run_metadata",
         "upstream_stage1_selection": run_dir / "00_upstream_stage1_selection",
         "stage4": run_dir / "03_stage4_text_to_brain_generation",
-        "final": run_dir / "04_all_domain_comparison",
+        "stage5": run_dir / "04_stage5_generation_eval",
+        "final": run_dir / "05_all_domain_comparison",
     }
     for path in paths.values():
         if isinstance(path, Path):
@@ -186,7 +187,12 @@ def detect_stage_status(
         ok = ok or metrics
     elif stage_name == "stage4":
         ok = any(path.glob("checkpoints/*.pt"))
-        metrics = any(path.glob("metrics/*metrics*.json")) or any(path.glob("metrics/*history*.csv"))
+        metrics = (
+            (path / "generation_eval_metrics.json").exists()
+            or (path / "history.json").exists()
+            or any(path.glob("metrics/*metrics*.json"))
+            or any(path.glob("metrics/*history*.csv"))
+        )
     elif stage_name == "stage5":
         ok = _valid_json(path / "metrics" / "generation_eval_metrics.json")
         metrics = ok and ((path / "generated_maps" / "predictions").exists() or (path / "metrics" / "generated_vs_target_metrics_all_rows.csv").exists())
@@ -204,16 +210,59 @@ def detect_stage_status(
     return {"stage": stage_name, "status": status, "warnings": warnings}
 
 
+def _combine_stage_statuses(stage_name: str, requested: bool, statuses: list[dict[str, Any]]) -> dict[str, Any]:
+    if not requested:
+        return {"stage": stage_name, "status": "not requested", "warnings": []}
+    if not statuses:
+        return {"stage": stage_name, "status": "requested but skipped", "warnings": ["No expected output directories were found."]}
+
+    successful = [row for row in statuses if row["status"] == "ran successfully"]
+    partial = [row for row in statuses if row["status"] == "ran but missing expected outputs"]
+    if len(successful) == len(statuses):
+        return {"stage": stage_name, "status": "ran successfully", "warnings": []}
+    if successful or partial:
+        return {
+            "stage": stage_name,
+            "status": "ran but missing expected outputs",
+            "warnings": [f"{len(successful)} of {len(statuses)} expected runs completed successfully."],
+        }
+    return {"stage": stage_name, "status": "requested but skipped", "warnings": ["No expected output files were found."]}
+
+
+def _downstream_stage_dirs(run: Path, stage_name: str) -> list[Path]:
+    return sorted(path for path in run.glob("[0-9][0-9]_*/*/stage*") if path.name == stage_name)
+
+
 def write_status_report(
     run_dir: str | Path,
     requested: dict[str, bool],
 ) -> list[dict[str, Any]]:
     run = Path(run_dir)
+    stage3_dirs = _downstream_stage_dirs(run, "stage3")
+    stage4_dirs = _downstream_stage_dirs(run, "stage4")
+    stage3_status = (
+        _combine_stage_statuses(
+            "stage3",
+            requested.get("stage3", False),
+            [detect_stage_status("stage3", requested=True, stage_dir=path) for path in stage3_dirs],
+        )
+        if stage3_dirs
+        else detect_stage_status("stage3", requested=requested.get("stage3", False), stage_dir=run / STAGE_DIRS["stage3"])
+    )
+    stage4_status = (
+        _combine_stage_statuses(
+            "stage4",
+            requested.get("stage4", False),
+            [detect_stage_status("stage4", requested=True, stage_dir=path) for path in stage4_dirs],
+        )
+        if stage4_dirs
+        else detect_stage_status("stage4", requested=requested.get("stage4", False), stage_dir=run / STAGE_DIRS["stage4"])
+    )
     statuses = [
         detect_stage_status("stage1", requested=requested.get("stage1", False), stage_dir=run / STAGE_DIRS["stage1"]),
         detect_stage_status("stage1b", requested=requested.get("stage1b", False), stage_dir=run / STAGE_DIRS["stage1b"]),
-        detect_stage_status("stage3", requested=requested.get("stage3", False), stage_dir=run / STAGE_DIRS["stage3"]),
-        detect_stage_status("stage4", requested=requested.get("stage4", False), stage_dir=run / STAGE_DIRS["stage4"]),
+        stage3_status,
+        stage4_status,
         detect_stage_status("stage5", requested=requested.get("stage5", False), stage_dir=run / STAGE_DIRS["stage5"]),
     ]
     write_json(run / "00_run_metadata" / "run_status.json", statuses)
