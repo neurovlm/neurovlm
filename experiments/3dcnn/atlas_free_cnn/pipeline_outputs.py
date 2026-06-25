@@ -73,6 +73,49 @@ def create_full_pipeline_run_dir(
     return {"run_dir": str(run_dir), **{key: str(run_dir / value) for key, value in STAGE_DIRS.items()}}
 
 
+def create_stage2_stage3_stage4_run_dir(
+    base_dir: str | Path = "runs_stage2_stage3_stage4",
+    *,
+    prefix: str = "stage2_stage3_stage4",
+    overwrite: bool = False,
+) -> dict[str, str]:
+    """Create a downstream-only run directory.
+
+    Stage 1 training and checkpoint evaluation are upstream completed artifacts
+    for this workflow, so this layout deliberately does not create Stage 1 or
+    Stage 1B training directories.
+    """
+    base = Path(base_dir)
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    run_dir = base / f"{prefix}_{stamp}"
+    if run_dir.exists() and not overwrite:
+        suffix = 1
+        while (base / f"{prefix}_{stamp}_{suffix:02d}").exists():
+            suffix += 1
+        run_dir = base / f"{prefix}_{stamp}_{suffix:02d}"
+
+    paths = {
+        "run_dir": run_dir,
+        "metadata": run_dir / "00_run_metadata",
+        "upstream_stage1_selection": run_dir / "00_upstream_stage1_selection",
+        "stage4": run_dir / "03_stage4_text_to_brain_generation",
+        "final": run_dir / "04_all_domain_comparison",
+    }
+    for path in paths.values():
+        if isinstance(path, Path):
+            path.mkdir(parents=True, exist_ok=True)
+    for domain, specialized in [
+        ("01_pubmed", "specialized_mixed_to_pubmed"),
+        ("02_nilearn", "specialized_mixed_to_nilearn"),
+        ("03_neurovault", "specialized_mixed_to_neurovault"),
+    ]:
+        for branch in ["baseline_mixed_stage1a", specialized]:
+            for stage in ["stage2", "stage3", "stage4"]:
+                (run_dir / domain / branch / stage).mkdir(parents=True, exist_ok=True)
+        (run_dir / domain / "comparison").mkdir(parents=True, exist_ok=True)
+    return {key: str(value) for key, value in paths.items()}
+
+
 def write_json(path: str | Path, payload: Any) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
