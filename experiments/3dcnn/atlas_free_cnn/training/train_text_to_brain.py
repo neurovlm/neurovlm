@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -130,6 +132,124 @@ def _loss_cfg(cfg: dict[str, Any]) -> GenerationLossConfig:
 def _load_text_cache(path: str | Path) -> dict[str, torch.Tensor]:
     payload = torch.load(path, map_location="cpu", weights_only=False)
     return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in payload.items()}
+
+
+def domain_from_source(value: str) -> str:
+    source = str(value or "").lower()
+    if source == "pubmed":
+        return "pubmed"
+    if source == "neurovault" or source.startswith("neurovault:"):
+        return "neurovault"
+    if source == "nilearn" or source.startswith("nilearn:"):
+        return "nilearn"
+    return source
+
+
+def primary_pair(row: dict[str, Any]) -> tuple[str, str]:
+    positives = row.get("positive_texts", []) or []
+    text_id = ""
+    if positives:
+        first = positives[0]
+        text_id = str(first.get("text_id") or first.get("id") or first.get("text") or "")
+    return str(row.get("map_id", "")), text_id
+
+
+def split_fingerprint(rows: list[dict[str, Any]]) -> str:
+    pairs = sorted(primary_pair(row) for row in rows)
+    payload = json.dumps(pairs, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def filter_dataset_to_domain(dataset: UnifiedMapTextDataset, domain: str) -> dict[str, Any]:
+    source_field = "source"
+    before = len(dataset.rows)
+    source_counts_before = Counter(str(row.get(source_field, "")) for row in dataset.rows)
+    dataset.rows = [row for row in dataset.rows if domain_from_source(row.get(source_field, "")) == domain]
+    source_counts_after = Counter(str(row.get(source_field, "")) for row in dataset.rows)
+    if not dataset.rows:
+        raise RuntimeError(f"Domain filter {domain!r} produced zero rows for {dataset.path}")
+    bad = [source for source in source_counts_after if domain_from_source(source) != domain]
+    if bad:
+        raise RuntimeError(f"Domain filter {domain!r} left non-domain rows in {dataset.path}: {bad}")
+    return {
+        "path": str(dataset.path),
+        "source_field": source_field,
+        "rows_before_filtering": before,
+        "rows_after_filtering": len(dataset.rows),
+        "unique_map_ids": len({str(row.get("map_id", "")) for row in dataset.rows}),
+        "unique_text_ids": len({primary_pair(row)[1] for row in dataset.rows}),
+        "source_value_counts_before": dict(source_counts_before),
+        "source_value_counts_after": dict(source_counts_after),
+        "fingerprint": split_fingerprint(dataset.rows),
+        "sample_rows": [
+            {
+                "map_id": row.get("map_id"),
+                "source": row.get(source_field),
+                "positive_text_id": primary_pair(row)[1],
+            }
+            for row in dataset.rows[:3]
+        ],
+    }
+
+
+def leakage_report(train_ds: UnifiedMapTextDataset, val_ds: UnifiedMapTextDataset, test_ds: UnifiedMapTextDataset) -> dict[str, Any]:
+    split_ids = {
+        "train": {primary_pair(row) for row in train_ds.rows},
+        "val": {primary_pair(row) for row in val_ds.rows},
+        "test": {primary_pair(row) for row in test_ds.rows},
+    }
+    overlaps = {
+        "train_val": len(split_ids["train"] & split_ids["val"]),
+        "train_test": len(split_ids["train"] & split_ids["test"]),
+        "val_test": len(split_ids["val"] & split_ids["test"]),
+    }
+    return {"overlap_counts": overlaps, "passed": all(value == 0 for value in overlaps.values())}
+
+
+def checkpoint_architecture(payload: dict[str, Any]) -> dict[str, Any]:
+    cfg = payload.get("config", {}) if isinstance(payload, dict) else {}
+    model_cfg = cfg.get("model", {}) if isinstance(cfg, dict) else {}
+    target_shape = payload.get("target_shape") or cfg.get("target_shape") or [36, 45, 38]
+    if isinstance(target_shape, tuple):
+        target_shape = list(target_shape)
+    return {
+        "latent_dim": model_cfg.get("latent_dim", payload.get("latent_dim", 384)),
+        "base_channels": model_cfg.get("base_channels", 64),
+        "num_blocks": model_cfg.get("num_blocks", 4),
+        "encoder_arch": model_cfg.get("encoder_arch", "plain"),
+        "dropout": model_cfg.get("dropout", 0.1),
+        "norm": model_cfg.get("norm", "group"),
+        "pooling": model_cfg.get("pooling", "max"),
+        "blocks_per_stage": model_cfg.get("blocks_per_stage", 2),
+        "use_dilation": model_cfg.get("use_dilation", False),
+        "multi_scale": model_cfg.get("multi_scale", False),
+        "global_context": model_cfg.get("global_context", "none"),
+        "target_shape": target_shape,
+    }
+
+
+def apply_checkpoint_architecture(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    payload = torch.load(cfg["autoencoder_checkpoint"], map_location="cpu", weights_only=False)
+    arch = checkpoint_architecture(payload)
+    cfg = dict(cfg)
+    model_cfg = dict(cfg.get("model", {}))
+    for key in [
+        "latent_dim",
+        "base_channels",
+        "num_blocks",
+        "encoder_arch",
+        "dropout",
+        "norm",
+        "pooling",
+        "blocks_per_stage",
+        "use_dilation",
+        "multi_scale",
+        "global_context",
+    ]:
+        model_cfg[key] = arch[key]
+    cfg["model"] = model_cfg
+    cfg["target_shape"] = arch["target_shape"]
+    return cfg, {"selected_ae_checkpoint_architecture": arch}
 
 
 def _lookup(cache: dict[str, torch.Tensor], texts: list[str]) -> torch.Tensor:
@@ -350,6 +470,7 @@ def evaluate_generation_dataset(
 
 
 def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    cfg, architecture_report = apply_checkpoint_architecture(cfg)
     device_name = cfg.get("device", "auto")
     device = torch.device("cuda" if device_name == "auto" and torch.cuda.is_available() else "cpu" if device_name == "auto" else device_name)
     if device.type == "cuda":
@@ -371,6 +492,13 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         global_context=str(model_cfg.get("global_context", "none")),
     ).to(device)
     load_autoencoder_checkpoint(autoencoder, cfg["autoencoder_checkpoint"])
+    architecture_report.update(
+        {
+            "instantiated_stage4_model": model_cfg,
+            "target_shape": list(target_shape),
+            "strict_autoencoder_load": "passed",
+        }
+    )
     autoencoder.eval()
     for p in autoencoder.parameters():
         p.requires_grad_(False)
@@ -383,12 +511,54 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         dropout=float(projection_cfg.get("dropout", cfg.get("dropout", 0.1))),
         out_dim=int(model_cfg.get("latent_dim", 384)),
     )
+    stage3_init_report = {"stage3_checkpoint": cfg.get("stage3_contrastive_checkpoint", ""), "loaded_tensors": 0}
+    if cfg.get("stage3_contrastive_checkpoint"):
+        stage3_payload = torch.load(cfg["stage3_contrastive_checkpoint"], map_location="cpu", weights_only=False)
+        stage3_state = stage3_payload.get("text_proj") or stage3_payload.get("text_projection") or {}
+        current_state = text_projector.state_dict()
+        compatible = {
+            key: value
+            for key, value in stage3_state.items()
+            if key in current_state and tuple(value.shape) == tuple(current_state[key].shape)
+        }
+        current_state.update(compatible)
+        text_projector.load_state_dict(current_state)
+        stage3_init_report = {
+            "stage3_checkpoint": cfg["stage3_contrastive_checkpoint"],
+            "checkpoint_tensors": len(stage3_state),
+            "loaded_tensors": len(compatible),
+            "loaded_keys": sorted(compatible),
+            "note": "Stage 4 projection is run-specific; compatible tensors from the matching Stage 3 text projection are used as initialization.",
+        }
+    architecture_report["matching_stage3_text_projection_initialization"] = stage3_init_report
     preflight = preflight_batch_size(autoencoder, text_projector, target_shape, cfg, device)
     cfg = dict(cfg)
     cfg["batch_size"] = int(preflight["selected_batch_size"])
     cfg["preflight"] = preflight
     train_ds = UnifiedMapTextDataset(cfg["train_jsonl"])
     val_ds = UnifiedMapTextDataset(cfg["val_jsonl"])
+    domain_report = {}
+    if cfg.get("domain"):
+        requested_domain = str(cfg["domain"])
+        domain_report = {
+            "requested_domain": requested_domain,
+            "train": filter_dataset_to_domain(train_ds, requested_domain),
+            "val": filter_dataset_to_domain(val_ds, requested_domain),
+        }
+        if cfg.get("test_jsonl"):
+            test_probe = UnifiedMapTextDataset(cfg["test_jsonl"], load_volumes=False)
+            domain_report["test"] = filter_dataset_to_domain(test_probe, requested_domain)
+            domain_report["leakage"] = leakage_report(train_ds, val_ds, test_probe)
+            if not domain_report["leakage"]["passed"]:
+                raise RuntimeError(f"Stage 4 split leakage detected: {domain_report['leakage']['overlap_counts']}")
+    architecture_report["domain_filter_report"] = domain_report
+    out_dir = Path(cfg.get("output_dir", "experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with (out_dir / "stage4_architecture_compatibility_report.json").open("w") as f:
+        json.dump(architecture_report, f, indent=2)
+    if domain_report:
+        with (out_dir / "stage4_domain_dataset_report.json").open("w") as f:
+            json.dump(domain_report, f, indent=2)
     collator = PrimaryTextVolumeCollator(target_shape, text_rank=int(cfg.get("primary_text_rank", 0)))
     num_workers = int(cfg.get("num_workers", 0))
     loader_kwargs = {
@@ -543,8 +713,6 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                     break
         print(row)
         epoch += 1
-    out_dir = Path(cfg.get("output_dir", "experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain"))
-    out_dir.mkdir(parents=True, exist_ok=True)
     json.dump(cfg, open(out_dir / "text_to_brain_config.json", "w"), indent=2)
     json.dump(preflight, open(out_dir / "preflight.json", "w"), indent=2)
     json.dump(history, open(out_dir / "history.json", "w"), indent=2)
@@ -581,6 +749,8 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             print(f"Skipping text-to-brain generation eval '{name}': missing JSONL {path}")
             continue
         eval_ds = UnifiedMapTextDataset(path)
+        if cfg.get("domain"):
+            filter_dataset_to_domain(eval_ds, str(cfg["domain"]))
         generation_eval_rows.extend(
             evaluate_generation_dataset(
                 autoencoder,

@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import shutil
 import sys
 import time
 import traceback
+from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from typing import Optional
@@ -29,7 +31,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Dataset, Subset
 import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -49,12 +51,19 @@ from neurovlm.metrics import (
 )
 
 from atlas_free_cnn.pipeline_outputs import select_ae_checkpoint
+from atlas_free_cnn.training.datasets import UnifiedMapTextDataset
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train ALE 3D CNN on NeuroVLM PubMed pairs.")
     p.add_argument("--mode", choices=["difumo_compatible", "atlas_free"], default="atlas_free")
     p.add_argument("--model", choices=["ale_3dcnn", "ale_3dcnn_resnet", "ale_flat_mlp"], default="ale_3dcnn")
+    p.add_argument("--train-jsonl", default=None, help="Unified multi-source train split JSONL.")
+    p.add_argument("--val-jsonl", default=None, help="Unified multi-source validation split JSONL.")
+    p.add_argument("--test-jsonl", default=None, help="Unified multi-source test split JSONL.")
+    p.add_argument("--text-embedding-cache", default=None, help="Torch cache mapping primary text strings to SPECTER embeddings.")
+    p.add_argument("--domain", choices=["pubmed", "nilearn", "neurovault"], default=None, help="Domain filter for unified multi-source JSONLs.")
+    p.add_argument("--target-shape", default="36,45,38", help="Target 3D shape for unified JSONL volumes, comma-separated.")
     p.add_argument("--epochs", type=int, default=50)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--batch-size-auto", action="store_true")
@@ -79,6 +88,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--lr-cnn", type=float, default=1e-4)
     p.add_argument("--lr-proj", type=float, default=1e-5)
+    p.add_argument("--weight-decay", type=float, default=1e-4)
     p.add_argument("--warmup-epochs", type=int, default=5)
     p.add_argument("--temperature", type=float, default=0.07)
     p.add_argument("--val-interval", type=int, default=1)
@@ -203,7 +213,223 @@ def parse_batch_size_candidates(raw: str, n_examples: int) -> list[int]:
     return [value for value in values if value > 0]
 
 
+def parse_target_shape(raw: str) -> tuple[int, int, int]:
+    values = [int(item.strip()) for item in str(raw).replace("x", ",").split(",") if item.strip()]
+    if len(values) != 3:
+        raise ValueError(f"--target-shape must have three dimensions, got {raw!r}")
+    return tuple(values)
+
+
+def domain_from_source(value: str) -> str:
+    source = str(value or "").lower()
+    if source == "pubmed":
+        return "pubmed"
+    if source == "neurovault" or source.startswith("neurovault:"):
+        return "neurovault"
+    if source == "nilearn" or source.startswith("nilearn:"):
+        return "nilearn"
+    return source
+
+
+def primary_pair(row: dict) -> tuple[str, str]:
+    positives = row.get("positive_texts", []) or []
+    if not positives:
+        return str(row.get("map_id", "")), ""
+    first = positives[0]
+    text_id = first.get("text_id") or first.get("id") or first.get("text") or ""
+    return str(row.get("map_id", "")), str(text_id)
+
+
+def split_fingerprint(rows: list[dict]) -> str:
+    pairs = sorted(primary_pair(row) for row in rows)
+    payload = json.dumps(pairs, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def detect_source_field(rows: list[dict]) -> str:
+    candidates = ["source", "domain", "image_source", "dataset_source"]
+    present = [field for field in candidates if any(field in row and row.get(field) for row in rows)]
+    if not present:
+        raise KeyError(f"Could not find an authoritative source field among {candidates}")
+    return present[0]
+
+
+def filter_rows_for_domain(rows: list[dict], domain: str, source_field: str) -> list[dict]:
+    return [row for row in rows if domain_from_source(row.get(source_field, "")) == domain]
+
+
+def leakage_report(splits: dict[str, list[dict]]) -> dict:
+    ids = {name: {primary_pair(row) for row in rows} for name, rows in splits.items()}
+    overlaps = {}
+    for left, right in [("train", "val"), ("train", "test"), ("val", "test")]:
+        overlap = ids[left] & ids[right]
+        overlaps[f"{left}_{right}"] = len(overlap)
+    return {"overlap_counts": overlaps, "passed": all(value == 0 for value in overlaps.values())}
+
+
+def write_domain_dataset_report(args: argparse.Namespace, splits: dict[str, list[dict]], source_field: str) -> dict:
+    before_counts = {name: count for name, count in getattr(args, "_domain_rows_before", {}).items()}
+    leakage = leakage_report(splits)
+    report = {
+        "requested_domain": args.domain,
+        "detected_source_field": source_field,
+        "rows_before_filtering": before_counts,
+        "rows_after_filtering": {name: len(rows) for name, rows in splits.items()},
+        "train_count": len(splits["train"]),
+        "validation_count": len(splits["val"]),
+        "test_count": len(splits["test"]),
+        "unique_map_ids": {name: len({str(row.get("map_id", "")) for row in rows}) for name, rows in splits.items()},
+        "unique_text_ids": {name: len({primary_pair(row)[1] for row in rows}) for name, rows in splits.items()},
+        "source_value_counts": {
+            name: dict(Counter(str(row.get(source_field, "")) for row in rows))
+            for name, rows in splits.items()
+        },
+        "sample_rows": {
+            name: [
+                {
+                    "map_id": row.get("map_id"),
+                    "source": row.get(source_field),
+                    "positive_text_id": primary_pair(row)[1],
+                }
+                for row in rows[:3]
+            ]
+            for name, rows in splits.items()
+        },
+        "split_fingerprints": {name: split_fingerprint(rows) for name, rows in splits.items()},
+        "leakage": leakage,
+    }
+    if any(len(rows) == 0 for rows in splits.values()):
+        raise RuntimeError(f"Domain filter produced an empty split: {report['rows_after_filtering']}")
+    if not leakage["passed"]:
+        raise RuntimeError(f"Domain split leakage detected: {leakage['overlap_counts']}")
+    for split_name, counts in report["source_value_counts"].items():
+        bad = [source for source in counts if domain_from_source(source) != args.domain]
+        if bad:
+            raise RuntimeError(f"{args.domain} {split_name} split contains non-domain sources: {bad}")
+    run_dir = Path(args.run_dir)
+    with (run_dir / "domain_dataset_report.json").open("w") as f:
+        json.dump(report, f, indent=2)
+    return report
+
+
+class UnifiedContrastiveDataset(Dataset):
+    def __init__(
+        self,
+        jsonl_path: str | Path,
+        rows: list[dict],
+        text_cache: dict[str, torch.Tensor],
+        *,
+        target_shape: tuple[int, int, int],
+    ):
+        self.base = UnifiedMapTextDataset(jsonl_path)
+        self.base.rows = rows
+        self.rows = rows
+        self.text_cache = text_cache
+        self.target_shape = target_shape
+        self.input_shape = target_shape
+        self.pmids = np.array([str(row.get("pmid", row.get("map_id", ""))) for row in rows])
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def __getitem__(self, idx: int) -> dict:
+        item = self.base[idx]
+        positives = item.get("positive_texts", []) or []
+        if not positives:
+            raise ValueError(f"Row {item.get('map_id')} has no positive_texts")
+        text = positives[0]["text"]
+        if text not in self.text_cache:
+            text_id = positives[0].get("text_id", "")
+            raise KeyError(f"Primary text missing from embedding cache for map_id={item.get('map_id')} text_id={text_id}")
+        volume = item["volume"].float()
+        if tuple(volume.shape[-3:]) != self.target_shape:
+            volume = F.interpolate(
+                volume.unsqueeze(0),
+                size=self.target_shape,
+                mode="trilinear",
+                align_corners=False,
+            ).squeeze(0)
+        return {
+            "volume": volume.clamp(0.0, 1.0),
+            "text": self.text_cache[text].float(),
+            "paper_idx": torch.tensor(idx, dtype=torch.long),
+            "map_id": item["map_id"],
+            "text_id": positives[0].get("text_id", ""),
+        }
+
+    def split_by_index(self, train_idx, val_idx, test_idx):
+        raise NotImplementedError("UnifiedContrastiveDataset receives fixed split JSONLs; do not random-split it.")
+
+    def covariate_frame(self) -> pd.DataFrame:
+        rows = []
+        for idx, row in enumerate(self.rows):
+            rows.append(
+                {
+                    "sample_pos": idx,
+                    "map_id": row.get("map_id", ""),
+                    "source": row.get("source", ""),
+                    "source_detail": row.get("source_detail", ""),
+                    "quality_score": row.get("quality_score", ""),
+                }
+            )
+        return pd.DataFrame(rows)
+
+
+def load_text_embedding_cache(path: str | Path) -> dict[str, torch.Tensor]:
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    return {str(key): torch.as_tensor(value, dtype=torch.float32) for key, value in payload.items()}
+
+
+def build_unified_dataset(args: argparse.Namespace):
+    required = {
+        "--train-jsonl": args.train_jsonl,
+        "--val-jsonl": args.val_jsonl,
+        "--test-jsonl": args.test_jsonl,
+        "--text-embedding-cache": args.text_embedding_cache,
+        "--domain": args.domain,
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise ValueError(f"Unified multi-source training requires {', '.join(missing)}")
+
+    split_paths = {"train": Path(args.train_jsonl), "val": Path(args.val_jsonl), "test": Path(args.test_jsonl)}
+    raw_rows = {}
+    for name, path in split_paths.items():
+        with path.open() as f:
+            raw_rows[name] = [json.loads(line) for line in f if line.strip()]
+    source_field = detect_source_field([row for rows in raw_rows.values() for row in rows[:100]])
+    args._domain_rows_before = {name: len(rows) for name, rows in raw_rows.items()}
+    filtered = {name: filter_rows_for_domain(rows, args.domain, source_field) for name, rows in raw_rows.items()}
+    domain_report = write_domain_dataset_report(args, filtered, source_field)
+    text_cache = load_text_embedding_cache(args.text_embedding_cache)
+    target_shape = parse_target_shape(args.target_shape)
+    train_ds = UnifiedContrastiveDataset(split_paths["train"], filtered["train"], text_cache, target_shape=target_shape)
+    val_ds = UnifiedContrastiveDataset(split_paths["val"], filtered["val"], text_cache, target_shape=target_shape)
+    test_ds = UnifiedContrastiveDataset(split_paths["test"], filtered["test"], text_cache, target_shape=target_shape)
+    train_ds.domain_report = domain_report
+    payload = {
+        "config": {
+            "dataset_kind": "unified_jsonl",
+            "train_jsonl": str(split_paths["train"]),
+            "val_jsonl": str(split_paths["val"]),
+            "test_jsonl": str(split_paths["test"]),
+            "text_embedding_cache": str(args.text_embedding_cache),
+            "domain": args.domain,
+            "source_field": source_field,
+        },
+        "metadata": {
+            "shape": target_shape,
+            "n_volumes": sum(len(rows) for rows in filtered.values()),
+            "domain_report": domain_report,
+        },
+    }
+    return train_ds, train_ds, val_ds, test_ds, payload, payload["config"]
+
+
 def build_dataset(args: argparse.Namespace):
+    if args.train_jsonl or args.val_jsonl or args.test_jsonl or args.domain:
+        return build_unified_dataset(args)
+
     print("Preparing ALE preprocessing config ...", flush=True)
     config = ALEPreprocessConfig(
         mode=args.mode,
@@ -294,23 +520,166 @@ def build_cache_only(args: argparse.Namespace) -> None:
     print(f"  metadata  : {run_dir / 'cache_metadata.json'}")
 
 
-def _load_encoder_from_autoencoder_checkpoint(brain_encoder: nn.Module, checkpoint_path: str | None) -> None:
-    if not checkpoint_path:
-        raise ValueError("--encoder-init autoencoder_pretrained requires --autoencoder-checkpoint")
-    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+PREVIOUS_PUBMED_REFERENCE_ARCHITECTURE = {
+    "model": "ale_3dcnn",
+    "base_channels": 48,
+    "num_blocks": 4,
+    "out_dim": 384,
+    "dropout": 0.1,
+    "norm": "group",
+    "pooling": "max",
+    "encoder_arch": "plain",
+    "blocks_per_stage": 2,
+    "use_dilation": False,
+    "multi_scale": False,
+    "global_context": "none",
+    "target_shape": [36, 45, 38],
+}
+
+
+CONTROLLED_MULTISOURCE_ARCHITECTURE = {
+    **PREVIOUS_PUBMED_REFERENCE_ARCHITECTURE,
+    "base_channels": 64,
+}
+
+
+def nested_get(mapping: dict, *keys, default=None):
+    cur = mapping
+    for key in keys:
+        if not isinstance(cur, dict) or key not in cur:
+            return default
+        cur = cur[key]
+    return cur
+
+
+def extract_checkpoint_architecture(payload: dict) -> dict:
+    cfg = payload.get("config", {}) if isinstance(payload, dict) else {}
+    model_cfg = cfg.get("model", {}) if isinstance(cfg, dict) else {}
+    target_shape = (
+        payload.get("target_shape")
+        or cfg.get("target_shape")
+        or nested_get(payload, "model_architecture", "target_shape")
+        or CONTROLLED_MULTISOURCE_ARCHITECTURE["target_shape"]
+    )
+    if isinstance(target_shape, tuple):
+        target_shape = list(target_shape)
+    return {
+        "model": cfg.get("model_name", "ale_3dcnn"),
+        "base_channels": model_cfg.get("base_channels", nested_get(payload, "model_architecture", "base_channels")),
+        "num_blocks": model_cfg.get("num_blocks", nested_get(payload, "model_architecture", "num_blocks")),
+        "latent_dim": model_cfg.get("latent_dim", payload.get("latent_dim")),
+        "out_dim": model_cfg.get("latent_dim", payload.get("latent_dim")),
+        "dropout": model_cfg.get("dropout", nested_get(payload, "model_architecture", "dropout")),
+        "norm": model_cfg.get("norm", nested_get(payload, "model_architecture", "norm")),
+        "pooling": model_cfg.get("pooling", nested_get(payload, "model_architecture", "pooling")),
+        "encoder_arch": model_cfg.get("encoder_arch", nested_get(payload, "model_architecture", "encoder_arch", default="plain")),
+        "blocks_per_stage": model_cfg.get("blocks_per_stage", nested_get(payload, "model_architecture", "blocks_per_stage", default=2)),
+        "use_dilation": model_cfg.get("use_dilation", nested_get(payload, "model_architecture", "use_dilation", default=False)),
+        "multi_scale": model_cfg.get("multi_scale", nested_get(payload, "model_architecture", "multi_scale", default=False)),
+        "global_context": model_cfg.get("global_context", nested_get(payload, "model_architecture", "global_context", default="none")),
+        "target_shape": target_shape,
+    }
+
+
+def stage3_architecture_from_args(args: argparse.Namespace) -> dict:
+    return {
+        "model": args.model,
+        "base_channels": args.base_channels,
+        "num_blocks": args.num_blocks,
+        "out_dim": args.out_dim,
+        "dropout": args.dropout,
+        "norm": args.norm,
+        "pooling": args.pooling,
+        "encoder_arch": "plain" if args.model == "ale_3dcnn" else args.model,
+        "blocks_per_stage": args.blocks_per_stage,
+        "use_dilation": args.use_dilation,
+        "multi_scale": args.multi_scale,
+        "global_context": args.global_context,
+        "target_shape": list(parse_target_shape(args.target_shape)) if args.train_jsonl else list(CONTROLLED_MULTISOURCE_ARCHITECTURE["target_shape"]),
+    }
+
+
+def compare_architecture(selected: dict, instantiated: dict) -> tuple[dict, dict]:
+    expected_differences = {
+        "base_channels": {
+            "previous_pubmed": 48,
+            "multisource_required": 64,
+            "reason": "Selected mixed-source Stage 1 AE checkpoints were trained with base_channels=64.",
+        }
+    }
+    unexpected = {}
+    for key, expected_value in CONTROLLED_MULTISOURCE_ARCHITECTURE.items():
+        selected_value = selected.get("latent_dim") if key == "out_dim" else selected.get(key)
+        instantiated_value = instantiated.get(key)
+        if key == "base_channels":
+            if selected_value != 64 or instantiated_value != 64:
+                unexpected[key] = {"selected_checkpoint": selected_value, "instantiated_stage3": instantiated_value, "expected": 64}
+            continue
+        if selected_value is not None and selected_value != expected_value:
+            unexpected[f"selected_{key}"] = {"observed": selected_value, "expected": expected_value}
+        if instantiated_value != expected_value:
+            unexpected[f"stage3_{key}"] = {"observed": instantiated_value, "expected": expected_value}
+    return expected_differences, unexpected
+
+
+def encoder_state_from_autoencoder_payload(payload: dict) -> dict:
     state = (
         payload.get("encoder")
         or payload.get("brain_encoder")
         or payload.get("model", {})
     )
-    if state and any(k.startswith("encoder.") for k in state):
-        state = {k.removeprefix("encoder."): v for k, v in state.items() if k.startswith("encoder.")}
+    if state and any(str(k).startswith("encoder.") for k in state):
+        state = {str(k).removeprefix("encoder."): v for k, v in state.items() if str(k).startswith("encoder.")}
     if not state:
         raise KeyError(
             "Autoencoder checkpoint must contain 'encoder', 'brain_encoder', "
             "or a 'model' state_dict with encoder.* keys"
         )
+    return state
+
+
+def _load_encoder_from_autoencoder_checkpoint(
+    brain_encoder: nn.Module,
+    checkpoint_path: str | None,
+    args: argparse.Namespace,
+) -> dict:
+    if not checkpoint_path:
+        raise ValueError("--encoder-init autoencoder_pretrained requires --autoencoder-checkpoint")
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    state = encoder_state_from_autoencoder_payload(payload)
+    model_state = brain_encoder.state_dict()
+    missing = sorted(set(model_state) - set(state))
+    unexpected = sorted(set(state) - set(model_state))
+    shape_mismatches = {
+        key: {"checkpoint": list(value.shape), "model": list(model_state[key].shape)}
+        for key, value in state.items()
+        if key in model_state and tuple(value.shape) != tuple(model_state[key].shape)
+    }
+    selected_arch = extract_checkpoint_architecture(payload)
+    instantiated_arch = stage3_architecture_from_args(args)
+    expected_differences, unexpected_differences = compare_architecture(selected_arch, instantiated_arch)
+    report = {
+        "previous_pubmed_reference_architecture": PREVIOUS_PUBMED_REFERENCE_ARCHITECTURE,
+        "selected_ae_checkpoint_architecture": selected_arch,
+        "instantiated_stage3_architecture": instantiated_arch,
+        "expected_differences": expected_differences,
+        "unexpected_differences": unexpected_differences,
+        "state_dict_missing_keys": missing,
+        "state_dict_unexpected_keys": unexpected,
+        "shape_mismatches": shape_mismatches,
+        "strict_load_success": False,
+        "final_compatibility_status": "failed",
+    }
+    if unexpected_differences or missing or unexpected or shape_mismatches:
+        with (Path(args.run_dir) / "architecture_compatibility_report.json").open("w") as f:
+            json.dump(report, f, indent=2, default=str)
+        raise RuntimeError(f"Stage 3 architecture compatibility failed: {json.dumps(report, indent=2, default=str)}")
     brain_encoder.load_state_dict(state, strict=True)
+    report["strict_load_success"] = True
+    report["final_compatibility_status"] = "passed"
+    with (Path(args.run_dir) / "architecture_compatibility_report.json").open("w") as f:
+        json.dump(report, f, indent=2, default=str)
+    return report
 
 
 def resolve_autoencoder_initialization(args: argparse.Namespace) -> dict:
@@ -378,10 +747,11 @@ def build_model(args: argparse.Namespace, input_shape: tuple[int, ...]):
             out_dim=args.out_dim,
             dropout=args.dropout,
         )
+    architecture_report = {}
     if args.encoder_init == "autoencoder_pretrained":
         if args.model == "ale_flat_mlp":
             raise ValueError("autoencoder_pretrained is only valid for CNN models")
-        _load_encoder_from_autoencoder_checkpoint(brain_encoder, args.autoencoder_checkpoint)
+        architecture_report = _load_encoder_from_autoencoder_checkpoint(brain_encoder, args.autoencoder_checkpoint, args)
 
     if args.text_proj_init == "pretrained_infonce":
         if args.out_dim != 384:
@@ -396,7 +766,7 @@ def build_model(args: argparse.Namespace, input_shape: tuple[int, ...]):
         dummy = torch.zeros(2, 1, *input_shape)
         out = brain_encoder(dummy)
         assert out.shape == (2, args.out_dim), out.shape
-    return brain_encoder, text_proj
+    return brain_encoder, text_proj, architecture_report
 
 
 class ALETrainer:
@@ -418,7 +788,7 @@ class ALETrainer:
         groups = [{"params": self.brain_encoder.parameters(), "lr": args.lr_cnn}]
         if not args.freeze_text_proj:
             groups.append({"params": self.text_proj.parameters(), "lr": args.lr_proj})
-        self.optimizer = torch.optim.AdamW(groups, weight_decay=1e-4)
+        self.optimizer = torch.optim.AdamW(groups, weight_decay=args.weight_decay)
         self.scheduler: Optional[torch.optim.lr_scheduler.LambdaLR] = None
         self.grad_accum_steps = max(1, int(args.grad_accum_steps))
         self.use_amp = args.amp and device.type == "cuda"
@@ -805,6 +1175,134 @@ class ALETrainer:
         )
 
 
+def trainability_report(trainer: ALETrainer, args: argparse.Namespace) -> dict:
+    brain_trainable = sum(p.numel() for p in trainer.brain_encoder.parameters() if p.requires_grad)
+    brain_frozen = sum(p.numel() for p in trainer.brain_encoder.parameters() if not p.requires_grad)
+    text_trainable = sum(p.numel() for p in trainer.text_proj.parameters() if p.requires_grad)
+    text_frozen = sum(p.numel() for p in trainer.text_proj.parameters() if not p.requires_grad)
+    report = {
+        "encoder_init": args.encoder_init,
+        "cnn_encoder_trainable": brain_trainable > 0,
+        "text_proj_init": args.text_proj_init,
+        "text_projection_pretrained": args.text_proj_init == "pretrained_infonce",
+        "text_projection_trainable": text_trainable > 0,
+        "loss": "symmetric InfoNCE",
+        "shared_embedding_dimension": args.out_dim,
+        "cnn_encoder_trainable_parameter_count": brain_trainable,
+        "text_projection_trainable_parameter_count": text_trainable,
+        "brain_projection_trainable_parameter_count": 0,
+        "frozen_parameter_count_by_component": {
+            "cnn_encoder": brain_frozen,
+            "text_projection": text_frozen,
+        },
+        "optimizer_parameter_groups": [
+            {
+                "index": idx,
+                "lr": group.get("lr"),
+                "weight_decay": group.get("weight_decay"),
+                "parameter_count": sum(p.numel() for p in group.get("params", [])),
+            }
+            for idx, group in enumerate(trainer.optimizer.param_groups)
+        ],
+    }
+    failures = []
+    if report["encoder_init"] != "autoencoder_pretrained":
+        failures.append("encoder_init is not autoencoder_pretrained")
+    if not report["cnn_encoder_trainable"]:
+        failures.append("CNN encoder is frozen")
+    if not report["text_projection_pretrained"]:
+        failures.append("text projection is not initialized from pretrained InfoNCE")
+    if not report["text_projection_trainable"]:
+        failures.append("text projection is frozen")
+    if report["shared_embedding_dimension"] != 384:
+        failures.append("shared embedding dimension is not 384")
+    report["failures"] = failures
+    report["status"] = "passed" if not failures else "failed"
+    with (Path(args.run_dir) / "stage3_trainability_report.json").open("w") as f:
+        json.dump(report, f, indent=2)
+    if failures:
+        raise RuntimeError(f"Stage 3 trainability verification failed: {failures}")
+    return report
+
+
+PREVIOUS_PUBMED_REFERENCE_TRAINING = {
+    "recipe": "ae_pretrained_finetune_cnn_pretrained_text_trainable",
+    "lr_cnn": 1e-4,
+    "lr_proj": 1e-5,
+    "weight_decay": 1e-4,
+    "temperature": 0.07,
+    "warmup_epochs": 5,
+    "batch_size": 512,
+    "batch_size_auto": False,
+    "epochs": 150,
+    "early_stopping_patience": 25,
+    "monitor_metric": "paper_recall_curve_auc",
+    "seed": 42,
+    "base_channels": 48,
+    "num_blocks": 4,
+    "out_dim": 384,
+    "dropout": 0.1,
+    "norm": "group",
+    "pooling": "max",
+    "encoder_init": "autoencoder_pretrained",
+    "text_proj_init": "pretrained_infonce",
+    "freeze_text_proj": False,
+}
+
+
+def write_training_diff_report(args: argparse.Namespace) -> dict:
+    current = {
+        "lr_cnn": args.lr_cnn,
+        "lr_proj": args.lr_proj,
+        "weight_decay": args.weight_decay,
+        "temperature": args.temperature,
+        "warmup_epochs": args.warmup_epochs,
+        "batch_size": args.batch_size,
+        "batch_size_auto": args.batch_size_auto,
+        "epochs": args.epochs,
+        "early_stopping_patience": args.early_stopping_patience,
+        "monitor_metric": args.monitor_metric,
+        "seed": args.seed,
+        "base_channels": args.base_channels,
+        "num_blocks": args.num_blocks,
+        "out_dim": args.out_dim,
+        "dropout": args.dropout,
+        "norm": args.norm,
+        "pooling": args.pooling,
+        "encoder_init": args.encoder_init,
+        "text_proj_init": args.text_proj_init,
+        "freeze_text_proj": args.freeze_text_proj,
+    }
+    diffs = {}
+    for key, previous in PREVIOUS_PUBMED_REFERENCE_TRAINING.items():
+        if key == "recipe":
+            continue
+        value = current.get(key)
+        if value != previous:
+            required = key == "base_channels"
+            if required:
+                reason = "Required because the selected mixed-source Stage 1 AE checkpoints were trained with base_channels=64."
+            elif key == "val_interval":
+                reason = "Intentional six-run workflow change: validation is cheap for these runs, so validating every epoch gives tighter checkpointing and earlier stopping."
+            else:
+                reason = "Configured multi-source launch setting; not required by architecture compatibility."
+            diffs[key] = {
+                "previous_value": previous,
+                "current_value": value,
+                "reason_for_change": reason,
+                "required": required,
+                "applies_identically_to_all_six_runs": True,
+            }
+    report = {
+        "previous_pubmed_reference": PREVIOUS_PUBMED_REFERENCE_TRAINING,
+        "current_multisource_training": current,
+        "differences": diffs,
+    }
+    with (Path(args.run_dir) / "pubmed_reference_vs_multisource_training_diff.json").open("w") as f:
+        json.dump(report, f, indent=2)
+    return report
+
+
 @torch.no_grad()
 def recall_curve_frame(text_emb: torch.Tensor, brain_emb: torch.Tensor) -> pd.DataFrame:
     t2i, i2t = recall_curve(text_emb, brain_emb)
@@ -1091,7 +1589,7 @@ def main() -> None:
 
     ae_init_report = resolve_autoencoder_initialization(args)
     ds, train_ds, val_ds, test_ds, payload, preprocess_config = build_dataset(args)
-    brain_encoder, text_proj = build_model(args, ds.input_shape)
+    brain_encoder, text_proj, architecture_report = build_model(args, ds.input_shape)
     device = which_device(args.device)
     print(f"Selected device: {device}", flush=True)
     if args.pin_memory is False and device.type == "cuda":
@@ -1146,6 +1644,8 @@ def main() -> None:
     print(f"  device={device} amp={args.amp and device.type == 'cuda'} batch={batch_label}")
 
     trainer = ALETrainer(brain_encoder, text_proj, args, device)
+    trainability_report(trainer, args)
+    write_training_diff_report(args)
     trainer.load_resume_model_weights()
     trainer.preflight_batch_size(train_ds)
     with (run_dir / "config.json").open("w") as f:
