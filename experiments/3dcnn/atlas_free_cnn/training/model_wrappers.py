@@ -59,6 +59,21 @@ class TextToBrainProjectionHead(nn.Module):
         return self.aligner(x)
 
 
+class GenerativeTextToAELatent(nn.Module):
+    """Fresh SPECTER2 -> frozen AE decoder latent projector for Stage 4."""
+
+    def __init__(self, in_dim: int = 768, hidden_dim: int = 512, latent_dim: int = 384):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, latent_dim),
+        )
+
+    def forward(self, text_embedding):
+        return self.net(text_embedding)
+
+
 def build_text_projection(init: str = "random", *, device: str | torch.device = "cpu") -> nn.Module:
     """Build a text projection variant for CNN latent experiments.
 
@@ -76,6 +91,16 @@ def build_text_projection(init: str = "random", *, device: str | torch.device = 
 
         return ProjHead.from_pretrained("text_infonce").to(device)
     raise ValueError("init must be 'random' or 'pretrained_text_infonce'")
+
+
+def build_generative_text_to_ae_latent(
+    *,
+    device: str | torch.device = "cpu",
+    in_dim: int = 768,
+    hidden_dim: int = 512,
+    latent_dim: int = 384,
+) -> nn.Module:
+    return GenerativeTextToAELatent(in_dim=in_dim, hidden_dim=hidden_dim, latent_dim=latent_dim).to(device)
 
 
 def build_text_to_brain_projection(

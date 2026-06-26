@@ -41,11 +41,15 @@ from atlas_free_cnn.training.generation_losses import (
     weighted_reconstruction_loss,
 )
 from atlas_free_cnn.training.model_wrappers import (
+    build_brain_encoder,
     build_cnn_autoencoder,
+    build_generative_text_to_ae_latent,
+    build_text_projection,
     build_text_to_brain_projection,
     load_autoencoder_checkpoint,
 )
 from neurovlm.gnn.ale_cnn import count_parameters
+from neurovlm.metrics import bidirectional_retrieval_metrics
 
 
 TEXT_TO_BRAIN_BATCH_CANDIDATES = [4096, 3072, 2048, 1536, 1024, 768, 512, 384, 256, 192, 128, 96, 64]
@@ -131,7 +135,27 @@ def _loss_cfg(cfg: dict[str, Any]) -> GenerationLossConfig:
 
 def _load_text_cache(path: str | Path) -> dict[str, torch.Tensor]:
     payload = torch.load(path, map_location="cpu", weights_only=False)
-    return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in payload.items()}
+    if isinstance(payload, dict):
+        for key in ["processed_embedding_by_text", "embedding_by_text", "text_to_embedding", "embeddings_by_text"]:
+            if isinstance(payload.get(key), dict):
+                payload = payload[key]
+                break
+        else:
+            if isinstance(payload.get("records"), list):
+                payload = {
+                    str(row.get("text", row.get("input_text", row.get("text_id", "")))): row["processed_embedding"]
+                    for row in payload["records"]
+                    if "processed_embedding" in row
+                }
+    if not isinstance(payload, dict):
+        raise TypeError(f"Unsupported text embedding cache format in {path}")
+    out = {}
+    for k, v in payload.items():
+        if torch.is_tensor(v) or isinstance(v, (list, tuple)):
+            tensor = torch.as_tensor(v, dtype=torch.float32)
+            if tensor.ndim == 1:
+                out[str(k)] = tensor
+    return out
 
 
 def domain_from_source(value: str) -> str:
@@ -261,10 +285,11 @@ def _lookup(cache: dict[str, torch.Tensor], texts: list[str]) -> torch.Tensor:
 
 def text_to_brain_loss(pred, target, brain_z, text_z, loss_cfg: GenerationLossConfig):
     parts = {
-        "latent_alignment": latent_alignment_loss(text_z, brain_z, loss_type="cosine", detach_brain_z=True),
-        "recon_mse": F.mse_loss(pred, target),
+        "latent_mse": F.mse_loss(text_z, brain_z.detach()),
+        "latent_cosine": F.cosine_similarity(text_z, brain_z.detach(), dim=1, eps=1e-8).mean(),
+        "reconstruction_mse": F.mse_loss(pred, target),
     }
-    total = loss_cfg.lambda_latent * parts["latent_alignment"] + loss_cfg.lambda_recon * parts["recon_mse"]
+    total = loss_cfg.lambda_latent * parts["latent_mse"] + loss_cfg.lambda_recon * parts["reconstruction_mse"]
     if loss_cfg.recon_alpha > 0:
         parts["positive_weighted_mse"] = weighted_reconstruction_loss(
             pred,
@@ -312,7 +337,7 @@ def preflight_batch_size(autoencoder, text_projector, target_shape, cfg, device)
             with torch.cuda.amp.autocast(enabled=bool(cfg.get("amp", True))):
                 text_z = text_projector(raw_text)
                 pred = autoencoder.decoder(text_z)
-                loss = F.mse_loss(pred, x) + latent_alignment_loss(text_z, brain_z)
+                loss = F.mse_loss(pred, x) + F.mse_loss(text_z, brain_z.detach())
             loss.backward()
             peak = torch.cuda.max_memory_allocated(device) / 1024**3
             free, _ = torch.cuda.mem_get_info(device)
@@ -366,6 +391,7 @@ def run_epoch(
     autoencoder.eval()
     text_projector.train(train)
     losses = []
+    loss_part_rows = []
     metric_rows = []
     total = len(loader)
     if max_batches is not None:
@@ -387,7 +413,7 @@ def run_epoch(
             with torch.cuda.amp.autocast(enabled=bool(use_amp and device.type == "cuda")):
                 text_z = text_projector(raw_text)
                 pred = autoencoder.decoder(text_z)
-                loss, _ = text_to_brain_loss(pred, target, brain_z, text_z, loss_cfg)
+                loss, parts = text_to_brain_loss(pred, target, brain_z, text_z, loss_cfg)
             if train:
                 optimizer.zero_grad(set_to_none=True)
                 if scaler is not None and use_amp and device.type == "cuda":
@@ -401,6 +427,7 @@ def run_epoch(
                     torch.nn.utils.clip_grad_norm_(text_projector.parameters(), 1.0)
                     optimizer.step()
         losses.append(float(loss.detach().cpu()))
+        loss_part_rows.append({k: float(v.detach().cpu()) for k, v in parts.items() if torch.is_tensor(v)})
         if compute_metrics and (metric_max_batches is None or len(metric_rows) < int(metric_max_batches)):
             pred_metric = pred.detach().clamp(0.0, 1.0)
             target_metric = target.detach()
@@ -412,6 +439,9 @@ def run_epoch(
             iterator.set_postfix(loss=f"{losses[-1]:.4f}")
     avg_metrics = {k: float(sum(r[k] for r in metric_rows) / max(1, len(metric_rows))) for k in metric_rows[0]} if metric_rows else {}
     avg_metrics["loss"] = float(sum(losses) / max(1, len(losses)))
+    if loss_part_rows:
+        for key in loss_part_rows[0]:
+            avg_metrics[key] = float(sum(row[key] for row in loss_part_rows) / max(1, len(loss_part_rows)))
     return avg_metrics
 
 
@@ -469,6 +499,100 @@ def evaluate_generation_dataset(
     return rows
 
 
+def _stage3_encoder_arch(model_name: str | None) -> str:
+    if model_name in {None, "", "ale_3dcnn"}:
+        return "plain"
+    if model_name == "ale_3dcnn_resnet":
+        return "resnet"
+    return str(model_name)
+
+
+def load_stage3_contrastive_models(stage3_checkpoint: str | Path, device: torch.device):
+    payload = torch.load(stage3_checkpoint, map_location="cpu", weights_only=False)
+    cfg = payload.get("config", {}) if isinstance(payload, dict) else {}
+    out_dim = int(cfg.get("out_dim", 384))
+    brain_encoder = build_brain_encoder(
+        out_dim=out_dim,
+        encoder_arch=_stage3_encoder_arch(cfg.get("model", "ale_3dcnn")),
+        base_channels=int(cfg.get("base_channels", 64)),
+        num_blocks=int(cfg.get("num_blocks", 4)),
+        blocks_per_stage=int(cfg.get("blocks_per_stage", 2)),
+        dropout=float(cfg.get("dropout", 0.1)),
+        use_dilation=bool(cfg.get("use_dilation", False)),
+        multi_scale=bool(cfg.get("multi_scale", False)),
+        global_context=str(cfg.get("global_context", "none")),
+    ).to(device)
+    text_proj = build_text_projection("random", device=device)
+    brain_state = payload.get("brain_encoder")
+    text_state = payload.get("text_proj") or payload.get("text_projection")
+    if brain_state is None or text_state is None:
+        raise KeyError(f"Stage 3 checkpoint must contain brain_encoder and text_proj: {stage3_checkpoint}")
+    brain_encoder.load_state_dict(brain_state, strict=True)
+    text_proj.load_state_dict(text_state, strict=True)
+    brain_encoder.eval()
+    text_proj.eval()
+    for model in [brain_encoder, text_proj]:
+        for param in model.parameters():
+            param.requires_grad_(False)
+    return brain_encoder, text_proj
+
+
+@torch.no_grad()
+def generation_semantic_auc(
+    autoencoder,
+    generative_text_to_ae_latent,
+    stage3_brain_encoder,
+    stage3_text_projection,
+    dataset: UnifiedMapTextDataset,
+    text_cache: dict[str, torch.Tensor],
+    cfg: dict[str, Any],
+    device: torch.device,
+) -> dict[str, float]:
+    collator = PrimaryTextVolumeCollator(_target_shape(cfg), text_rank=int(cfg.get("primary_text_rank", 0)))
+    loader = DataLoader(
+        dataset,
+        batch_size=int(cfg.get("generation_auc_batch_size", cfg.get("eval_batch_size", cfg.get("batch_size", 256)))),
+        shuffle=False,
+        num_workers=int(cfg.get("eval_num_workers", 0)),
+        collate_fn=collator,
+        pin_memory=bool(cfg.get("pin_memory", device.type == "cuda")),
+    )
+    generated_brain_embeddings = []
+    text_embeddings = []
+    matched_cosines = []
+    for batch in loader:
+        x = batch["volume"].to(device)
+        raw_text = _lookup(text_cache, batch["texts"]).to(device)
+        text_latent = generative_text_to_ae_latent(raw_text)
+        pred = autoencoder.decoder(text_latent)
+        generated_brain_embeddings.append(stage3_brain_encoder(pred.float()).cpu())
+        text_embeddings.append(stage3_text_projection(raw_text.float()).cpu())
+    generated = torch.cat(generated_brain_embeddings, dim=0)
+    text = torch.cat(text_embeddings, dim=0)
+    metrics = bidirectional_retrieval_metrics(text, generated, ks=(1, 5, 10, 50))
+    text_n = F.normalize(text.float(), dim=1, eps=1e-8)
+    gen_n = F.normalize(generated.float(), dim=1, eps=1e-8)
+    sim = text_n @ gen_n.T
+    matched = sim.diag()
+    if sim.shape[0] > 1:
+        shuffled = sim[torch.arange(sim.shape[0]), torch.roll(torch.arange(sim.shape[0]), shifts=1)]
+        shuffled_mean = float(shuffled.mean().item())
+    else:
+        shuffled_mean = float("nan")
+    return {
+        "generation_text_to_brain_normalized_auc": metrics["t2i_normalized_k_recall_curve_auc"],
+        "generation_brain_to_text_normalized_auc": metrics["i2t_normalized_k_recall_curve_auc"],
+        "generation_mean_normalized_auc": metrics["mean_normalized_k_recall_curve_auc"],
+        "generation_normalized_auc": metrics["mean_normalized_k_recall_curve_auc"],
+        "generation_matched_contrastive_cosine": float(matched.mean().item()),
+        "generation_shuffled_contrastive_cosine": shuffled_mean,
+        "generation_recall@1": metrics["mean_recall@1"],
+        "generation_recall@5": metrics["mean_recall@5"],
+        "generation_recall@10": metrics["mean_recall@10"],
+        "generation_recall@50": metrics["mean_recall@50"],
+    }
+
+
 def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     cfg, architecture_report = apply_checkpoint_architecture(cfg)
     device_name = cfg.get("device", "auto")
@@ -502,17 +626,49 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     autoencoder.eval()
     for p in autoencoder.parameters():
         p.requires_grad_(False)
-    projection_cfg = cfg.get("text_to_brain_projection", {})
-    text_projector = build_text_to_brain_projection(
-        cfg.get("text_projection_init", "random"),
-        device=device,
-        hidden_dim=int(projection_cfg.get("hidden_dim", cfg.get("hidden_dim", 512))),
-        depth=int(projection_cfg.get("depth", cfg.get("depth", 2))),
-        dropout=float(projection_cfg.get("dropout", cfg.get("dropout", 0.1))),
-        out_dim=int(model_cfg.get("latent_dim", 384)),
-    )
-    stage3_init_report = {"stage3_checkpoint": cfg.get("stage3_contrastive_checkpoint", ""), "loaded_tensors": 0}
-    if cfg.get("stage3_contrastive_checkpoint"):
+    trainable_ae = sum(p.numel() for p in autoencoder.parameters() if p.requires_grad)
+    if trainable_ae:
+        raise RuntimeError(f"Corrected Stage 4 requires frozen AE encoder/decoder; found {trainable_ae} trainable AE parameters")
+    projection_cfg = cfg.get("generative_text_to_ae_latent", cfg.get("text_to_brain_projection", {}))
+    projector_name = str(projection_cfg.get("name", "generative_text_to_ae_latent"))
+    legacy_stage4 = bool(cfg.get("legacy_contrastive_initialized_stage4", False))
+    input_dim = int(projection_cfg.get("in_dim", 768))
+    hidden_dim = int(projection_cfg.get("hidden_dim", cfg.get("hidden_dim", 512)))
+    latent_dim = int(model_cfg.get("latent_dim", 384))
+    if input_dim != 768:
+        raise RuntimeError(f"Corrected Stage 4 requires 768-d processed SPECTER2 embeddings, got {input_dim}")
+    if latent_dim != 384:
+        raise RuntimeError(f"Corrected Stage 4 requires AE latent_dim=384, got {latent_dim}")
+    if legacy_stage4:
+        text_projector = build_text_to_brain_projection(
+            cfg.get("text_projection_init", "random"),
+            device=device,
+            in_dim=input_dim,
+            hidden_dim=hidden_dim,
+            depth=int(projection_cfg.get("depth", cfg.get("depth", 2))),
+            dropout=float(projection_cfg.get("dropout", cfg.get("dropout", 0.1))),
+            out_dim=latent_dim,
+        )
+    else:
+        if cfg.get("text_projection_init", "random") not in {"random", "scratch", "fresh"}:
+            raise RuntimeError(
+                "Corrected Stage 4 generative_text_to_ae_latent must be initialized fresh. "
+                "Set legacy_contrastive_initialized_stage4=True to reproduce the old path."
+            )
+        text_projector = build_generative_text_to_ae_latent(
+            device=device,
+            in_dim=input_dim,
+            hidden_dim=hidden_dim,
+            latent_dim=latent_dim,
+        )
+    stage3_init_report = {
+        "stage3_checkpoint": cfg.get("stage3_contrastive_checkpoint", ""),
+        "loaded_tensors": 0,
+        "projector_name": projector_name,
+        "legacy_contrastive_initialized_stage4": legacy_stage4,
+        "note": "Corrected Stage 4 initializes the generative text-to-AE-latent projector fresh and does not load Stage 3 contrastive text projection tensors.",
+    }
+    if legacy_stage4 and cfg.get("stage3_contrastive_checkpoint"):
         stage3_payload = torch.load(cfg["stage3_contrastive_checkpoint"], map_location="cpu", weights_only=False)
         stage3_state = stage3_payload.get("text_proj") or stage3_payload.get("text_projection") or {}
         current_state = text_projector.state_dict()
@@ -531,6 +687,17 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             "note": "Stage 4 projection is run-specific; compatible tensors from the matching Stage 3 text projection are used as initialization.",
         }
     architecture_report["matching_stage3_text_projection_initialization"] = stage3_init_report
+    architecture_report["corrected_stage4_projector"] = {
+        "projector_name": projector_name,
+        "input_dim": input_dim,
+        "hidden_dim": hidden_dim,
+        "latent_dim": latent_dim,
+        "fresh_initialization": not legacy_stage4,
+        "loads_stage3_projection_tensors": bool(stage3_init_report.get("loaded_tensors", 0)),
+        "targets": "raw frozen-autoencoder latent",
+    }
+    if not legacy_stage4 and stage3_init_report["loaded_tensors"] != 0:
+        raise RuntimeError("Corrected Stage 4 must not load Stage 3 contrastive projector tensors")
     preflight = preflight_batch_size(autoencoder, text_projector, target_shape, cfg, device)
     cfg = dict(cfg)
     cfg["batch_size"] = int(preflight["selected_batch_size"])
@@ -554,6 +721,19 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     architecture_report["domain_filter_report"] = domain_report
     out_dir = Path(cfg.get("output_dir", "experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain"))
     out_dir.mkdir(parents=True, exist_ok=True)
+    trainability_report = {
+        "autoencoder_encoder_trainable_parameters": int(sum(p.numel() for p in autoencoder.encoder.parameters() if p.requires_grad)),
+        "autoencoder_decoder_trainable_parameters": int(sum(p.numel() for p in autoencoder.decoder.parameters() if p.requires_grad)),
+        "generative_text_to_ae_latent_trainable_parameters": int(sum(p.numel() for p in text_projector.parameters() if p.requires_grad)),
+        "stage3_contrastive_projector_part_of_training": False,
+        "stage3_brain_encoder_part_of_training": False,
+        "status": "passed",
+    }
+    if trainability_report["autoencoder_encoder_trainable_parameters"] or trainability_report["autoencoder_decoder_trainable_parameters"]:
+        trainability_report["status"] = "failed"
+        raise RuntimeError(f"Corrected Stage 4 freeze check failed: {trainability_report}")
+    with (out_dir / "stage4_trainability_report.json").open("w") as f:
+        json.dump(trainability_report, f, indent=2)
     with (out_dir / "stage4_architecture_compatibility_report.json").open("w") as f:
         json.dump(architecture_report, f, indent=2)
     if domain_report:
@@ -576,11 +756,28 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
 
     train_loader, val_loader = make_loaders(int(cfg.get("batch_size", 4)))
     text_cache = _load_text_cache(cfg["text_embedding_cache"])
+    if not text_cache:
+        raise RuntimeError(f"Text embedding cache is empty: {cfg['text_embedding_cache']}")
+    dims = {int(v.numel()) for v in text_cache.values()}
+    if dims != {768}:
+        raise RuntimeError(f"Corrected Stage 4 requires all text cache vectors to be 768-d, got dimensions {sorted(dims)}")
+    stage3_semantic_models = None
+    if cfg.get("stage3_contrastive_checkpoint"):
+        stage3_semantic_models = load_stage3_contrastive_models(cfg["stage3_contrastive_checkpoint"], device)
     optimizer = torch.optim.AdamW(text_projector.parameters(), lr=float(cfg.get("lr", 1e-4)), weight_decay=float(cfg.get("weight_decay", 1e-4)))
     loss_cfg = _loss_cfg(cfg)
     ckpt = CheckpointManager(
         cfg.get("checkpoint_dir", "experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain/checkpoints"),
-        maximize={"val_loss": False},
+        maximize={
+            "val_loss": False,
+            "val_latent_mse": False,
+            "val_reconstruction_mse": False,
+            "val_spatial_corr": True,
+            "val_top5_dice": True,
+            "val_generation_normalized_auc": True,
+            "generation_top5_dice": True,
+            "generation_spatial_correlation": True,
+        },
     )
     history = []
     use_amp = bool(cfg.get("amp", device.type == "cuda"))
@@ -593,11 +790,13 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     include_voxel_auroc = bool(cfg.get("include_voxel_auroc", False))
     last_val_metrics: dict[str, float] = {}
     max_epochs = int(cfg.get("epochs", 3))
+    generation_auc_val_interval = int(cfg.get("generation_auc_val_interval", 5))
     early_stopping = bool(cfg.get("early_stopping", True))
-    early_metric = str(cfg.get("early_stopping_metric", "val_loss"))
+    early_metric = str(cfg.get("early_stopping_metric", "val_generation_normalized_auc"))
+    early_mode = str(cfg.get("early_stopping_mode", "max" if "auc" in early_metric or "corr" in early_metric or "dice" in early_metric else "min"))
     early_patience = int(cfg.get("early_stopping_patience", 25))
     early_min_delta = float(cfg.get("early_stopping_min_delta", 0.0))
-    best_early_value = float("inf")
+    best_early_value = -float("inf") if early_mode == "max" else float("inf")
     bad_val_checks = 0
     stop_reason = "max_epochs"
     runtime_candidates = sorted(
@@ -646,6 +845,22 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                     show_progress=bool(cfg.get("progress", True)),
                     progress_desc=f"epoch {epoch} val",
                 )
+                if stage3_semantic_models is not None and (
+                    epoch == 1 or epoch % generation_auc_val_interval == 0 or epoch == max_epochs
+                ):
+                    stage3_brain_encoder, stage3_text_projection = stage3_semantic_models
+                    last_val_metrics.update(
+                        generation_semantic_auc(
+                            autoencoder,
+                            text_projector,
+                            stage3_brain_encoder,
+                            stage3_text_projection,
+                            val_ds,
+                            text_cache,
+                            cfg,
+                            device,
+                        )
+                    )
         except BaseException as exc:
             if not (runtime_batch_fallback and device.type == "cuda" and _is_cuda_oom(exc)):
                 raise
@@ -674,13 +889,16 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         history.append(row)
         payload = {
             "text_projector": text_projector.state_dict(),
+            "generative_text_to_ae_latent": text_projector.state_dict(),
             "config": cfg,
             "history": history,
             "epoch": epoch,
             "target_shape": target_shape,
+            "projector_name": projector_name,
             "early_stopping": {
                 "enabled": early_stopping,
                 "metric": early_metric,
+                "mode": early_mode,
                 "patience": early_patience,
                 "min_delta": early_min_delta,
                 "bad_val_checks": bad_val_checks,
@@ -690,27 +908,45 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         ckpt.save_last(payload)
         if val_metrics:
             ckpt.maybe_save_best("val_loss", val_metrics.get("loss", float("inf")), payload)
+            ckpt.maybe_save_best("val_latent_mse", val_metrics.get("latent_mse", float("inf")), payload)
+            ckpt.maybe_save_best("val_reconstruction_mse", val_metrics.get("reconstruction_mse", float("inf")), payload)
+            ckpt.maybe_save_best("val_spatial_corr", val_metrics.get("spatial_corr", -1.0), payload)
+            ckpt.maybe_save_best("val_top5_dice", val_metrics.get("top5_dice", 0.0), payload)
+            if "generation_mean_normalized_auc" in val_metrics:
+                ckpt.maybe_save_best(
+                    "val_generation_normalized_auc",
+                    val_metrics.get("generation_mean_normalized_auc", 0.0),
+                    payload,
+                )
             ckpt.maybe_save_best("generation_top5_dice", val_metrics.get("top5_dice", 0.0), payload)
             ckpt.maybe_save_best("generation_spatial_correlation", val_metrics.get("spatial_corr", -1.0), payload)
             if early_stopping:
                 metric_key = early_metric[4:] if early_metric.startswith("val_") else early_metric
-                current = float(val_metrics.get(metric_key, math.inf))
-                if current < best_early_value - early_min_delta:
-                    best_early_value = current
-                    bad_val_checks = 0
+                if metric_key not in val_metrics:
+                    current = float("nan")
                 else:
-                    bad_val_checks += 1
-                if bad_val_checks >= early_patience:
-                    stop_reason = f"early_stopping:{early_metric}"
-                    print({
-                        "early_stopping": True,
-                        "epoch": epoch,
-                        "metric": early_metric,
-                        "best_value": best_early_value,
-                        "current_value": current,
-                        "bad_val_checks": bad_val_checks,
-                    })
-                    break
+                    current = float(val_metrics[metric_key])
+                    improved = (
+                        current > best_early_value + early_min_delta
+                        if early_mode == "max"
+                        else current < best_early_value - early_min_delta
+                    )
+                    if improved:
+                        best_early_value = current
+                        bad_val_checks = 0
+                    else:
+                        bad_val_checks += 1
+                    if bad_val_checks >= early_patience:
+                        stop_reason = f"early_stopping:{early_metric}"
+                        print({
+                            "early_stopping": True,
+                            "epoch": epoch,
+                            "metric": early_metric,
+                            "best_value": best_early_value,
+                            "current_value": current,
+                            "bad_val_checks": bad_val_checks,
+                        })
+                        break
         print(row)
         epoch += 1
     json.dump(cfg, open(out_dir / "text_to_brain_config.json", "w"), indent=2)
@@ -732,10 +968,12 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             f,
             indent=2,
         )
-    best_path = ckpt.out_dir / "best_val_loss.pt"
+    best_path = ckpt.out_dir / "best_val_generation_normalized_auc.pt"
+    if not best_path.exists():
+        best_path = ckpt.out_dir / "best_val_loss.pt"
     if best_path.exists():
         best_payload = torch.load(best_path, map_location=device, weights_only=False)
-        text_projector.load_state_dict(best_payload["text_projector"])
+        text_projector.load_state_dict(best_payload.get("generative_text_to_ae_latent") or best_payload["text_projector"])
         text_projector.eval()
     eval_specs: dict[str, str] = {}
     if cfg.get("test_jsonl"):
@@ -751,19 +989,33 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         eval_ds = UnifiedMapTextDataset(path)
         if cfg.get("domain"):
             filter_dataset_to_domain(eval_ds, str(cfg["domain"]))
-        generation_eval_rows.extend(
-            evaluate_generation_dataset(
+        eval_rows = evaluate_generation_dataset(
+            autoencoder,
+            text_projector,
+            eval_ds,
+            text_cache,
+            cfg,
+            device,
+            loss_cfg,
+            name,
+            metrics_device=metrics_device,
+        )
+        if stage3_semantic_models is not None:
+            stage3_brain_encoder, stage3_text_projection = stage3_semantic_models
+            semantic = generation_semantic_auc(
                 autoencoder,
                 text_projector,
+                stage3_brain_encoder,
+                stage3_text_projection,
                 eval_ds,
                 text_cache,
                 cfg,
                 device,
-                loss_cfg,
-                name,
-                metrics_device=metrics_device,
             )
-        )
+            for row in eval_rows:
+                if row.get("source") == "all":
+                    row.update(semantic)
+        generation_eval_rows.extend(eval_rows)
     if generation_eval_rows:
         with (out_dir / "generation_eval_metrics.json").open("w") as f:
             json.dump(generation_eval_rows, f, indent=2)
