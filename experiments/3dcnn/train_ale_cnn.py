@@ -377,7 +377,23 @@ class UnifiedContrastiveDataset(Dataset):
 
 def load_text_embedding_cache(path: str | Path) -> dict[str, torch.Tensor]:
     payload = torch.load(path, map_location="cpu", weights_only=False)
-    return {str(key): torch.as_tensor(value, dtype=torch.float32) for key, value in payload.items()}
+    if isinstance(payload, dict):
+        for key in ["embedding_by_text", "processed_embedding_by_text", "text_to_embedding", "embeddings_by_text"]:
+            if isinstance(payload.get(key), dict):
+                payload = payload[key]
+                break
+        else:
+            if torch.is_tensor(payload.get("embeddings")) and isinstance(payload.get("texts"), list):
+                embeddings = payload["embeddings"].float().cpu()
+                texts = [str(text) for text in payload["texts"]]
+                payload = {text: embeddings[i] for i, text in enumerate(texts)}
+    if not isinstance(payload, dict):
+        raise TypeError(f"Unsupported text embedding cache format in {path}")
+    return {
+        str(key): torch.as_tensor(value, dtype=torch.float32).flatten()
+        for key, value in payload.items()
+        if torch.is_tensor(value) or isinstance(value, (list, tuple))
+    }
 
 
 def build_unified_dataset(args: argparse.Namespace):

@@ -63,6 +63,8 @@ __all__ = [
     "_load_atlas_free_cnn_volumes",
     "_load_atlas_free_cnn_rows",
     "_load_atlas_free_cnn_text_pairs",
+    "_load_atlas_free_cnn_normalized_specter2_cache",
+    "_load_atlas_free_cnn_normalized_specter2_embeddings",
     "_load_latent_ngram",
     "_load_ngram",
     "_load_kg_mesh_dataset",
@@ -653,6 +655,46 @@ def _load_atlas_free_cnn_text_pairs() -> pd.DataFrame:
     except Exception as exc:  # pragma: no cover
         print(f"pyarrow failed: {exc}, trying fastparquet...")
         return pd.read_parquet(pairs_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_atlas_free_cnn_normalized_specter2_cache() -> dict:
+    """Load the normalized SPECTER2 atlas-free CNN text cache.
+
+    The expected HuggingFace artifact is
+    ``text_embeddings/specter2_stage3_stage4_emptycentered_unitnorm.pt`` in
+    ``neurovlm/atlas_free_cnn_dataset``. Vectors are 768-dimensional SPECTER2
+    embeddings after empty-string centering and L2 unit normalization.
+    """
+
+    cache_path = _download_from_hf(
+        "neurovlm/atlas_free_cnn_dataset",
+        "text_embeddings/specter2_stage3_stage4_emptycentered_unitnorm.pt",
+    )
+    payload = torch.load(cache_path, weights_only=False, map_location="cpu")
+    if not isinstance(payload, dict) or not torch.is_tensor(payload.get("embeddings")):
+        raise TypeError("Expected normalized SPECTER2 cache to contain an 'embeddings' tensor.")
+    embeddings = payload["embeddings"].float().cpu()
+    if embeddings.ndim != 2 or embeddings.shape[1] != 768:
+        raise ValueError(f"Expected normalized SPECTER2 embeddings with shape N x 768, got {tuple(embeddings.shape)}")
+    if not torch.isfinite(embeddings).all():
+        raise ValueError("Normalized SPECTER2 cache contains NaNs or infinities.")
+    norms = embeddings.norm(dim=1)
+    if float((norms.sub(1).abs() <= 1e-3).float().mean()) < 0.999:
+        raise ValueError("Normalized SPECTER2 cache is not approximately unit-normalized.")
+    payload["embeddings"] = embeddings
+    return payload
+
+
+@lru_cache(maxsize=1)
+def _load_atlas_free_cnn_normalized_specter2_embeddings() -> Tuple[torch.Tensor, np.ndarray, dict]:
+    """Return normalized SPECTER2 embeddings, text IDs, and metadata."""
+
+    payload = _load_atlas_free_cnn_normalized_specter2_cache()
+    text_ids = np.asarray(payload.get("text_ids", []))
+    if len(text_ids) != int(payload["embeddings"].shape[0]):
+        raise ValueError("Normalized SPECTER2 cache text_ids length does not match embeddings.")
+    return payload["embeddings"], text_ids, payload.get("metadata", {})
 
 
 @lru_cache(maxsize=1)
