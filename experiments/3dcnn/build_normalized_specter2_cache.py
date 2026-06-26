@@ -33,9 +33,15 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
+try:
+    from tqdm.auto import tqdm
+except Exception:  # pragma: no cover - tqdm is optional
+    tqdm = None
+
 EXPECTED_DIM = 768
 DEFAULT_REPO_ID = "neurovlm/atlas_free_cnn_dataset"
-DEFAULT_ENCODER = "allenai/specter2_aug2023refresh_candidate"
+DEFAULT_ENCODER = "allenai/specter2_aug2023refresh"
+DEFAULT_ADAPTER = "adhoc_query"
 DEFAULT_OUTPUT_BASENAME = "specter2_stage3_stage4_emptycentered_unitnorm"
 EPSILON = 1e-12
 RANDOM_SEED = 20260626
@@ -395,6 +401,12 @@ def encode_texts_specter2(
 
     base_model, adapter_id, adapter_label = split_encoder_name(model_name, adapter_name)
     base_repo = f"{base_model}_base"
+    total_batches = (len(texts) + batch_size - 1) // batch_size
+    print(
+        f"Loading SPECTER2 encoder: base={base_repo} adapter={adapter_id or '<none>'} "
+        f"device={device} texts={len(texts):,} batch_size={batch_size} batches={total_batches:,}",
+        flush=True,
+    )
     tokenizer = AutoTokenizer.from_pretrained(base_repo)
     if adapter_id:
         model = AutoAdapterModel.from_pretrained(base_repo)
@@ -404,7 +416,10 @@ def encode_texts_specter2(
     torch_device = torch.device("cuda" if device == "auto" and torch.cuda.is_available() else "cpu" if device == "auto" else device)
     model = model.to(torch_device).eval()
     outputs = []
-    for start in range(0, len(texts), batch_size):
+    batch_starts = range(0, len(texts), batch_size)
+    if tqdm is not None:
+        batch_starts = tqdm(batch_starts, total=total_batches, desc="Encoding SPECTER2", unit="batch")
+    for batch_index, start in enumerate(batch_starts, start=1):
         batch = texts[start : start + batch_size]
         tokens = tokenizer(
             batch,
@@ -419,6 +434,9 @@ def encode_texts_specter2(
             hidden = model(**tokens).last_hidden_state
             pooled = hidden[:, 0].float().cpu()
         outputs.append(pooled)
+        if tqdm is None and (batch_index == 1 or batch_index % 25 == 0 or batch_index == total_batches):
+            encoded = min(start + len(batch), len(texts))
+            print(f"Encoded {encoded:,}/{len(texts):,} SPECTER2 texts ({batch_index:,}/{total_batches:,} batches)", flush=True)
     info = {
         "text_encoder_model_name": model_name,
         "base_model": base_repo,
@@ -633,7 +651,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-basename", default=DEFAULT_OUTPUT_BASENAME)
     parser.add_argument("--source-cache-filename", default="")
     parser.add_argument("--encoder-model", default=DEFAULT_ENCODER)
-    parser.add_argument("--adapter-name", default="")
+    parser.add_argument("--adapter-name", default=DEFAULT_ADAPTER)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--max-length", type=int, default=512)
@@ -715,6 +733,7 @@ def main() -> None:
     else:
         print("Rebuilding all embeddings because the source cache convention was not confidently verified.")
         all_texts = [rec["text"] for rec in records]
+        print(f"Starting full SPECTER2 rebuild for {len(all_texts):,} unique texts plus empty-string reference.", flush=True)
         raw_plus_empty, encoder_info = encode_texts_specter2(
             all_texts + [""],
             model_name=args.encoder_model,
@@ -728,7 +747,9 @@ def main() -> None:
         centered = raw.float() - empty_embedding.float().view(1, -1)
         convention = "rebuilt_raw_specter2"
 
+    print("Applying empty-string centering and L2 unit normalization.", flush=True)
     normalized = F.normalize(centered.float(), dim=1, eps=EPSILON).contiguous()
+    print("Validating normalized cache.", flush=True)
     validation = validate_output(records, map_rows, source_emb, centered, normalized)
 
     if empty_embedding is None:
@@ -770,8 +791,10 @@ def main() -> None:
 
     payload = build_payload(records, normalized, metadata)
     output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Saving normalized cache tensor to {paths['pt']}", flush=True)
     torch.save(payload, paths["pt"])
     metadata["output_checksum"] = sha256_file(paths["pt"])
+    print("Writing metadata, index, and validation sidecars.", flush=True)
     write_json(paths["metadata"], metadata)
     write_csv(paths["index"], prepare_index(records, normalized))
     validation.update(
