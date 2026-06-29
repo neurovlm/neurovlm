@@ -37,8 +37,8 @@ except ImportError:  # pragma: no cover
     tqdm = None
 
 
-REPO_DIR = Path(__file__).resolve().parents[2]
-THREEDCNN_DIR = Path(__file__).resolve().parent
+REPO_DIR = Path(__file__).resolve().parents[4]
+THREEDCNN_DIR = Path(__file__).resolve().parents[2]
 DRIVE_ROOT = Path(os.environ.get("NEUROVLM_DRIVE_ROOT", "/content/drive/MyDrive/neurovlm"))
 for path in [REPO_DIR / "src", THREEDCNN_DIR]:
     if str(path) not in sys.path:

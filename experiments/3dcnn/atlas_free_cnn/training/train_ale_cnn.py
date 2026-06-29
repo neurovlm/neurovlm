@@ -34,9 +34,11 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset, Subset
 import torch.nn.functional as F
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+REPO_DIR = Path(__file__).resolve().parents[4]
+THREEDCNN_DIR = Path(__file__).resolve().parents[2]
+for path in [THREEDCNN_DIR, REPO_DIR / "src"]:
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from neurovlm.gnn.ale_cnn import ALE3DCNNEncoder, ALEFlatMLPEncoder, ALEResNet3DEncoder, count_parameters
 from neurovlm.gnn.ale_dataset import ALEPreprocessConfig, ALEVolumeDataset, build_or_load_ale_cache

@@ -7,8 +7,11 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+REPO_DIR = Path(__file__).resolve().parents[4]
+THREEDCNN_DIR = Path(__file__).resolve().parents[2]
+for path in [THREEDCNN_DIR, REPO_DIR / "src"]:
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from neurovlm.gnn.ale_dataset import ALEPreprocessConfig, build_or_load_ale_cache
 

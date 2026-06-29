@@ -16,14 +16,17 @@ import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+REPO_DIR = Path(__file__).resolve().parents[4]
+THREEDCNN_DIR = Path(__file__).resolve().parents[2]
+for path in [THREEDCNN_DIR, REPO_DIR / "src"]:
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
 from atlas_free_cnn.training.generation_losses import (
     GenerationLossConfig,
 )
-from experiments.train_ale_cnn import build_dataset, which_device
+from atlas_free_cnn.training.train_ale_cnn import build_dataset, which_device
 from neurovlm.gnn.ale_cnn import ALE3DCNNAutoEncoder, count_parameters
 from neurovlm.gnn.model import TextProjHead
 
