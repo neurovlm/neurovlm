@@ -86,6 +86,7 @@ def create_stage2_stage3_stage4_run_dir(
     *,
     prefix: str = "stage2_stage3_stage4",
     overwrite: bool = False,
+    branch_stage_dirs: tuple[str, ...] | list[str] | None = ("stage2", "stage3", "stage4"),
 ) -> dict[str, str]:
     """Create a downstream-only run directory.
 
@@ -119,7 +120,7 @@ def create_stage2_stage3_stage4_run_dir(
         ("03_neurovault", "specialized_mixed_to_neurovault"),
     ]:
         for branch in ["baseline_mixed_stage1a", specialized]:
-            for stage in ["stage2", "stage3", "stage4"]:
+            for stage in branch_stage_dirs or ():
                 (run_dir / domain / branch / stage).mkdir(parents=True, exist_ok=True)
         (run_dir / domain / "comparison").mkdir(parents=True, exist_ok=True)
     return {key: str(value) for key, value in paths.items()}
@@ -260,8 +261,23 @@ def _stage_dirs_for_run(run: Path) -> dict[str, str]:
     return STAGE_DIRS
 
 
-def _downstream_stage_dirs(run: Path, stage_name: str) -> list[Path]:
-    if stage_name == "stage3":
+def _downstream_stage_dirs(
+    run: Path,
+    stage_name: str,
+    *,
+    layout: str | None = None,
+    include_legacy_stage4: bool = False,
+) -> list[Path]:
+    if layout in {"normalized_specter", "6a_normalized_specter"}:
+        if stage_name == "stage3":
+            patterns = ["[0-9][0-9]_*/*/stage3_normalized_specter"]
+        elif stage_name == "stage4":
+            patterns = ["[0-9][0-9]_*/*/corrected_stage4_normalized_specter"]
+            if include_legacy_stage4:
+                patterns.append("[0-9][0-9]_*/*/legacy_contrastive_initialized_stage4_normalized_specter")
+        else:
+            patterns = [f"[0-9][0-9]_*/*/{stage_name}"]
+    elif stage_name == "stage3":
         patterns = ["[0-9][0-9]_*/*/stage3*"]
     elif stage_name == "stage4":
         patterns = ["[0-9][0-9]_*/*/stage4", "[0-9][0-9]_*/*/*stage4*"]
@@ -281,14 +297,32 @@ def _downstream_stage_dirs(run: Path, stage_name: str) -> list[Path]:
 def write_status_report(
     run_dir: str | Path,
     requested: dict[str, bool],
+    *,
+    layout: str | None = None,
+    include_legacy_stage4: bool = False,
 ) -> list[dict[str, Any]]:
     run = Path(run_dir)
     stage_dirs = _stage_dirs_for_run(run)
-    stage3_requested = bool(requested.get("stage3", requested.get("stage3_rerun", requested.get("stage3_contrastive", False))))
-    stage4_requested = bool(requested.get("stage4", requested.get("stage4_text_to_brain", False)))
+    stage3_requested = bool(
+        requested.get(
+            "stage3_normalized_specter",
+            requested.get("stage3", requested.get("stage3_rerun", requested.get("stage3_contrastive", False))),
+        )
+    )
+    stage4_requested = bool(
+        requested.get(
+            "corrected_stage4_normalized_specter",
+            requested.get("stage4", requested.get("stage4_text_to_brain", False)),
+        )
+    )
     stage5_requested = bool(requested.get("stage5", requested.get("stage5_generation_eval", False)))
-    stage3_dirs = _downstream_stage_dirs(run, "stage3")
-    stage4_dirs = _downstream_stage_dirs(run, "stage4")
+    stage3_dirs = _downstream_stage_dirs(run, "stage3", layout=layout)
+    stage4_dirs = _downstream_stage_dirs(
+        run,
+        "stage4",
+        layout=layout,
+        include_legacy_stage4=include_legacy_stage4,
+    )
     stage3_status = (
         _combine_stage_statuses(
             "stage3",
