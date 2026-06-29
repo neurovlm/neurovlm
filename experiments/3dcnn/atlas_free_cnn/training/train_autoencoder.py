@@ -32,7 +32,7 @@ except ImportError:  # pragma: no cover
     yaml = None
 
 from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
-from atlas_free_cnn.pipeline_outputs import git_info
+from atlas_free_cnn.pipeline_outputs import AE_SELECTION_TO_FILE, git_info
 from atlas_free_cnn.training.autoencoder_losses import AutoencoderLossConfig, reconstruction_loss
 from atlas_free_cnn.training.checkpointing import CheckpointManager
 from atlas_free_cnn.training.datasets import UnifiedMapTextDataset
@@ -749,25 +749,19 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         ckpt.save_last(payload)
         ckpt.save("last_cnn_autoencoder.pt", payload)
         if val_metrics:
-            ckpt.maybe_save_best("val_loss", float(val_metrics.get("loss", math.inf)), payload)
-            ckpt.maybe_save_best("spatial_corr", float(val_metrics.get("spatial_corr", -1.0)), payload)
-            ckpt.maybe_save_best("top1_dice", float(val_metrics.get("top1_dice", 0.0)), payload)
-            ckpt.maybe_save_best("top5_dice", float(val_metrics.get("top5_dice", 0.0)), payload)
-            ckpt.maybe_save_best("foreground_mse", float(val_metrics.get("foreground_mse", math.inf)), payload)
+            _improved = {
+                "val_loss": ckpt.maybe_save_best("val_loss", float(val_metrics.get("loss", math.inf)), payload),
+                "spatial_corr": ckpt.maybe_save_best("spatial_corr", float(val_metrics.get("spatial_corr", -1.0)), payload),
+                "top1_dice": ckpt.maybe_save_best("top1_dice", float(val_metrics.get("top1_dice", 0.0)), payload),
+                "top5_dice": ckpt.maybe_save_best("top5_dice", float(val_metrics.get("top5_dice", 0.0)), payload),
+                "foreground_mse": ckpt.maybe_save_best("foreground_mse", float(val_metrics.get("foreground_mse", math.inf)), payload),
+            }
             selection = str(cfg.get("checkpoint_selection_metric", "best_val_loss"))
             metric_name = selection.removeprefix("best_")
             if metric_name == "last":
                 ckpt.save("best_cnn_autoencoder.pt", payload)
-            elif metric_name in ckpt.best:
-                selected_value = {
-                    "val_loss": float(val_metrics.get("loss", math.inf)),
-                    "spatial_corr": float(val_metrics.get("spatial_corr", -1.0)),
-                    "top1_dice": float(val_metrics.get("top1_dice", 0.0)),
-                    "top5_dice": float(val_metrics.get("top5_dice", 0.0)),
-                    "foreground_mse": float(val_metrics.get("foreground_mse", math.inf)),
-                }.get(metric_name)
-                if selected_value is not None and float(ckpt.best[metric_name]) == float(selected_value):
-                    ckpt.save("best_cnn_autoencoder.pt", payload)
+            elif _improved.get(metric_name):
+                ckpt.save("best_cnn_autoencoder.pt", payload)
             if early_stopping:
                 metric_key = early_metric[4:] if early_metric.startswith("val_") else early_metric
                 current = float(val_metrics.get(metric_key, math.inf))
@@ -790,8 +784,14 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         print(row)
     with (out_dir / "history.json").open("w") as f:
         json.dump(history, f, indent=2)
-    _write_csv(metrics_dir / "train_history.csv", [_flatten_history_row(row) for row in history])
-    _write_csv(metrics_dir / "val_history.csv", [_flatten_history_row(row) for row in history])
+    _write_csv(metrics_dir / "train_history.csv", [
+        {k: v for k, v in _flatten_history_row(row).items() if k == "epoch" or k.startswith("train_")}
+        for row in history
+    ])
+    _write_csv(metrics_dir / "val_history.csv", [
+        {k: v for k, v in _flatten_history_row(row).items() if k == "epoch" or k.startswith("val_")}
+        for row in history
+    ])
     _write_csv(metrics_dir / "source_sampling_history.csv", sampling_history)
     with (out_dir / "training_stop.json").open("w") as f:
         json.dump(
@@ -809,6 +809,12 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         )
 
     eval_rows = []
+    if bool(cfg.get("final_eval", True)):
+        _selection_ckpt = checkpoint_dir / AE_SELECTION_TO_FILE.get(
+            str(cfg.get("checkpoint_selection_metric", "best_val_loss")), "best_val_loss.pt"
+        )
+        if _selection_ckpt.exists():
+            _load_model_checkpoint_for_eval(model, _selection_ckpt, device)
     for split_name, ds in [("train", train_ds), ("val", val_ds), ("test", test_ds)]:
         if ds is not None and bool(cfg.get("final_eval", True)):
             eval_rows.extend(evaluate_by_source(model, ds, cfg, device, split_name))

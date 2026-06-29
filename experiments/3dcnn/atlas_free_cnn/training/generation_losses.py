@@ -99,10 +99,9 @@ def hard_topk_mask(x: torch.Tensor, k_percent: float, mask: torch.Tensor | None 
     flat = x.masked_fill(~valid, -torch.inf).flatten(1)
     valid_counts = valid.flatten(1).sum(dim=1).clamp_min(1)
     k = torch.clamp((valid_counts.float() * float(k_percent)).ceil().long(), min=1)
-    out = torch.zeros_like(flat, dtype=torch.bool)
-    for i in range(flat.shape[0]):
-        idx = torch.topk(flat[i], int(k[i].item())).indices
-        out[i, idx] = True
+    sorted_idx = torch.argsort(flat, dim=1, descending=True)
+    rank = torch.argsort(sorted_idx, dim=1)
+    out = rank < k.unsqueeze(1)
     return out.view_as(x) & valid
 
 
@@ -172,6 +171,7 @@ def hard_topk_dice(
 class GenerationLossConfig:
     lambda_recon: float = 1.0
     lambda_latent: float = 0.0
+    lambda_latent_cosine: float = 0.0
     lambda_dice: float = 0.0
     lambda_topk: float = 0.0
     lambda_corr: float = 0.0
@@ -215,19 +215,20 @@ def combined_generation_loss(
         alpha=cfg.recon_alpha,
         gamma=cfg.recon_gamma,
     )
-    parts["soft_dice"] = soft_dice_loss(pred_active, target, mask=mask)
-    parts["topk_overlap"] = topk_overlap_loss(pred_active, target, mask=mask)
-    parts["spatial_corr"] = spatial_correlation_loss(pred_active, target, mask=mask)
+    total = cfg.lambda_recon * parts["weighted_recon"]
+    if cfg.lambda_dice:
+        parts["soft_dice"] = soft_dice_loss(pred_active, target, mask=mask)
+        total = total + cfg.lambda_dice * parts["soft_dice"]
+    if cfg.lambda_topk:
+        parts["topk_overlap"] = topk_overlap_loss(pred_active, target, mask=mask)
+        total = total + cfg.lambda_topk * parts["topk_overlap"]
+    if cfg.lambda_corr:
+        parts["spatial_corr"] = spatial_correlation_loss(pred_active, target, mask=mask)
+        total = total + cfg.lambda_corr * parts["spatial_corr"]
     if brain_z is not None and text_z is not None and cfg.lambda_latent:
         parts["latent_alignment"] = latent_alignment_loss(text_z, brain_z)
+        total = total + cfg.lambda_latent * parts["latent_alignment"]
     else:
         parts["latent_alignment"] = pred_active.sum() * 0.0
-    total = (
-        cfg.lambda_recon * parts["weighted_recon"]
-        + cfg.lambda_dice * parts["soft_dice"]
-        + cfg.lambda_topk * parts["topk_overlap"]
-        + cfg.lambda_corr * parts["spatial_corr"]
-        + cfg.lambda_latent * parts["latent_alignment"]
-    )
     parts["total"] = total
     return total, parts

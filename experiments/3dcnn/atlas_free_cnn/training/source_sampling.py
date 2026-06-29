@@ -17,6 +17,8 @@ def canonical_source(row: dict[str, Any]) -> str:
         return "neurovault"
     if source.startswith("nilearn"):
         return "nilearn"
+    if source.startswith("network"):
+        return "networks"
     return source or "unknown"
 
 

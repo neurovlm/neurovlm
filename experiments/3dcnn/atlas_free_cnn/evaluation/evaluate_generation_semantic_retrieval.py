@@ -35,10 +35,10 @@ def main() -> None:
         torch.load(args.positive_mask, map_location="cpu", weights_only=False),
     )
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    json.dump(metrics, open(args.output, "w"), indent=2)
+    with Path(args.output).open("w") as f:
+        json.dump(metrics, f, indent=2)
     print(json.dumps(metrics, indent=2))
 
 
 if __name__ == "__main__":
     main()
-

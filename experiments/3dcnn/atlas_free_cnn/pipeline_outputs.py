@@ -22,6 +22,14 @@ STAGE_DIRS = {
     "final": "07_final_comparison",
 }
 
+DOWNSTREAM_STAGE_DIRS = {
+    "metadata": "00_run_metadata",
+    "upstream_stage1_selection": "00_upstream_stage1_selection",
+    "stage4": "03_stage4_text_to_brain_generation",
+    "stage5": "04_stage5_generation_eval",
+    "final": "05_all_domain_comparison",
+}
+
 AE_SELECTION_TO_FILE = {
     "best_val_loss": "best_val_loss.pt",
     "best_spatial_corr": "best_spatial_corr.pt",
@@ -182,8 +190,16 @@ def detect_stage_status(
         ok = any(path.glob("*/checkpoints/best_*.pt"))
         metrics = any(path.glob("*/metrics/reconstruction_summary_by_source.csv"))
     elif stage_name == "stage3":
-        ok = (path / "checkpoints" / "best_contrastive.pt").exists() or (path / "checkpoints" / "best_ale_cnn.pt").exists()
-        metrics = _valid_json(path / "metrics" / "test_metrics.json") or _valid_json(path / "eval_results.json")
+        ok = (
+            (path / "checkpoints" / "best_contrastive.pt").exists()
+            or (path / "checkpoints" / "best_ale_cnn.pt").exists()
+            or (path / "checkpoints" / "best_val_normalized_recall_auc.pt").exists()
+        )
+        metrics = (
+            _valid_json(path / "metrics" / "test_metrics.json")
+            or _valid_json(path / "test_metrics.json")
+            or _valid_json(path / "eval_results.json")
+        )
         ok = ok or metrics
     elif stage_name == "stage4":
         ok = any(path.glob("checkpoints/*.pt"))
@@ -229,8 +245,37 @@ def _combine_stage_statuses(stage_name: str, requested: bool, statuses: list[dic
     return {"stage": stage_name, "status": "requested but skipped", "warnings": ["No expected output files were found."]}
 
 
+def _is_downstream_stage2_stage3_stage4_run(run: Path) -> bool:
+    return (
+        (run / DOWNSTREAM_STAGE_DIRS["final"]).exists()
+        or (run / DOWNSTREAM_STAGE_DIRS["upstream_stage1_selection"]).exists()
+        or any(run.glob("[0-9][0-9]_*/*/stage3*"))
+        or any(run.glob("[0-9][0-9]_*/*/*stage4*"))
+    )
+
+
+def _stage_dirs_for_run(run: Path) -> dict[str, str]:
+    if _is_downstream_stage2_stage3_stage4_run(run):
+        return {**STAGE_DIRS, **DOWNSTREAM_STAGE_DIRS}
+    return STAGE_DIRS
+
+
 def _downstream_stage_dirs(run: Path, stage_name: str) -> list[Path]:
-    return sorted(path for path in run.glob("[0-9][0-9]_*/*/stage*") if path.name == stage_name)
+    if stage_name == "stage3":
+        patterns = ["[0-9][0-9]_*/*/stage3*"]
+    elif stage_name == "stage4":
+        patterns = ["[0-9][0-9]_*/*/stage4", "[0-9][0-9]_*/*/*stage4*"]
+    else:
+        patterns = [f"[0-9][0-9]_*/*/{stage_name}"]
+    paths: list[Path] = []
+    seen: set[str] = set()
+    for pattern in patterns:
+        for path in sorted(run.glob(pattern)):
+            key = str(path)
+            if path.is_dir() and key not in seen:
+                seen.add(key)
+                paths.append(path)
+    return paths
 
 
 def write_status_report(
@@ -238,36 +283,51 @@ def write_status_report(
     requested: dict[str, bool],
 ) -> list[dict[str, Any]]:
     run = Path(run_dir)
+    stage_dirs = _stage_dirs_for_run(run)
+    stage3_requested = bool(requested.get("stage3", requested.get("stage3_rerun", requested.get("stage3_contrastive", False))))
+    stage4_requested = bool(requested.get("stage4", requested.get("stage4_text_to_brain", False)))
+    stage5_requested = bool(requested.get("stage5", requested.get("stage5_generation_eval", False)))
     stage3_dirs = _downstream_stage_dirs(run, "stage3")
     stage4_dirs = _downstream_stage_dirs(run, "stage4")
     stage3_status = (
         _combine_stage_statuses(
             "stage3",
-            requested.get("stage3", False),
+            stage3_requested,
             [detect_stage_status("stage3", requested=True, stage_dir=path) for path in stage3_dirs],
         )
         if stage3_dirs
-        else detect_stage_status("stage3", requested=requested.get("stage3", False), stage_dir=run / STAGE_DIRS["stage3"])
+        else detect_stage_status("stage3", requested=stage3_requested, stage_dir=run / stage_dirs["stage3"])
     )
     stage4_status = (
         _combine_stage_statuses(
             "stage4",
-            requested.get("stage4", False),
+            stage4_requested,
             [detect_stage_status("stage4", requested=True, stage_dir=path) for path in stage4_dirs],
         )
         if stage4_dirs
-        else detect_stage_status("stage4", requested=requested.get("stage4", False), stage_dir=run / STAGE_DIRS["stage4"])
+        else detect_stage_status("stage4", requested=stage4_requested, stage_dir=run / stage_dirs["stage4"])
     )
+    stage5_status = detect_stage_status("stage5", requested=stage5_requested, stage_dir=run / stage_dirs["stage5"])
+    if (
+        stage5_requested
+        and stage5_status["status"] == "requested but skipped"
+        and any((path / "generation_eval_metrics.json").exists() for path in stage4_dirs)
+    ):
+        stage5_status = {
+            "stage": "stage5",
+            "status": "covered by stage4 trainer outputs",
+            "warnings": ["Generation semantic/spatial evaluation was written by Stage 4 trainer runs."],
+        }
     statuses = [
-        detect_stage_status("stage1", requested=requested.get("stage1", False), stage_dir=run / STAGE_DIRS["stage1"]),
-        detect_stage_status("stage1b", requested=requested.get("stage1b", False), stage_dir=run / STAGE_DIRS["stage1b"]),
+        detect_stage_status("stage1", requested=requested.get("stage1", False), stage_dir=run / stage_dirs["stage1"]),
+        detect_stage_status("stage1b", requested=requested.get("stage1b", False), stage_dir=run / stage_dirs["stage1b"]),
         stage3_status,
         stage4_status,
-        detect_stage_status("stage5", requested=requested.get("stage5", False), stage_dir=run / STAGE_DIRS["stage5"]),
+        stage5_status,
     ]
-    write_json(run / "00_run_metadata" / "run_status.json", statuses)
-    write_json(run / "07_final_comparison" / "final_model_card.json", {"run_dir": str(run), "stage_status": statuses})
-    csv_path = run / "00_run_metadata" / "run_status.csv"
+    write_json(run / stage_dirs["metadata"] / "run_status.json", statuses)
+    write_json(run / stage_dirs["final"] / "final_model_card.json", {"run_dir": str(run), "stage_status": statuses})
+    csv_path = run / stage_dirs["metadata"] / "run_status.csv"
     with csv_path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["stage", "status", "warnings"])
         writer.writeheader()

@@ -83,6 +83,7 @@ latent_alignment:
 loss:
   lambda_recon: 1.0
   lambda_latent: 1.0
+  lambda_latent_cosine: 0.0
   lambda_dice: 0.0
   lambda_topk: 0.0
   lambda_corr: 0.0

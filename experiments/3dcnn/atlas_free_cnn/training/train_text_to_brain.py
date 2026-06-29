@@ -30,6 +30,7 @@ except ImportError:  # pragma: no cover
     yaml = None
 
 from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
+from atlas_free_cnn.evaluation.stage4_semantic import evaluate_generation_semantic_loader
 from atlas_free_cnn.training.checkpointing import CheckpointManager
 from atlas_free_cnn.training.datasets import UnifiedMapTextDataset
 from atlas_free_cnn.training.generation_losses import GenerationLossConfig
@@ -48,25 +49,11 @@ from atlas_free_cnn.training.model_wrappers import (
     build_text_to_brain_projection,
     load_autoencoder_checkpoint,
 )
+from atlas_free_cnn.training.source_sampling import canonical_source
 from neurovlm.gnn.ale_cnn import count_parameters
-from neurovlm.metrics import bidirectional_retrieval_metrics
 
 
 TEXT_TO_BRAIN_BATCH_CANDIDATES = [4096, 3072, 2048, 1536, 1024, 768, 512, 384, 256, 192, 128, 96, 64]
-
-
-def canonical_source(row: dict[str, Any]) -> str:
-    source = str(row.get("source", "")).lower()
-    if source == "pubmed" or row.get("pmid"):
-        return "pubmed"
-    if source.startswith("neurovault"):
-        return "neurovault"
-    if source.startswith("nilearn"):
-        return "nilearn"
-    if source.startswith("network"):
-        return "networks"
-    return source or "unknown"
-
 
 class PrimaryTextVolumeCollator:
     """Use exactly one primary text per map for text-to-brain training."""
@@ -123,6 +110,7 @@ def _loss_cfg(cfg: dict[str, Any]) -> GenerationLossConfig:
     return GenerationLossConfig(
         lambda_recon=float(loss.get("lambda_recon", 1.0)),
         lambda_latent=float(loss.get("lambda_latent", 1.0)),
+        lambda_latent_cosine=float(loss.get("lambda_latent_cosine", 0.0)),
         lambda_dice=float(loss.get("lambda_dice", 0.0)),
         lambda_topk=float(loss.get("lambda_topk", 0.0)),
         lambda_corr=float(loss.get("lambda_corr", 0.0)),
@@ -284,12 +272,18 @@ def _lookup(cache: dict[str, torch.Tensor], texts: list[str]) -> torch.Tensor:
 
 
 def text_to_brain_loss(pred, target, brain_z, text_z, loss_cfg: GenerationLossConfig):
+    latent_cosine = F.cosine_similarity(text_z, brain_z.detach(), dim=1, eps=1e-8).mean()
     parts = {
         "latent_mse": F.mse_loss(text_z, brain_z.detach()),
-        "latent_cosine": F.cosine_similarity(text_z, brain_z.detach(), dim=1, eps=1e-8).mean(),
+        "latent_cosine": latent_cosine,
+        "latent_cosine_loss": 1.0 - latent_cosine,
         "reconstruction_mse": F.mse_loss(pred, target),
     }
-    total = loss_cfg.lambda_latent * parts["latent_mse"] + loss_cfg.lambda_recon * parts["reconstruction_mse"]
+    total = (
+        loss_cfg.lambda_latent * parts["latent_mse"]
+        + loss_cfg.lambda_latent_cosine * parts["latent_cosine_loss"]
+        + loss_cfg.lambda_recon * parts["reconstruction_mse"]
+    )
     if loss_cfg.recon_alpha > 0:
         parts["positive_weighted_mse"] = weighted_reconstruction_loss(
             pred,
@@ -404,8 +398,7 @@ def run_epoch(
             break
         x = batch["volume"].to(device)
         raw_text = _lookup(text_cache, batch["texts"]).to(device)
-        owners = batch["pos_mask"].float().argmax(dim=0).to(device)
-        target = x[owners]
+        target = x
         with torch.no_grad():
             with torch.cuda.amp.autocast(enabled=bool(use_amp and device.type == "cuda")):
                 brain_z = autoencoder.encoder(target)
@@ -504,7 +497,7 @@ def _stage3_encoder_arch(model_name: str | None) -> str:
         return "plain"
     if model_name == "ale_3dcnn_resnet":
         return "resnet"
-    return str(model_name)
+    raise ValueError(f"Unknown stage3 encoder model_name: {model_name!r}")
 
 
 def load_stage3_contrastive_models(stage3_checkpoint: str | Path, device: torch.device):
@@ -557,40 +550,19 @@ def generation_semantic_auc(
         collate_fn=collator,
         pin_memory=bool(cfg.get("pin_memory", device.type == "cuda")),
     )
-    generated_brain_embeddings = []
-    text_embeddings = []
-    matched_cosines = []
-    for batch in loader:
-        x = batch["volume"].to(device)
-        raw_text = _lookup(text_cache, batch["texts"]).to(device)
-        text_latent = generative_text_to_ae_latent(raw_text)
-        pred = autoencoder.decoder(text_latent)
-        generated_brain_embeddings.append(stage3_brain_encoder(pred.float()).cpu())
-        text_embeddings.append(stage3_text_projection(raw_text.float()).cpu())
-    generated = torch.cat(generated_brain_embeddings, dim=0)
-    text = torch.cat(text_embeddings, dim=0)
-    metrics = bidirectional_retrieval_metrics(text, generated, ks=(1, 5, 10, 50))
-    text_n = F.normalize(text.float(), dim=1, eps=1e-8)
-    gen_n = F.normalize(generated.float(), dim=1, eps=1e-8)
-    sim = text_n @ gen_n.T
-    matched = sim.diag()
-    if sim.shape[0] > 1:
-        shuffled = sim[torch.arange(sim.shape[0]), torch.roll(torch.arange(sim.shape[0]), shifts=1)]
-        shuffled_mean = float(shuffled.mean().item())
-    else:
-        shuffled_mean = float("nan")
-    return {
-        "generation_text_to_brain_normalized_auc": metrics["t2i_normalized_k_recall_curve_auc"],
-        "generation_brain_to_text_normalized_auc": metrics["i2t_normalized_k_recall_curve_auc"],
-        "generation_mean_normalized_auc": metrics["mean_normalized_k_recall_curve_auc"],
-        "generation_normalized_auc": metrics["mean_normalized_k_recall_curve_auc"],
-        "generation_matched_contrastive_cosine": float(matched.mean().item()),
-        "generation_shuffled_contrastive_cosine": shuffled_mean,
-        "generation_recall@1": metrics["mean_recall@1"],
-        "generation_recall@5": metrics["mean_recall@5"],
-        "generation_recall@10": metrics["mean_recall@10"],
-        "generation_recall@50": metrics["mean_recall@50"],
-    }
+    return evaluate_generation_semantic_loader(
+        autoencoder,
+        generative_text_to_ae_latent,
+        stage3_brain_encoder,
+        stage3_text_projection,
+        loader,
+        text_cache,
+        device,
+        evaluator_text_cache=text_cache,
+        prefix="generation",
+        include_raw=True,
+        include_clamped=True,
+    )
 
 
 def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -796,6 +768,8 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     early_mode = str(cfg.get("early_stopping_mode", "max" if "auc" in early_metric or "corr" in early_metric or "dice" in early_metric else "min"))
     early_patience = int(cfg.get("early_stopping_patience", 25))
     early_min_delta = float(cfg.get("early_stopping_min_delta", 0.0))
+    early_metric_key = early_metric[4:] if early_metric.startswith("val_") else early_metric
+    early_metric_requires_generation_auc = "generation" in early_metric_key and "auc" in early_metric_key
     best_early_value = -float("inf") if early_mode == "max" else float("inf")
     bad_val_checks = 0
     stop_reason = "max_epochs"
@@ -845,9 +819,13 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                     show_progress=bool(cfg.get("progress", True)),
                     progress_desc=f"epoch {epoch} val",
                 )
-                if stage3_semantic_models is not None and (
-                    epoch == 1 or epoch % generation_auc_val_interval == 0 or epoch == max_epochs
-                ):
+                run_semantic_auc = (
+                    epoch == 1
+                    or epoch % generation_auc_val_interval == 0
+                    or epoch == max_epochs
+                    or (early_stopping and early_metric_requires_generation_auc)
+                )
+                if stage3_semantic_models is not None and run_semantic_auc:
                     stage3_brain_encoder, stage3_text_projection = stage3_semantic_models
                     last_val_metrics.update(
                         generation_semantic_auc(
@@ -901,6 +879,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 "mode": early_mode,
                 "patience": early_patience,
                 "min_delta": early_min_delta,
+                "generation_auc_forced_each_validation": bool(early_metric_requires_generation_auc),
                 "bad_val_checks": bad_val_checks,
                 "best_value": best_early_value,
             },
@@ -921,11 +900,10 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             ckpt.maybe_save_best("generation_top5_dice", val_metrics.get("top5_dice", 0.0), payload)
             ckpt.maybe_save_best("generation_spatial_correlation", val_metrics.get("spatial_corr", -1.0), payload)
             if early_stopping:
-                metric_key = early_metric[4:] if early_metric.startswith("val_") else early_metric
-                if metric_key not in val_metrics:
+                if early_metric_key not in val_metrics:
                     current = float("nan")
                 else:
-                    current = float(val_metrics[metric_key])
+                    current = float(val_metrics[early_metric_key])
                     improved = (
                         current > best_early_value + early_min_delta
                         if early_mode == "max"
@@ -949,9 +927,12 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                         break
         print(row)
         epoch += 1
-    json.dump(cfg, open(out_dir / "text_to_brain_config.json", "w"), indent=2)
-    json.dump(preflight, open(out_dir / "preflight.json", "w"), indent=2)
-    json.dump(history, open(out_dir / "history.json", "w"), indent=2)
+    with (out_dir / "text_to_brain_config.json").open("w") as f:
+        json.dump(cfg, f, indent=2)
+    with (out_dir / "preflight.json").open("w") as f:
+        json.dump(preflight, f, indent=2)
+    with (out_dir / "history.json").open("w") as f:
+        json.dump(history, f, indent=2)
     with (out_dir / "training_stop.json").open("w") as f:
         json.dump(
             {
@@ -959,8 +940,10 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 "epochs_completed": len(history),
                 "early_stopping": early_stopping,
                 "early_stopping_metric": early_metric,
+                "early_stopping_metric_key": early_metric_key,
                 "early_stopping_patience": early_patience,
                 "early_stopping_min_delta": early_min_delta,
+                "generation_auc_forced_each_validation": bool(early_metric_requires_generation_auc),
                 "best_early_value": best_early_value,
                 "final_batch_size": int(cfg.get("batch_size", 0)),
                 "runtime_batch_fallbacks": cfg.get("runtime_batch_fallbacks", []),

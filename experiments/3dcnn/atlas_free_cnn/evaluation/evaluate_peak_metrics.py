@@ -68,7 +68,8 @@ def main() -> None:
     affine = np.asarray(json.load(open(args.affine_json)), dtype=float)
     metrics = evaluate_peak_metrics(pred, pmids, affine)
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    json.dump(metrics, open(args.output, "w"), indent=2)
+    with Path(args.output).open("w") as f:
+        json.dump(metrics, f, indent=2)
     print(json.dumps(metrics, indent=2))
 
 
