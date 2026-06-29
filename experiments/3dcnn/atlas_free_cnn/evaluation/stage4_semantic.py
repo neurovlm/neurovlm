@@ -154,6 +154,19 @@ def semantic_retrieval_metrics(
     return out
 
 
+def stage4_metric_aliases(metrics: dict[str, Any], *, prefix: str = "generation") -> dict[str, Any]:
+    """Return stable notebook/report column names for Stage 4 semantic metrics."""
+
+    return {
+        "raw_strict_auc": metrics.get(f"{prefix}_raw_strict_map_mean_normalized_auc", ""),
+        "clamped_strict_auc": metrics.get(f"{prefix}_clamped_strict_map_mean_normalized_auc", metrics.get(f"{prefix}_mean_normalized_auc", "")),
+        "same_text_group_auc": metrics.get(f"{prefix}_clamped_same_text_group_mean_normalized_auc", ""),
+        "publication_group_auc": metrics.get(f"{prefix}_clamped_publication_group_mean_normalized_auc", ""),
+        "matched_cosine": metrics.get(f"{prefix}_clamped_matched_contrastive_cosine", metrics.get(f"{prefix}_matched_contrastive_cosine", "")),
+        "shuffled_cosine": metrics.get(f"{prefix}_clamped_shuffled_contrastive_cosine", metrics.get(f"{prefix}_shuffled_contrastive_cosine", "")),
+    }
+
+
 def stack_text_cache(text_cache: dict[str, torch.Tensor], texts: Iterable[str]) -> torch.Tensor:
     text_list = [str(text) for text in texts]
     missing = [text for text in text_list if text not in text_cache]
@@ -499,6 +512,21 @@ def run_cross_eval(config: dict[str, Any]) -> list[dict[str, Any]]:
             )
             rows.append(
                 {
+                    "domain": stage4.get("domain", config.get("domain", "")),
+                    "branch": stage4.get("branch", stage4.get("branch_kind", "")),
+                    "generation_model_type": stage4.get("generation_model_type", stage4["name"]),
+                    "stage3_evaluator_type": evaluator.get("stage3_evaluator_type", evaluator["name"]),
+                    "text_preprocessing": evaluator.get("text_preprocessing", stage4.get("text_preprocessing", "")),
+                    **stage4_metric_aliases(metrics),
+                    "n_eval": metrics.get("semantic_eval_n", ""),
+                    "checkpoint_paths": json.dumps(
+                        {
+                            "stage4_checkpoint": stage4["checkpoint"],
+                            "stage3_evaluator_checkpoint": evaluator["checkpoint"],
+                            "autoencoder_checkpoint": stage4["autoencoder_checkpoint"],
+                        },
+                        sort_keys=True,
+                    ),
                     "stage4_model": stage4["name"],
                     "stage3_evaluator": evaluator["name"],
                     "stage4_checkpoint": stage4["checkpoint"],

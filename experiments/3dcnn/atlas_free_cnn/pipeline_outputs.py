@@ -10,6 +10,17 @@ import time
 from pathlib import Path
 from typing import Any
 
+from atlas_free_cnn.notebook_utils import (
+    CORRECTED_STAGE4_CHECKPOINT,
+    CORRECTED_STAGE4_DIRNAME,
+    DOMAIN_DIRS,
+    LEGACY_NORMALIZED_STAGE4_DIRNAME,
+    NORMALIZED_STAGE3_CHECKPOINT,
+    NORMALIZED_STAGE3_DIRNAME,
+    SPECIALIZED_BRANCHES,
+    six_branch_specs,
+)
+
 
 STAGE_DIRS = {
     "metadata": "00_run_metadata",
@@ -86,13 +97,17 @@ def create_stage2_stage3_stage4_run_dir(
     *,
     prefix: str = "stage2_stage3_stage4",
     overwrite: bool = False,
-    branch_stage_dirs: tuple[str, ...] | list[str] | None = ("stage2", "stage3", "stage4"),
+    branch_stage_dirs: tuple[str, ...] | list[str] | None = None,
+    create_legacy_branch_placeholders: bool = False,
 ) -> dict[str, str]:
     """Create a downstream-only run directory.
 
     Stage 1 training and checkpoint evaluation are upstream completed artifacts
     for this workflow, so this layout deliberately does not create Stage 1 or
-    Stage 1B training directories.
+    Stage 1B training directories. Branch-level ``stage2/``, ``stage3/``, and
+    ``stage4/`` placeholders are also skipped by default; pass
+    ``create_legacy_branch_placeholders=True`` or explicit ``branch_stage_dirs``
+    only for backward-compatible legacy notebooks.
     """
     base = Path(base_dir)
     stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -114,6 +129,9 @@ def create_stage2_stage3_stage4_run_dir(
     for path in paths.values():
         if isinstance(path, Path):
             path.mkdir(parents=True, exist_ok=True)
+    if branch_stage_dirs is None:
+        branch_stage_dirs = ("stage2", "stage3", "stage4") if create_legacy_branch_placeholders else ()
+
     for domain, specialized in [
         ("01_pubmed", "specialized_mixed_to_pubmed"),
         ("02_nilearn", "specialized_mixed_to_nilearn"),
@@ -184,6 +202,12 @@ def detect_stage_status(
     if not requested:
         return {"stage": stage_name, "status": "not requested", "warnings": []}
     warnings: list[str] = []
+    details: dict[str, Any] = {
+        "stage_dir": str(path),
+        "training_completed_on_drive": False,
+        "metrics_exported": False,
+        "checkpoints_in_export_zip": False,
+    }
     if stage_name == "stage1":
         ok = any((path / "checkpoints" / name).exists() for name in AE_SELECTION_TO_FILE.values())
         metrics = (path / "metrics" / "reconstruction_summary_by_source.csv").exists() or (path / "autoencoder_reconstruction_metrics.csv").exists()
@@ -191,25 +215,57 @@ def detect_stage_status(
         ok = any(path.glob("*/checkpoints/best_*.pt"))
         metrics = any(path.glob("*/metrics/reconstruction_summary_by_source.csv"))
     elif stage_name == "stage3":
-        ok = (
+        normalized_layout = path.name == NORMALIZED_STAGE3_DIRNAME
+        checkpoint = (
+            (path / "checkpoints" / NORMALIZED_STAGE3_CHECKPOINT)
+            if normalized_layout
+            else None
+        )
+        marker = path / "NORMALIZED_STAGE3_COMPLETE.json"
+        legacy_checkpoint_ok = (
             (path / "checkpoints" / "best_contrastive.pt").exists()
             or (path / "checkpoints" / "best_ale_cnn.pt").exists()
-            or (path / "checkpoints" / "best_val_normalized_recall_auc.pt").exists()
+            or (path / "checkpoints" / NORMALIZED_STAGE3_CHECKPOINT).exists()
         )
         metrics = (
             _valid_json(path / "metrics" / "test_metrics.json")
             or _valid_json(path / "test_metrics.json")
             or _valid_json(path / "eval_results.json")
         )
-        ok = ok or metrics
+        details["training_completed_on_drive"] = bool(marker.exists() or legacy_checkpoint_ok or metrics)
+        details["metrics_exported"] = bool(metrics)
+        details["checkpoints_in_export_zip"] = bool(checkpoint.exists() if checkpoint else legacy_checkpoint_ok)
+        if normalized_layout:
+            ok = bool((marker.exists() or details["checkpoints_in_export_zip"]) and metrics)
+            if ok and not details["checkpoints_in_export_zip"]:
+                warnings.append("Checkpoint file is absent from this export, but completion marker and metrics are present.")
+        else:
+            ok = legacy_checkpoint_ok or metrics
     elif stage_name == "stage4":
-        ok = any(path.glob("checkpoints/*.pt"))
+        corrected_layout = path.name == CORRECTED_STAGE4_DIRNAME
+        checkpoint = path / "checkpoints" / CORRECTED_STAGE4_CHECKPOINT
+        semantic_metrics = (path / "generation_eval_metrics.json").exists()
         metrics = (
-            (path / "generation_eval_metrics.json").exists()
-            or (path / "history.json").exists()
-            or any(path.glob("metrics/*metrics*.json"))
-            or any(path.glob("metrics/*history*.csv"))
+            semantic_metrics
+            if corrected_layout
+            else (
+                (path / "generation_eval_metrics.json").exists()
+                or (path / "history.json").exists()
+                or any(path.glob("metrics/*metrics*.json"))
+                or any(path.glob("metrics/*history*.csv"))
+            )
         )
+        training_stop = path / "training_stop.json"
+        generic_checkpoint_ok = any(path.glob("checkpoints/*.pt"))
+        details["training_completed_on_drive"] = bool(training_stop.exists() or generic_checkpoint_ok)
+        details["metrics_exported"] = bool(metrics)
+        details["checkpoints_in_export_zip"] = bool(checkpoint.exists() if corrected_layout else generic_checkpoint_ok)
+        if corrected_layout:
+            ok = bool(training_stop.exists() and metrics)
+            if ok and not details["checkpoints_in_export_zip"]:
+                warnings.append("Checkpoint file is absent from this export, but training_stop.json and metrics are present.")
+        else:
+            ok = generic_checkpoint_ok
     elif stage_name == "stage5":
         ok = _valid_json(path / "metrics" / "generation_eval_metrics.json")
         metrics = ok and ((path / "generated_maps" / "predictions").exists() or (path / "metrics" / "generated_vs_target_metrics_all_rows.csv").exists())
@@ -224,7 +280,7 @@ def detect_stage_status(
     else:
         status = "requested but skipped"
         warnings.append("No expected output files were found.")
-    return {"stage": stage_name, "status": status, "warnings": warnings}
+    return {"stage": stage_name, "status": status, "warnings": warnings, **details}
 
 
 def _combine_stage_statuses(stage_name: str, requested: bool, statuses: list[dict[str, Any]]) -> dict[str, Any]:
@@ -235,15 +291,36 @@ def _combine_stage_statuses(stage_name: str, requested: bool, statuses: list[dic
 
     successful = [row for row in statuses if row["status"] == "ran successfully"]
     partial = [row for row in statuses if row["status"] == "ran but missing expected outputs"]
+    warning_lines = []
+    for row in statuses:
+        for warning in row.get("warnings", []):
+            warning_lines.append(f"{Path(row.get('stage_dir', '')).parent.name or row.get('stage_dir', '')}: {warning}")
     if len(successful) == len(statuses):
-        return {"stage": stage_name, "status": "ran successfully", "warnings": []}
+        return {
+            "stage": stage_name,
+            "status": "ran successfully",
+            "warnings": warning_lines,
+            "expected_runs": len(statuses),
+            "completed_runs": len(successful),
+            "runs": statuses,
+        }
     if successful or partial:
         return {
             "stage": stage_name,
             "status": "ran but missing expected outputs",
-            "warnings": [f"{len(successful)} of {len(statuses)} expected runs completed successfully."],
+            "warnings": [f"{len(successful)} of {len(statuses)} expected runs completed successfully.", *warning_lines],
+            "expected_runs": len(statuses),
+            "completed_runs": len(successful),
+            "runs": statuses,
         }
-    return {"stage": stage_name, "status": "requested but skipped", "warnings": ["No expected output files were found."]}
+    return {
+        "stage": stage_name,
+        "status": "requested but skipped",
+        "warnings": ["No expected output files were found."],
+        "expected_runs": len(statuses),
+        "completed_runs": 0,
+        "runs": statuses,
+    }
 
 
 def _is_downstream_stage2_stage3_stage4_run(run: Path) -> bool:
@@ -294,6 +371,30 @@ def _downstream_stage_dirs(
     return paths
 
 
+def _expected_downstream_stage_dirs(
+    run: Path,
+    stage_name: str,
+    *,
+    layout: str | None = None,
+    include_legacy_stage4: bool = False,
+) -> list[Path]:
+    if layout not in {"normalized_specter", "6a_normalized_specter", "6a_normalized_corrected"}:
+        return _downstream_stage_dirs(run, stage_name, layout=layout, include_legacy_stage4=include_legacy_stage4)
+    if stage_name not in {"stage3", "stage4"}:
+        return _downstream_stage_dirs(run, stage_name, layout=layout, include_legacy_stage4=include_legacy_stage4)
+    dirname = NORMALIZED_STAGE3_DIRNAME if stage_name == "stage3" else CORRECTED_STAGE4_DIRNAME
+    paths = [
+        run / spec["domain_dir"] / spec["branch"] / dirname
+        for spec in six_branch_specs()
+    ]
+    if stage_name == "stage4" and include_legacy_stage4:
+        paths.extend(
+            run / spec["domain_dir"] / spec["branch"] / LEGACY_NORMALIZED_STAGE4_DIRNAME
+            for spec in six_branch_specs()
+        )
+    return paths
+
+
 def write_status_report(
     run_dir: str | Path,
     requested: dict[str, bool],
@@ -316,8 +417,8 @@ def write_status_report(
         )
     )
     stage5_requested = bool(requested.get("stage5", requested.get("stage5_generation_eval", False)))
-    stage3_dirs = _downstream_stage_dirs(run, "stage3", layout=layout)
-    stage4_dirs = _downstream_stage_dirs(
+    stage3_dirs = _expected_downstream_stage_dirs(run, "stage3", layout=layout)
+    stage4_dirs = _expected_downstream_stage_dirs(
         run,
         "stage4",
         layout=layout,
@@ -363,10 +464,16 @@ def write_status_report(
     write_json(run / stage_dirs["final"] / "final_model_card.json", {"run_dir": str(run), "stage_status": statuses})
     csv_path = run / stage_dirs["metadata"] / "run_status.csv"
     with csv_path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["stage", "status", "warnings"])
+        writer = csv.DictWriter(f, fieldnames=["stage", "status", "warnings", "expected_runs", "completed_runs"])
         writer.writeheader()
         for row in statuses:
-            writer.writerow({**row, "warnings": "; ".join(row.get("warnings", []))})
+            writer.writerow({
+                "stage": row.get("stage", ""),
+                "status": row.get("status", ""),
+                "warnings": "; ".join(row.get("warnings", [])),
+                "expected_runs": row.get("expected_runs", ""),
+                "completed_runs": row.get("completed_runs", ""),
+            })
     return statuses
 
 
