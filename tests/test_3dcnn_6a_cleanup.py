@@ -25,7 +25,10 @@ from atlas_free_cnn.notebook_utils import (
     NORMALIZED_STAGE3_CHECKPOINT,
     NORMALIZED_STAGE3_DIRNAME,
     locked_stage1_checkpoint_selection,
+    resolve_text_embedding_cache,
     six_branch_specs,
+    text_embedding_metadata_fields,
+    validate_legacy_specter_cache,
     validate_normalized_specter_cache,
 )
 from atlas_free_cnn.pipeline_outputs import write_status_report
@@ -133,6 +136,37 @@ def test_normalized_cache_validation_requires_768_unit_vectors_and_text_ids(tmp_
     assert audit["stats"]["dim"] == 768
     assert abs(audit["stats"]["norm_mean"] - 1.0) < 1e-6
     assert audit["stats"]["required_text_ids_present"] is True
+
+
+def test_text_embedding_resolver_records_normalized_and_legacy_conventions(tmp_path: Path) -> None:
+    normalized = resolve_text_embedding_cache("normalized_specter2", local_cache_dir=tmp_path, env_override=False)
+    legacy = resolve_text_embedding_cache("legacy_specter2", local_cache_dir=tmp_path, env_override=False)
+
+    assert normalized["cache_name"] == "specter2_stage3_stage4_emptycentered_unitnorm.pt"
+    assert normalized["hf_path"] == "text_embeddings/specter2_stage3_stage4_emptycentered_unitnorm.pt"
+    assert normalized["metadata_hf_path"] == "text_embeddings/specter2_stage3_stage4_emptycentered_unitnorm_metadata.json"
+    assert normalized["preprocessing"] == "empty_string_centered_l2_unit_normalized"
+    assert normalized["expect_unit_norm"] is True
+
+    assert legacy["cache_name"] == "specter_text_cache.pt"
+    assert legacy["hf_path"] == "text_embeddings/specter_text_cache.pt"
+    assert legacy["preprocessing"] == "legacy_existing_cache_convention"
+    assert legacy["expect_unit_norm"] is False
+
+
+def test_legacy_cache_validation_does_not_require_unit_norm_and_records_checksum(tmp_path: Path) -> None:
+    cache_path = tmp_path / "specter_text_cache.pt"
+    torch.save({"alpha": torch.ones(768), "beta": torch.arange(768).float()}, cache_path)
+
+    audit = validate_legacy_specter_cache(cache_path, required_texts={"alpha", "beta"})
+    spec = resolve_text_embedding_cache("legacy_specter2", local_cache_dir=tmp_path, env_override=False)
+    metadata = text_embedding_metadata_fields(spec, audit)
+
+    assert audit["stats"]["dim"] == 768
+    assert audit["stats"]["required_texts_present"] is True
+    assert audit["stats"]["sha256"]
+    assert metadata["text_embedding_cache_checksum"] == audit["stats"]["sha256"]
+    assert metadata["expect_unit_norm"] is False
 
 
 class FakeDecoder(nn.Module):

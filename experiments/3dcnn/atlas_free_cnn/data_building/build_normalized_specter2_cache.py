@@ -775,7 +775,7 @@ def main() -> None:
         "title_abstract_formatting": "exact manifest primary positive_texts[0].text; no additional separator rewriting",
         "empty_string_embedding_checksum": empty_checksum,
         "preprocessing_order": ["subtract_empty_string_embedding", "l2_unit_normalize"],
-        "text_embedding_preprocessing": "specter2_empty_string_centered_unitnorm",
+        "text_embedding_preprocessing": "empty_string_centered_l2_unit_normalized",
         "epsilon": EPSILON,
         "number_of_unique_texts": len(records),
         "domain_counts": dict(Counter(d for rec in records for d in rec["source_domains"])),
