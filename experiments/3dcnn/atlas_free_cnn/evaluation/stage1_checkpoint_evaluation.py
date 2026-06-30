@@ -67,11 +67,33 @@ CHECKPOINT_FILENAMES = [
     "best_top1_dice.pt",
     "best_top5_dice.pt",
     "best_foreground_mse.pt",
+    "best_top10_dice.pt",
     "best_cnn_autoencoder.pt",
     "last.pt",
     "last_cnn_autoencoder.pt",
     "best_generation_spatial_correlation.pt",
     "best_generation_top5_dice.pt",
+]
+STAGE1A_SELECTION_METRIC = "held_out_source_normalized_spatial_corr"
+STAGE1A_SELECTION_POLICY = (
+    "Rank within each Stage 1A recipe by source-normalized spatial correlation, "
+    "then source-normalized top-5 Dice, then source-normalized foreground MSE, "
+    "then source-normalized reconstruction MSE."
+)
+STAGE1A_RECIPE_BEST_COLUMNS = [
+    "recipe",
+    "best_checkpoint_name",
+    "best_checkpoint_path",
+    "selection_metric",
+    "selection_metric_value",
+    "mse",
+    "foreground_mse",
+    "spatial_corr",
+    "top1_dice",
+    "top5_dice",
+    "top10_dice",
+    "epoch",
+    "heldout_split_fingerprint",
 ]
 DOMAIN_TO_DATA_MODE = {
     "mixed": "mixed",
@@ -425,6 +447,7 @@ def saved_val_score(metric_name: str, val_metrics: dict[str, Any]) -> Any:
         "spatial_corr": "spatial_corr",
         "top1_dice": "top1_dice",
         "top5_dice": "top5_dice",
+        "top10_dice": "top10_dice",
         "foreground_mse": "foreground_mse",
     }
     key = aliases.get(metric_name, metric_name)
@@ -919,6 +942,10 @@ def ensure_expected_output_files(output_root: Path, registry: dict[str, dict[str
     stage1a_path = output_root / "01_stage1a/mixed_stage1a_checkpoint_selection.csv"
     if not stage1a_path.exists():
         write_csv(stage1a_path, [])
+    for filename in ["stage1a_all_checkpoint_eval.csv", "stage1a_recipe_best_checkpoint_comparison.csv"]:
+        path = output_root / "01_stage1a" / filename
+        if not path.exists():
+            write_csv(path, [])
 
 
 def append_warning(existing: str, warning: str) -> str:
@@ -952,7 +979,11 @@ def base_comparison_prefix(
     }
 
 
-def minmax_normalize(rows: list[dict[str, Any]], key: str, *, higher_is_better: bool) -> dict[tuple[str, str], float]:
+def stage1a_row_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    return (str(row.get("variant", "")), str(row.get("checkpoint_name", "")), str(row.get("test_domain", "")))
+
+
+def minmax_normalize(rows: list[dict[str, Any]], key: str, *, higher_is_better: bool) -> dict[tuple[str, str, str], float]:
     vals = []
     row_keys = []
     for row in rows:
@@ -962,7 +993,7 @@ def minmax_normalize(rows: list[dict[str, Any]], key: str, *, higher_is_better: 
             continue
         if math.isfinite(val):
             vals.append(val)
-            row_keys.append((row["checkpoint_name"], row["test_domain"]))
+            row_keys.append(stage1a_row_key(row))
     if not vals:
         return {}
     lo, hi = min(vals), max(vals)
@@ -975,72 +1006,262 @@ def minmax_normalize(rows: list[dict[str, Any]], key: str, *, higher_is_better: 
     return out
 
 
-def create_stage1a_selection(comparison_rows: list[dict[str, Any]], output_root: Path) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+def stage1a_variants(registry: dict[str, dict[str, Any]] | None, comparison_rows: list[dict[str, Any]]) -> list[str]:
+    variants: list[str] = []
+    if registry:
+        variants.extend([variant for variant, spec in registry.items() if spec.get("stage") == "stage1a"])
+    for row in comparison_rows:
+        if row.get("stage") == "stage1a" and row.get("variant") not in variants:
+            variants.append(str(row.get("variant")))
+    return variants
+
+
+def stage1a_selection_sort_key(row: dict[str, Any]) -> tuple[float, float, float, float]:
+    return (
+        safe_float(row.get("mean_source_normalized_spatial_corr"), -1),
+        safe_float(row.get("mean_source_normalized_top5_dice"), -1),
+        safe_float(row.get("mean_source_normalized_foreground_mse"), -1),
+        safe_float(row.get("mean_source_normalized_reconstruction_mse"), -1),
+    )
+
+
+def stage1a_mixed_row(group: list[dict[str, Any]]) -> dict[str, Any]:
+    return next((r for r in group if r.get("test_domain") == "mixed"), group[0])
+
+
+def stage1a_checkpoint_eval_row(
+    recipe: str,
+    checkpoint_name: str,
+    group: list[dict[str, Any]],
+    *,
+    status: str,
+    error_message: str = "",
+) -> dict[str, Any]:
+    if not group:
+        return {
+            "recipe": recipe,
+            "checkpoint_name": checkpoint_name,
+            "checkpoint_path": "",
+            "selection_metric": STAGE1A_SELECTION_METRIC,
+            "selection_metric_value": "",
+            "mse": "",
+            "foreground_mse": "",
+            "spatial_corr": "",
+            "top1_dice": "",
+            "top5_dice": "",
+            "top10_dice": "",
+            "epoch": "",
+            "heldout_split_fingerprint": "",
+            "status": status,
+            "error_message": error_message,
+        }
+    mixed = stage1a_mixed_row(group)
+    return {
+        "recipe": recipe,
+        "checkpoint_name": checkpoint_name,
+        "checkpoint_path": mixed.get("checkpoint_path", ""),
+        "selection_metric": STAGE1A_SELECTION_METRIC,
+        "selection_metric_value": mixed.get("mean_source_normalized_spatial_corr", ""),
+        "mse": mixed.get("reconstruction_mse", ""),
+        "foreground_mse": mixed.get("foreground_mse", ""),
+        "spatial_corr": mixed.get("spatial_corr", ""),
+        "top1_dice": mixed.get("top1_dice", ""),
+        "top5_dice": mixed.get("top5_dice", ""),
+        "top10_dice": mixed.get("top10_dice", ""),
+        "epoch": mixed.get("checkpoint_epoch", ""),
+        "heldout_split_fingerprint": mixed.get("test_split_fingerprint", ""),
+        "status": status,
+        "error_message": error_message,
+    }
+
+
+def stage1a_recipe_best_row(recipe: str, row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "recipe": recipe,
+        "best_checkpoint_name": row.get("checkpoint_name", ""),
+        "best_checkpoint_path": row.get("checkpoint_path", ""),
+        "selection_metric": STAGE1A_SELECTION_METRIC,
+        "selection_metric_value": row.get("mean_source_normalized_spatial_corr", ""),
+        "mse": row.get("mse", ""),
+        "foreground_mse": row.get("foreground_mse", ""),
+        "spatial_corr": row.get("spatial_corr", ""),
+        "top1_dice": row.get("top1_dice", ""),
+        "top5_dice": row.get("top5_dice", ""),
+        "top10_dice": row.get("top10_dice", ""),
+        "epoch": row.get("epoch", ""),
+        "heldout_split_fingerprint": row.get("heldout_split_fingerprint", ""),
+        "selection_policy": STAGE1A_SELECTION_POLICY,
+        "rank_within_recipe": row.get("rank_within_recipe", ""),
+    }
+
+
+def stage1a_manifest_missing_rows(
+    variants: list[str],
+    manifest: list[dict[str, Any]] | None,
+    loaded_groups: dict[tuple[str, str], list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    manifest = manifest or []
+    for item in manifest:
+        if item.get("stage") != "stage1a":
+            continue
+        variant = str(item.get("variant", ""))
+        if variant not in variants:
+            continue
+        status = str(item.get("load_status", ""))
+        if status in {"manifest_ok", "loaded", "alias_copied"}:
+            continue
+        rows.append(
+            stage1a_checkpoint_eval_row(
+                variant,
+                str(item.get("checkpoint_name") or "missing_checkpoints"),
+                [],
+                status=status or "missing",
+                error_message=str(item.get("error_message", "")),
+            )
+        )
+    for variant in variants:
+        has_loaded = any(key[0] == variant for key in loaded_groups)
+        has_missing = any(row["recipe"] == variant for row in rows)
+        if not has_loaded and not has_missing:
+            rows.append(
+                stage1a_checkpoint_eval_row(
+                    variant,
+                    "missing_checkpoints",
+                    [],
+                    status="missing_run_or_checkpoints",
+                    error_message="No loadable Stage 1A checkpoints were evaluated for this recipe.",
+                )
+            )
+    return rows
+
+
+def create_stage1a_selection(
+    comparison_rows: list[dict[str, Any]],
+    output_root: Path,
+    registry: dict[str, dict[str, Any]] | None = None,
+    manifest: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    variants = stage1a_variants(registry, comparison_rows)
     rows = [
         r for r in comparison_rows
-        if r["variant"] == "mixed_baseline_raw_mse"
+        if r.get("stage") == "stage1a"
         and r.get("eval_scope") == "primary"
         and r.get("load_status") in {"loaded", "alias_copied"}
     ]
     if not rows:
+        missing_rows = stage1a_manifest_missing_rows(variants, manifest, {})
+        write_csv(output_root / "01_stage1a/stage1a_all_checkpoint_eval.csv", missing_rows)
+        write_csv(output_root / "01_stage1a/stage1a_recipe_best_checkpoint_comparison.csv", [])
         write_csv(output_root / "01_stage1a/mixed_stage1a_checkpoint_selection.csv", [])
         return [], None
+
     spatial_norm = minmax_normalize(rows, "spatial_corr", higher_is_better=True)
     top5_norm = minmax_normalize(rows, "top5_dice", higher_is_better=True)
     fg_norm = minmax_normalize(rows, "foreground_mse", higher_is_better=False)
     mse_norm = minmax_normalize(rows, "reconstruction_mse", higher_is_better=False)
-    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        grouped[row["checkpoint_name"]].append(row)
-    selection_rows = []
-    for checkpoint_name, group in grouped.items():
-        if any(r["alias_status"] == "alias" for r in group):
-            continue
-        key_vals = [(checkpoint_name, r["test_domain"]) for r in group]
+        grouped[(str(row["variant"]), str(row["checkpoint_name"]))].append(row)
+
+    selection_rows: list[dict[str, Any]] = []
+    all_eval_rows: list[dict[str, Any]] = []
+    for (recipe, checkpoint_name), group in grouped.items():
+        key_vals = [stage1a_row_key(r) for r in group]
         mean_spatial_norm = mean([spatial_norm.get(k, float("nan")) for k in key_vals])
         mean_top5_norm = mean([top5_norm.get(k, float("nan")) for k in key_vals])
         mean_fg_norm = mean([fg_norm.get(k, float("nan")) for k in key_vals])
         mean_mse_norm = mean([mse_norm.get(k, float("nan")) for k in key_vals])
-        selection_rows.append(
+        mixed = stage1a_mixed_row(group)
+        selection_row = {
+            "recipe": recipe,
+            "variant": recipe,
+            "checkpoint_name": checkpoint_name,
+            "checkpoint_path": mixed.get("checkpoint_path", group[0].get("checkpoint_path", "")),
+            "canonical_checkpoint_name": group[0].get("canonical_checkpoint_name", ""),
+            "checkpoint_epoch": group[0].get("checkpoint_epoch", ""),
+            "mean_source_normalized_spatial_corr": mean_spatial_norm,
+            "mean_source_normalized_top5_dice": mean_top5_norm,
+            "mean_source_normalized_foreground_mse": mean_fg_norm,
+            "mean_source_normalized_reconstruction_mse": mean_mse_norm,
+            "generalization_score": mean_spatial_norm + mean_top5_norm + 0.25 * mean_fg_norm + 0.10 * mean_mse_norm,
+            "mean_spatial_corr": mean_float(group, "spatial_corr"),
+            "mean_top5_dice": mean_float(group, "top5_dice"),
+            "mean_foreground_mse": mean_float(group, "foreground_mse"),
+            "mean_reconstruction_mse": mean_float(group, "reconstruction_mse"),
+            "mixed_spatial_corr": metric_for_domain(group, "mixed", "spatial_corr"),
+            "pubmed_spatial_corr": metric_for_domain(group, "pubmed", "spatial_corr"),
+            "nilearn_spatial_corr": metric_for_domain(group, "nilearn", "spatial_corr"),
+            "neurovault_spatial_corr": metric_for_domain(group, "neurovault", "spatial_corr"),
+            "mixed_top5_dice": metric_for_domain(group, "mixed", "top5_dice"),
+            "pubmed_top5_dice": metric_for_domain(group, "pubmed", "top5_dice"),
+            "nilearn_top5_dice": metric_for_domain(group, "nilearn", "top5_dice"),
+            "neurovault_top5_dice": metric_for_domain(group, "neurovault", "top5_dice"),
+            "expected_candidate": checkpoint_name == "best_spatial_corr.pt",
+            "selection_metric": STAGE1A_SELECTION_METRIC,
+            "selection_metric_value": mean_spatial_norm,
+            "mse": mixed.get("reconstruction_mse", ""),
+            "foreground_mse": mixed.get("foreground_mse", ""),
+            "spatial_corr": mixed.get("spatial_corr", ""),
+            "top1_dice": mixed.get("top1_dice", ""),
+            "top5_dice": mixed.get("top5_dice", ""),
+            "top10_dice": mixed.get("top10_dice", ""),
+            "epoch": mixed.get("checkpoint_epoch", ""),
+            "heldout_split_fingerprint": mixed.get("test_split_fingerprint", ""),
+            "status": "alias" if any(r.get("alias_status") == "alias" for r in group) else "evaluated",
+            "selection_policy": STAGE1A_SELECTION_POLICY,
+        }
+        eval_row = stage1a_checkpoint_eval_row(recipe, checkpoint_name, group, status=selection_row["status"])
+        eval_row.update(
             {
-                "checkpoint_name": checkpoint_name,
-                "checkpoint_path": group[0]["checkpoint_path"],
-                "canonical_checkpoint_name": group[0]["canonical_checkpoint_name"],
-                "checkpoint_epoch": group[0]["checkpoint_epoch"],
                 "mean_source_normalized_spatial_corr": mean_spatial_norm,
                 "mean_source_normalized_top5_dice": mean_top5_norm,
                 "mean_source_normalized_foreground_mse": mean_fg_norm,
                 "mean_source_normalized_reconstruction_mse": mean_mse_norm,
-                "generalization_score": mean_spatial_norm + mean_top5_norm + 0.25 * mean_fg_norm + 0.10 * mean_mse_norm,
-                "mean_spatial_corr": mean_float(group, "spatial_corr"),
-                "mean_top5_dice": mean_float(group, "top5_dice"),
-                "mean_foreground_mse": mean_float(group, "foreground_mse"),
-                "mean_reconstruction_mse": mean_float(group, "reconstruction_mse"),
-                "mixed_spatial_corr": metric_for_domain(group, "mixed", "spatial_corr"),
-                "pubmed_spatial_corr": metric_for_domain(group, "pubmed", "spatial_corr"),
-                "nilearn_spatial_corr": metric_for_domain(group, "nilearn", "spatial_corr"),
-                "neurovault_spatial_corr": metric_for_domain(group, "neurovault", "spatial_corr"),
-                "mixed_top5_dice": metric_for_domain(group, "mixed", "top5_dice"),
-                "pubmed_top5_dice": metric_for_domain(group, "pubmed", "top5_dice"),
-                "nilearn_top5_dice": metric_for_domain(group, "nilearn", "top5_dice"),
-                "neurovault_top5_dice": metric_for_domain(group, "neurovault", "top5_dice"),
-                "expected_candidate": checkpoint_name == "best_spatial_corr.pt",
+                "generalization_score": selection_row["generalization_score"],
+                "selection_policy": STAGE1A_SELECTION_POLICY,
             }
         )
-    selection_rows.sort(
-        key=lambda r: (
-            safe_float(r["mean_source_normalized_spatial_corr"], -1),
-            safe_float(r["mean_source_normalized_top5_dice"], -1),
-            safe_float(r["mean_source_normalized_foreground_mse"], -1),
-            safe_float(r["mean_source_normalized_reconstruction_mse"], -1),
-        ),
-        reverse=True,
-    )
-    for rank, row in enumerate(selection_rows, 1):
-        row["rank"] = rank
+        all_eval_rows.append(eval_row)
+        if selection_row["status"] != "alias":
+            selection_rows.append(selection_row)
+
+    all_eval_rows.extend(stage1a_manifest_missing_rows(variants, manifest, grouped))
+    selection_by_recipe: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in selection_rows:
+        selection_by_recipe[row["recipe"]].append(row)
+
+    recipe_best_rows = []
+    for recipe in variants:
+        recipe_rows = selection_by_recipe.get(recipe, [])
+        recipe_rows.sort(key=stage1a_selection_sort_key, reverse=True)
+        for rank, row in enumerate(recipe_rows, 1):
+            row["rank_within_recipe"] = rank
+            best_eval = next(
+                r for r in all_eval_rows
+                if r["recipe"] == recipe and r["checkpoint_name"] == row["checkpoint_name"]
+            )
+            best_eval["rank_within_recipe"] = rank
+            best_eval["is_recipe_best"] = rank == 1
+            if rank == 1:
+                recipe_best_rows.append(stage1a_recipe_best_row(recipe, best_eval))
+    for row in all_eval_rows:
+        row.setdefault("rank_within_recipe", "")
+        row.setdefault("is_recipe_best", False)
+
+    recipe_best_rows.sort(key=lambda r: safe_float(r.get("selection_metric_value"), -1), reverse=True)
+    for rank, row in enumerate(recipe_best_rows, 1):
+        row["recipe_comparison_rank"] = rank
+    all_eval_rows.sort(key=lambda r: (str(r.get("recipe")), safe_float(r.get("rank_within_recipe"), 1e9), str(r.get("checkpoint_name"))))
+
+    write_csv(output_root / "01_stage1a/stage1a_all_checkpoint_eval.csv", all_eval_rows)
+    write_csv(output_root / "01_stage1a/stage1a_recipe_best_checkpoint_comparison.csv", recipe_best_rows)
+
+    baseline_rows = selection_by_recipe.get("mixed_baseline_raw_mse", [])
     path = output_root / "01_stage1a/mixed_stage1a_checkpoint_selection.csv"
-    write_csv(path, selection_rows)
-    return selection_rows, selection_rows[0] if selection_rows else None
+    write_csv(path, baseline_rows)
+    return selection_rows, baseline_rows[0] if baseline_rows else None
 
 
 def create_stage1b_selection(
@@ -1230,7 +1451,14 @@ def create_selected_manifest(
     stage1a_rows: list[dict[str, Any]],
     stage1b_rows: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
-    expected_stage1a = next((r for r in stage1a_rows if r["checkpoint_name"] == "best_spatial_corr.pt"), None)
+    expected_stage1a = next(
+        (
+            r for r in stage1a_rows
+            if r.get("recipe", r.get("variant")) == "mixed_baseline_raw_mse"
+            and r["checkpoint_name"] == "best_spatial_corr.pt"
+        ),
+        None,
+    )
     selected: dict[str, Any] = {}
     if stage1a_selected:
         selected["mixed_stage1a"] = {
@@ -1423,17 +1651,22 @@ This directory contains evaluation-only outputs for saved Stage 1A and Stage 1B 
 Inspect these first:
 
 1. `04_final_selection/selected_stage2_checkpoints.json`
-2. `01_stage1a/mixed_stage1a_checkpoint_selection.csv`
-3. `02_stage1b/pubmed/pubmed_stage1b_checkpoint_selection.csv`
-4. `02_stage1b/nilearn/nilearn_stage1b_checkpoint_selection.csv`
-5. `02_stage1b/neurovault/neurovault_stage1b_checkpoint_selection.csv`
-6. `03_baseline_vs_specialized/*_ae_baseline_vs_specialized.csv`
-7. `00_metadata/checkpoint_manifest.csv` for aliases, load failures, epochs, and checksums.
+2. `01_stage1a/stage1a_recipe_best_checkpoint_comparison.csv`
+3. `01_stage1a/stage1a_all_checkpoint_eval.csv`
+4. `01_stage1a/mixed_stage1a_checkpoint_selection.csv`
+5. `02_stage1b/pubmed/pubmed_stage1b_checkpoint_selection.csv`
+6. `02_stage1b/nilearn/nilearn_stage1b_checkpoint_selection.csv`
+7. `02_stage1b/neurovault/neurovault_stage1b_checkpoint_selection.csv`
+8. `03_baseline_vs_specialized/*_ae_baseline_vs_specialized.csv`
+9. `00_metadata/checkpoint_manifest.csv` for aliases, load failures, epochs, and checksums.
+
+Each Stage 1A recipe was first checkpoint-selected on the same held-out split. The table compares the best checkpoint from each recipe.
 
 Ranking policy:
 
 - Stage 1A prioritizes source-normalized spatial correlation, then source-normalized top-5 Dice.
 - Foreground MSE and reconstruction MSE are secondary tie-breakers so background-dominated MSE does not control selection.
+- `01_stage1a/stage1a_all_checkpoint_eval.csv` keeps the per-recipe checkpoint diagnostics, including last-checkpoint rows when present.
 - Stage 1B keeps `best_top5_dice.pt` unless another checkpoint shows strictly better held-out top-5 Dice on the matching domain.
 
 The evaluator runs under `model.eval()` and `torch.inference_mode()`. It does not create optimizers, call backward, modify checkpoint files, or save trained weights.
@@ -1475,6 +1708,8 @@ def print_final_summary(
     for path in [
         output_root / "00_metadata/checkpoint_manifest.csv",
         output_root / "00_metadata/test_split_fingerprints.json",
+        output_root / "01_stage1a/stage1a_recipe_best_checkpoint_comparison.csv",
+        output_root / "01_stage1a/stage1a_all_checkpoint_eval.csv",
         output_root / "01_stage1a/mixed_stage1a_checkpoint_selection.csv",
         output_root / "02_stage1b/pubmed/pubmed_stage1b_checkpoint_selection.csv",
         output_root / "02_stage1b/nilearn/nilearn_stage1b_checkpoint_selection.csv",
@@ -1512,7 +1747,13 @@ def run_evaluation(eval_cfg: EvaluationConfig) -> Path:
     comparison_rows, load_failures = run_checkpoint_evaluation(eval_cfg, output_root, manifest, fingerprints)
     ensure_expected_output_files(output_root, eval_cfg.registry)
     load_failures.extend(manifest_failures)
-    stage1a_rows, stage1a_selected = create_stage1a_selection(comparison_rows, output_root)
+    manifest_for_selection = manifest + [r for r in manifest_failures if r not in manifest]
+    stage1a_rows, stage1a_selected = create_stage1a_selection(
+        comparison_rows,
+        output_root,
+        eval_cfg.registry,
+        manifest_for_selection,
+    )
     stage1b_rows = create_stage1b_selection(comparison_rows, output_root)
     baseline_vs_specialized = create_baseline_vs_specialized(output_root, eval_cfg.registry, stage1a_selected, stage1b_rows, eval_cfg)
     selected = create_selected_manifest(output_root, stage1a_selected, stage1a_rows, stage1b_rows)

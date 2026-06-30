@@ -13,11 +13,18 @@ from typing import Any
 from atlas_free_cnn.notebook_utils import (
     CORRECTED_STAGE4_CHECKPOINT,
     CORRECTED_STAGE4_DIRNAME,
+    CORRECTED_LEGACY_STAGE4_DIRNAME,
     DOMAIN_DIRS,
+    LEGACY_STAGE3_DIRNAME,
     NORMALIZED_STAGE3_CHECKPOINT,
     NORMALIZED_STAGE3_DIRNAME,
     SPECIALIZED_BRANCHES,
+    ae_branch_specs,
+    corrected_stage4_dirname_for_text_embedding_convention,
+    normalize_ae_branch_mode,
     six_branch_specs,
+    stage3_dirname_for_text_embedding_convention,
+    text_embedding_convention_dir_suffix,
 )
 
 
@@ -214,17 +221,21 @@ def detect_stage_status(
         ok = any(path.glob("*/checkpoints/best_*.pt"))
         metrics = any(path.glob("*/metrics/reconstruction_summary_by_source.csv"))
     elif stage_name == "stage3":
-        normalized_layout = path.name == NORMALIZED_STAGE3_DIRNAME
-        checkpoint = (
-            (path / "checkpoints" / NORMALIZED_STAGE3_CHECKPOINT)
-            if normalized_layout
-            else None
-        )
-        marker = path / "NORMALIZED_STAGE3_COMPLETE.json"
+        convention_layout = path.name in {NORMALIZED_STAGE3_DIRNAME, LEGACY_STAGE3_DIRNAME}
+        marker_names = [
+            "NORMALIZED_STAGE3_COMPLETE.json",
+            "STAGE3_NORMALIZED_SPECTER_COMPLETE.json",
+            "LEGACY_STAGE3_COMPLETE.json",
+            "STAGE3_LEGACY_SPECTER_COMPLETE.json",
+        ]
+        marker = next((path / name for name in marker_names if (path / name).exists()), path / marker_names[0])
+        # Priority: canonical best_val_normalized_recall_auc.pt first; legacy
+        # best_ale_cnn.pt and best_contrastive.pt are fallback aliases for older
+        # completed runs exported before the canonical name was standardised.
         legacy_checkpoint_ok = (
-            (path / "checkpoints" / "best_contrastive.pt").exists()
+            (path / "checkpoints" / NORMALIZED_STAGE3_CHECKPOINT).exists()
             or (path / "checkpoints" / "best_ale_cnn.pt").exists()
-            or (path / "checkpoints" / NORMALIZED_STAGE3_CHECKPOINT).exists()
+            or (path / "checkpoints" / "best_contrastive.pt").exists()
         )
         metrics = (
             _valid_json(path / "metrics" / "test_metrics.json")
@@ -233,15 +244,15 @@ def detect_stage_status(
         )
         details["training_completed_on_drive"] = bool(marker.exists() or legacy_checkpoint_ok or metrics)
         details["metrics_exported"] = bool(metrics)
-        details["checkpoints_in_export_zip"] = bool(checkpoint.exists() if checkpoint else legacy_checkpoint_ok)
-        if normalized_layout:
+        details["checkpoints_in_export_zip"] = bool(legacy_checkpoint_ok)
+        if convention_layout:
             ok = bool((marker.exists() or details["checkpoints_in_export_zip"]) and metrics)
             if ok and not details["checkpoints_in_export_zip"]:
                 warnings.append("Checkpoint file is absent from this export, but completion marker and metrics are present.")
         else:
             ok = legacy_checkpoint_ok or metrics
     elif stage_name == "stage4":
-        corrected_layout = path.name == CORRECTED_STAGE4_DIRNAME
+        corrected_layout = path.name in {CORRECTED_STAGE4_DIRNAME, CORRECTED_LEGACY_STAGE4_DIRNAME}
         checkpoint = path / "checkpoints" / CORRECTED_STAGE4_CHECKPOINT
         semantic_metrics = (path / "generation_eval_metrics.json").exists()
         metrics = (
@@ -342,12 +353,28 @@ def _downstream_stage_dirs(
     stage_name: str,
     *,
     layout: str | None = None,
+    text_embedding_convention: str | None = None,
 ) -> list[Path]:
-    if layout in {"normalized_specter", "6a_normalized_specter"}:
+    convention_layouts = {
+        "normalized_specter",
+        "6a_normalized_specter",
+        "6a_normalized_corrected",
+        "legacy_specter",
+        "6a_legacy_specter",
+    }
+    if text_embedding_convention is not None or layout in convention_layouts:
         if stage_name == "stage3":
-            patterns = ["[0-9][0-9]_*/*/stage3_normalized_specter"]
+            dirname = stage3_dirname_for_text_embedding_convention(
+                text_embedding_convention
+                or ("legacy_specter2" if layout in {"legacy_specter", "6a_legacy_specter"} else "normalized_specter2")
+            )
+            patterns = [f"[0-9][0-9]_*/*/{dirname}"]
         elif stage_name == "stage4":
-            patterns = ["[0-9][0-9]_*/*/corrected_stage4_normalized_specter"]
+            dirname = corrected_stage4_dirname_for_text_embedding_convention(
+                text_embedding_convention
+                or ("legacy_specter2" if layout in {"legacy_specter", "6a_legacy_specter"} else "normalized_specter2")
+            )
+            patterns = [f"[0-9][0-9]_*/*/{dirname}"]
         else:
             patterns = [f"[0-9][0-9]_*/*/{stage_name}"]
     elif stage_name == "stage3":
@@ -372,15 +399,30 @@ def _expected_downstream_stage_dirs(
     stage_name: str,
     *,
     layout: str | None = None,
+    text_embedding_convention: str | None = None,
+    ae_branch_mode: str = "mixed_and_specialized",
 ) -> list[Path]:
-    if layout not in {"normalized_specter", "6a_normalized_specter", "6a_normalized_corrected"}:
+    convention_layouts = {
+        "normalized_specter",
+        "6a_normalized_specter",
+        "6a_normalized_corrected",
+        "legacy_specter",
+        "6a_legacy_specter",
+    }
+    convention_layout = text_embedding_convention is not None or layout in convention_layouts
+    if not convention_layout:
         return _downstream_stage_dirs(run, stage_name, layout=layout)
     if stage_name not in {"stage3", "stage4"}:
-        return _downstream_stage_dirs(run, stage_name, layout=layout)
-    dirname = NORMALIZED_STAGE3_DIRNAME if stage_name == "stage3" else CORRECTED_STAGE4_DIRNAME
+        return _downstream_stage_dirs(run, stage_name, layout=layout, text_embedding_convention=text_embedding_convention)
+    convention = text_embedding_convention or ("legacy_specter2" if layout in {"legacy_specter", "6a_legacy_specter"} else "normalized_specter2")
+    dirname = (
+        stage3_dirname_for_text_embedding_convention(convention)
+        if stage_name == "stage3"
+        else corrected_stage4_dirname_for_text_embedding_convention(convention)
+    )
     paths = [
         run / spec["domain_dir"] / spec["branch"] / dirname
-        for spec in six_branch_specs()
+        for spec in ae_branch_specs(ae_branch_mode)
     ]
     return paths
 
@@ -390,24 +432,53 @@ def write_status_report(
     requested: dict[str, bool],
     *,
     layout: str | None = None,
+    text_embedding_convention: str | None = None,
+    ae_branch_mode: str = "mixed_and_specialized",
 ) -> list[dict[str, Any]]:
     run = Path(run_dir)
     stage_dirs = _stage_dirs_for_run(run)
+    ae_branch_mode = normalize_ae_branch_mode(ae_branch_mode)
+    expected_branch_runs = [spec["run"] for spec in ae_branch_specs(ae_branch_mode)]
+    effective_text_embedding_convention = text_embedding_convention
+    if effective_text_embedding_convention is None:
+        if layout in {"legacy_specter", "6a_legacy_specter"}:
+            effective_text_embedding_convention = "legacy_specter2"
+        elif layout in {"normalized_specter", "6a_normalized_specter", "6a_normalized_corrected"}:
+            effective_text_embedding_convention = "normalized_specter2"
+    convention_suffix = (
+        text_embedding_convention_dir_suffix(effective_text_embedding_convention)
+        if effective_text_embedding_convention is not None
+        else None
+    )
+    stage3_convention_key = f"stage3_{convention_suffix}" if convention_suffix else "stage3_normalized_specter"
+    stage4_convention_key = f"corrected_stage4_{convention_suffix}" if convention_suffix else "corrected_stage4_normalized_specter"
     stage3_requested = bool(
         requested.get(
-            "stage3_normalized_specter",
+            stage3_convention_key,
             requested.get("stage3", requested.get("stage3_rerun", requested.get("stage3_contrastive", False))),
         )
     )
     stage4_requested = bool(
         requested.get(
-            "corrected_stage4_normalized_specter",
+            stage4_convention_key,
             requested.get("stage4", requested.get("stage4_text_to_brain", False)),
         )
     )
     stage5_requested = bool(requested.get("stage5", requested.get("stage5_generation_eval", False)))
-    stage3_dirs = _expected_downstream_stage_dirs(run, "stage3", layout=layout)
-    stage4_dirs = _expected_downstream_stage_dirs(run, "stage4", layout=layout)
+    stage3_dirs = _expected_downstream_stage_dirs(
+        run,
+        "stage3",
+        layout=layout,
+        text_embedding_convention=effective_text_embedding_convention,
+        ae_branch_mode=ae_branch_mode,
+    )
+    stage4_dirs = _expected_downstream_stage_dirs(
+        run,
+        "stage4",
+        layout=layout,
+        text_embedding_convention=effective_text_embedding_convention,
+        ae_branch_mode=ae_branch_mode,
+    )
     stage3_status = (
         _combine_stage_statuses(
             "stage3",
@@ -426,6 +497,9 @@ def write_status_report(
         if stage4_dirs
         else detect_stage_status("stage4", requested=stage4_requested, stage_dir=run / stage_dirs["stage4"])
     )
+    for row in (stage3_status, stage4_status):
+        row["ae_branch_mode"] = ae_branch_mode
+        row["expected_branch_runs"] = expected_branch_runs
     stage5_status = detect_stage_status("stage5", requested=stage5_requested, stage_dir=run / stage_dirs["stage5"])
     if (
         stage5_requested
@@ -448,7 +522,7 @@ def write_status_report(
     write_json(run / stage_dirs["final"] / "final_model_card.json", {"run_dir": str(run), "stage_status": statuses})
     csv_path = run / stage_dirs["metadata"] / "run_status.csv"
     with csv_path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["stage", "status", "warnings", "expected_runs", "completed_runs"])
+        writer = csv.DictWriter(f, fieldnames=["stage", "status", "warnings", "expected_runs", "completed_runs", "ae_branch_mode"])
         writer.writeheader()
         for row in statuses:
             writer.writerow({
@@ -457,6 +531,7 @@ def write_status_report(
                 "warnings": "; ".join(row.get("warnings", [])),
                 "expected_runs": row.get("expected_runs", ""),
                 "completed_runs": row.get("completed_runs", ""),
+                "ae_branch_mode": row.get("ae_branch_mode", ""),
             })
     return statuses
 

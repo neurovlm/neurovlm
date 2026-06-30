@@ -12,6 +12,14 @@ Important paths:
 - `training/`: stable raw-MSE autoencoder and text-to-brain projection trainers.
 - `evaluation/`: generation/reconstruction metrics and generation evaluation.
 
+Notebook 5b Stage 1A checkpoint comparison writes two recipe-level tables under
+`01_stage1a/`: `stage1a_all_checkpoint_eval.csv` contains one row per evaluated
+checkpoint per Stage 1A recipe, and
+`stage1a_recipe_best_checkpoint_comparison.csv` compares only the best checkpoint
+selected within each recipe. Each Stage 1A recipe was first checkpoint-selected
+on the same held-out split. The table compares the best checkpoint from each
+recipe.
+
 For module-style commands from the repo root, use:
 
 ```bash

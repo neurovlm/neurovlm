@@ -55,6 +55,8 @@ from neurovlm.metrics import (
 from atlas_free_cnn.pipeline_outputs import select_ae_checkpoint
 from atlas_free_cnn.training.datasets import UnifiedMapTextDataset
 
+SAVE_LEGACY_STAGE3_CHECKPOINT_ALIASES = False
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train ALE 3D CNN on NeuroVLM PubMed pairs.")
@@ -155,18 +157,24 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--resume-from",
         default=None,
-        help="Resume contrastive training from a last_ale_cnn.pt checkpoint.",
+        help="Resume contrastive training from a last.pt checkpoint.",
     )
     p.add_argument("--comparison-file", default="runs/ale_model_comparison.csv")
-    p.add_argument("--save-plots", action="store_true", default=True)
+    p.add_argument("--save-plots", action="store_true", default=False)
     p.add_argument("--no-save-plots", dest="save_plots", action="store_false")
+    p.add_argument("--save-plots-during-training", dest="save_plots", action="store_true")
     p.add_argument("--umap", action="store_true", help="Save UMAP/PCA diagnostics.")
+    p.add_argument("--run-umap-during-training", dest="umap", action="store_true")
+    p.add_argument("--run-covariate-correlations", action="store_true", default=False)
     p.add_argument("--eval-neurovlm-baseline", action="store_true")
     p.add_argument("--semantic-eval", action="store_true", default=False)
     p.add_argument("--eval-resource-dir", default=None)
     p.add_argument("--mesh-json", default=None)
+    p.add_argument("--run-train-sanity-eval", action="store_true", default=False)
+    p.add_argument("--final-test-eval", dest="final_test_eval", action="store_true", default=True)
+    p.add_argument("--no-final-test-eval", dest="final_test_eval", action="store_false")
     p.add_argument("--train-sanity-n", type=int, default=512,
-                   help="Evaluate retrieval on this many training examples after training.")
+                   help="Evaluate retrieval on this many training examples after training when --run-train-sanity-eval is set.")
     return p.parse_args()
 
 
@@ -828,6 +836,16 @@ class ALETrainer:
             "lr_proj": [],
             "val_epoch": [],
         }
+        self.timing_profile: dict[str, object] = {
+            "data_cache_load_sec": 0.0,
+            "preflight_batch_size_sec": 0.0,
+            "train_epoch_sec": [],
+            "validation_eval_sec": [],
+            "generation_auc_eval_sec": [],
+            "artifact_save_sec": [],
+            "final_eval_sec": [],
+            "total_branch_sec": 0.0,
+        }
 
         n_text_trainable = sum(p.numel() for p in self.text_proj.parameters() if p.requires_grad)
         print(
@@ -1082,6 +1100,8 @@ class ALETrainer:
             )
             self.history["train_loss"].append(float(np.mean(losses)))
             self.history["epoch_time_sec"].append(float(epoch_time))
+            self.timing_profile["train_epoch_sec"].append({"epoch": int(epoch), "seconds": float(epoch_time)})
+            print(f"[timing] train_epoch epoch={epoch} seconds={epoch_time:.2f}", flush=True)
             self.history["peak_vram_mb"].append(float(peak_vram))
             self.history["lr_brain"].append(float(self.optimizer.param_groups[0]["lr"]))
             self.history["lr_proj"].append(
@@ -1089,7 +1109,11 @@ class ALETrainer:
             )
 
             if epoch % self.args.val_interval == 0:
+                val_start = time.perf_counter()
                 metrics, _, _ = self.evaluate(val_ds)
+                val_time = time.perf_counter() - val_start
+                self.timing_profile["validation_eval_sec"].append({"epoch": int(epoch), "seconds": float(val_time)})
+                print(f"[timing] validation_eval epoch={epoch} seconds={val_time:.2f}", flush=True)
                 self.history["val_epoch"].append(epoch)
                 for k, v in metrics.items():
                     self.history.setdefault(f"val_{k}", []).append(float(v))
@@ -1125,12 +1149,20 @@ class ALETrainer:
                     f"loss={self.history['train_loss'][-1]:.4f} time={epoch_time:.1f}s"
                 )
             last_completed_epoch = epoch
+            save_start = time.perf_counter()
             self.save_last(epoch=epoch, bad_checks=bad_checks)
+            save_time = time.perf_counter() - save_start
+            self.timing_profile["artifact_save_sec"].append({"epoch": int(epoch), "artifact": "last_checkpoint", "seconds": float(save_time)})
+            print(f"[timing] artifact_save epoch={epoch} artifact=last_checkpoint seconds={save_time:.2f}", flush=True)
             if should_stop:
                 break
 
+        save_start = time.perf_counter()
         self.save_best()
+        self.timing_profile["artifact_save_sec"].append({"artifact": "best_checkpoint", "seconds": float(time.perf_counter() - save_start)})
+        save_start = time.perf_counter()
         self.save_last(epoch=last_completed_epoch, bad_checks=bad_checks)
+        self.timing_profile["artifact_save_sec"].append({"artifact": "final_last_checkpoint", "seconds": float(time.perf_counter() - save_start)})
 
     @torch.no_grad()
     def collect_embeddings(self, ds) -> tuple[torch.Tensor, torch.Tensor]:
@@ -1168,13 +1200,17 @@ class ALETrainer:
     def save_best(self) -> None:
         if self.best_state is None:
             return
-        path = Path(self.args.checkpoint_dir) / "best_ale_cnn.pt"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(self.best_state, path)
+        ckpt_dir = Path(self.args.checkpoint_dir)
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        canonical = ckpt_dir / "best_val_normalized_recall_auc.pt"
+        torch.save(self.best_state, canonical)
+        if SAVE_LEGACY_STAGE3_CHECKPOINT_ALIASES:
+            shutil.copy2(canonical, ckpt_dir / "best_ale_cnn.pt")
 
     def save_last(self, epoch: Optional[int] = None, bad_checks: int = 0) -> None:
-        path = Path(self.args.checkpoint_dir) / "last_ale_cnn.pt"
-        path.parent.mkdir(parents=True, exist_ok=True)
+        ckpt_dir = Path(self.args.checkpoint_dir)
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        path = ckpt_dir / "last.pt"
         torch.save(
             {
                 "brain_encoder": self.brain_encoder.state_dict(),
@@ -1541,7 +1577,7 @@ def append_comparison_row(args, payload, metrics, trainer, input_shape) -> dict:
         "mrr": metrics["mean_mrr"],
         "median_rank": metrics["mean_median_rank"],
         "random_recall@10": metrics["mean_random_recall@10"],
-        "checkpoint_path": str(Path(args.checkpoint_dir) / "best_ale_cnn.pt"),
+        "checkpoint_path": str(Path(args.checkpoint_dir) / "best_val_normalized_recall_auc.pt"),
         "config_path": str(Path(args.run_dir) / "config.json"),
         "cache_path": str(args.cache_file),
         "cache_shape": str(tuple(payload["metadata"]["shape"])),
@@ -1586,6 +1622,7 @@ def evaluate_train_subset_sanity(
 
 
 def main() -> None:
+    branch_start = time.perf_counter()
     args = parse_args()
     stamp = time.strftime("%Y%m%d_%H%M%S")
     if args.run_dir is None:
@@ -1598,16 +1635,34 @@ def main() -> None:
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+    timing_profile: dict[str, object] = {
+        "data_cache_load_sec": 0.0,
+        "preflight_batch_size_sec": 0.0,
+        "train_epoch_sec": [],
+        "validation_eval_sec": [],
+        "generation_auc_eval_sec": [],
+        "artifact_save_sec": [],
+        "final_eval_sec": [],
+        "total_branch_sec": 0.0,
+    }
 
     if args.build_cache_only:
         with (run_dir / "training_config.json").open("w") as f:
             json.dump(vars(args), f, indent=2)
+        data_start = time.perf_counter()
         build_cache_only(args)
+        timing_profile["data_cache_load_sec"] = float(time.perf_counter() - data_start)
+        timing_profile["total_branch_sec"] = float(time.perf_counter() - branch_start)
+        with (run_dir / "timing_profile.json").open("w") as f:
+            json.dump(timing_profile, f, indent=2)
         return
 
+    data_start = time.perf_counter()
     ae_init_report = resolve_autoencoder_initialization(args)
     ds, train_ds, val_ds, test_ds, payload, preprocess_config = build_dataset(args)
     brain_encoder, text_proj, architecture_report = build_model(args, ds.input_shape)
+    timing_profile["data_cache_load_sec"] = float(time.perf_counter() - data_start)
+    print(f"[timing] data_cache_load seconds={timing_profile['data_cache_load_sec']:.2f}", flush=True)
     device = which_device(args.device)
     print(f"Selected device: {device}", flush=True)
     if args.pin_memory is False and device.type == "cuda":
@@ -1662,10 +1717,14 @@ def main() -> None:
     print(f"  device={device} amp={args.amp and device.type == 'cuda'} batch={batch_label}")
 
     trainer = ALETrainer(brain_encoder, text_proj, args, device)
+    trainer.timing_profile.update(timing_profile)
     trainability_report(trainer, args)
     write_training_diff_report(args)
     trainer.load_resume_model_weights()
+    preflight_start = time.perf_counter()
     trainer.preflight_batch_size(train_ds)
+    trainer.timing_profile["preflight_batch_size_sec"] = float(time.perf_counter() - preflight_start)
+    print(f"[timing] preflight_batch_size seconds={trainer.timing_profile['preflight_batch_size_sec']:.2f}", flush=True)
     with (run_dir / "config.json").open("w") as f:
         json.dump(vars(args), f, indent=2)
     print(f"  selected batch_size={args.batch_size}", flush=True)
@@ -1674,15 +1733,26 @@ def main() -> None:
 
     all_metrics = {}
     eval_payloads = {}
-    if args.train_sanity_n and args.train_sanity_n > 0:
+    if args.run_train_sanity_eval and args.train_sanity_n and args.train_sanity_n > 0:
+        eval_start = time.perf_counter()
         train_metrics, train_brain, train_text = evaluate_train_subset_sanity(
             trainer, train_ds, args.train_sanity_n
         )
+        eval_time = time.perf_counter() - eval_start
+        trainer.timing_profile["final_eval_sec"].append({"split": "train_subset", "seconds": float(eval_time)})
+        print(f"[timing] final_eval split=train_subset seconds={eval_time:.2f}", flush=True)
         all_metrics["train_subset"] = train_metrics
         eval_payloads["train_subset"] = (train_metrics, train_brain, train_text)
 
-    for name, split_ds in [("val", val_ds), ("test", test_ds)]:
+    final_splits = [("val", val_ds)]
+    if args.final_test_eval:
+        final_splits.append(("test", test_ds))
+    for name, split_ds in final_splits:
+        eval_start = time.perf_counter()
         metrics, brain_emb, text_emb = trainer.evaluate(split_ds)
+        eval_time = time.perf_counter() - eval_start
+        trainer.timing_profile["final_eval_sec"].append({"split": name, "seconds": float(eval_time)})
+        print(f"[timing] final_eval split={name} seconds={eval_time:.2f}", flush=True)
         all_metrics[name] = metrics
         eval_payloads[name] = (metrics, brain_emb, text_emb)
         print(
@@ -1698,8 +1768,13 @@ def main() -> None:
         )
 
     if args.eval_neurovlm_baseline:
+        eval_start = time.perf_counter()
         all_metrics["test_neurovlm_baseline"] = evaluate_neurovlm_baseline_by_pmids(test_ds.pmids, device)
+        eval_time = time.perf_counter() - eval_start
+        trainer.timing_profile["final_eval_sec"].append({"split": "test_neurovlm_baseline", "seconds": float(eval_time)})
+        print(f"[timing] final_eval split=test_neurovlm_baseline seconds={eval_time:.2f}", flush=True)
 
+    artifact_start = time.perf_counter()
     with (run_dir / "training_history.json").open("w") as f:
         json.dump(trainer.history, f, indent=2)
     with (run_dir / "eval_results.json").open("w") as f:
@@ -1715,13 +1790,19 @@ def main() -> None:
         json.dump(vars(args), f, indent=2)
     with (config_dir / "ae_init_config.json").open("w") as f:
         json.dump(ae_init_report, f, indent=2, default=str)
-    best_src = Path(args.checkpoint_dir) / "best_ale_cnn.pt"
-    last_src = Path(args.checkpoint_dir) / "last_ale_cnn.pt"
-    if best_src.exists():
+    best_src = Path(args.checkpoint_dir) / "best_val_normalized_recall_auc.pt"
+    last_src = Path(args.checkpoint_dir) / "last.pt"
+    if SAVE_LEGACY_STAGE3_CHECKPOINT_ALIASES and best_src.exists():
         shutil.copy2(best_src, ckpt_stage_dir / "best_contrastive.pt")
-    if last_src.exists():
+        shutil.copy2(best_src, ckpt_stage_dir / "best_ale_cnn.pt")
+    if SAVE_LEGACY_STAGE3_CHECKPOINT_ALIASES and last_src.exists():
+        shutil.copy2(last_src, ckpt_stage_dir / "last_ale_cnn.pt")
         shutil.copy2(last_src, ckpt_stage_dir / "last_contrastive.pt")
+    artifact_time = time.perf_counter() - artifact_start
+    trainer.timing_profile["artifact_save_sec"].append({"artifact": "final_core_artifacts", "seconds": float(artifact_time)})
+    print(f"[timing] artifact_save artifact=final_core_artifacts seconds={artifact_time:.2f}", flush=True)
 
+    diagnostics_start = time.perf_counter()
     curve_frames = {}
     for split_name, (_, brain_emb, text_emb) in eval_payloads.items():
         curve_df = recall_curve_frame(text_emb, brain_emb)
@@ -1730,16 +1811,24 @@ def main() -> None:
         with (run_dir / f"{split_name}_recall_curve.json").open("w") as f:
             json.dump(recall_curve_payload(text_emb, brain_emb), f, indent=2)
 
-    test_metrics, test_brain, test_text = eval_payloads["test"]
-    curve_df = curve_frames["test"]
-    cov = test_ds.covariate_frame()
-    diag_df = retrieval_diagnostics(test_text, test_brain, cov)
-    diag_df.to_csv(run_dir / "test_retrieval_diagnostics.csv", index=False)
-    save_embedding_correlations(run_dir, test_brain, cov)
-    if args.save_plots:
-        save_plots(run_dir, trainer.history, curve_df, diag_df if args.umap else None, test_brain)
+    if args.final_test_eval and "test" in eval_payloads:
+        test_metrics, test_brain, test_text = eval_payloads["test"]
+        curve_df = curve_frames["test"]
+        cov = test_ds.covariate_frame()
+        diag_df = retrieval_diagnostics(test_text, test_brain, cov)
+        diag_df.to_csv(run_dir / "test_retrieval_diagnostics.csv", index=False)
+        if args.run_covariate_correlations:
+            save_embedding_correlations(run_dir, test_brain, cov)
+        if args.save_plots:
+            save_plots(run_dir, trainer.history, curve_df, diag_df if args.umap else None, test_brain)
+    else:
+        test_metrics = all_metrics.get("val", {})
+    diagnostics_time = time.perf_counter() - diagnostics_start
+    trainer.timing_profile["artifact_save_sec"].append({"artifact": "final_diagnostics_artifacts", "seconds": float(diagnostics_time)})
+    print(f"[timing] artifact_save artifact=final_diagnostics_artifacts seconds={diagnostics_time:.2f}", flush=True)
 
-    if getattr(args, "semantic_eval", False):
+    if getattr(args, "semantic_eval", False) and args.final_test_eval and "test" in eval_payloads:
+        semantic_start = time.perf_counter()
         try:
             from experiments.semantic_model_eval import (
                 _add_macro_retrieval_normalized_k_auc,
@@ -1796,8 +1885,19 @@ def main() -> None:
         except Exception as exc:
             print(f"WARNING: semantic evaluation suite failed: {exc}", flush=True)
             print(traceback.format_exc(), flush=True)
+        semantic_time = time.perf_counter() - semantic_start
+        trainer.timing_profile["final_eval_sec"].append({"split": "semantic_eval", "seconds": float(semantic_time)})
+        print(f"[timing] final_eval split=semantic_eval seconds={semantic_time:.2f}", flush=True)
+    elif getattr(args, "semantic_eval", False):
+        print("Skipping semantic evaluation because final_test_eval=False.", flush=True)
 
+    comparison_start = time.perf_counter()
     append_comparison_row(args, payload, test_metrics, trainer, ds.input_shape)
+    trainer.timing_profile["artifact_save_sec"].append({"artifact": "comparison_row", "seconds": float(time.perf_counter() - comparison_start)})
+    trainer.timing_profile["total_branch_sec"] = float(time.perf_counter() - branch_start)
+    print(f"[timing] total_branch seconds={trainer.timing_profile['total_branch_sec']:.2f}", flush=True)
+    with (run_dir / "timing_profile.json").open("w") as f:
+        json.dump(trainer.timing_profile, f, indent=2)
     print(f"\nArtifacts saved to {run_dir}")
     print(f"Comparison row appended to {args.comparison_file}")
 

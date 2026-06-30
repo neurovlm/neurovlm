@@ -24,6 +24,7 @@ from typing import Any
 
 TARGET_SHAPE = (36, 45, 38)
 LATENT_DIM = 384
+DOMAIN_LABELS = {"pubmed": "PubMed", "nilearn": "Nilearn", "neurovault": "NeuroVault"}
 
 REQUIRED_SELECTIONS: dict[str, dict[str, str]] = {
     "mixed_stage1a": {
@@ -77,6 +78,8 @@ class IntegrationConfig:
     stage1a_evaluation_dir: Path | None = None
     stage1b_evaluation_dir: Path | None = None
     rerun_stage1_checkpoint_evaluation: bool = False
+    required_selection_keys: tuple[str, ...] | None = None
+    downstream_runs: tuple[dict[str, str], ...] | list[dict[str, str]] | None = None
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -131,6 +134,13 @@ def valid_optional_dir(path: Path | None) -> Path | None:
     if "EDIT_ME" in str(path) or not path.exists():
         return None
     return path
+
+
+def default_downstream_runs() -> list[dict[str, str]]:
+    return [
+        {"run": run_name, "domain": domain.lower(), "type": run_type, "ae_registry_key": ae_key}
+        for run_name, domain, run_type, ae_key in SIX_RUNS
+    ]
 
 
 def source_dir_for(config: IntegrationConfig, spec: dict[str, str]) -> Path | None:
@@ -375,7 +385,7 @@ This downstream notebook does not train, fine-tune, resume, optimize, or rerun c
 
 Completed Stage 1A and Stage 1B evaluation folders are optional provenance inputs. When provided, the integration output records the source directories and preserves the original selection tables. They are not used to decide the checkpoint names; the empirical choices are fixed in the downstream registry.
 
-Selected checkpoints:
+The selected-checkpoint registry contains whichever locked selections are required by the requested downstream runs:
 
 * Stage 1A mixed: `best_top1_dice.pt`, selected by `held_out_multi_source_rank_1`.
 * Stage 1B PubMed: `best_top1_dice.pt`, selected by `held_out_domain_rank_1`.
@@ -388,7 +398,7 @@ Downstream notebooks should load:
 
 * `02_selected_checkpoint_registry/selected_ae_checkpoints_for_stage2_stage3_stage4.json`
 * `03_downstream_usage/stage2_stage3_stage4_input_manifest.json`
-* `03_downstream_usage/six_run_ae_assignment.csv`
+* `03_downstream_usage/selected_ae_branch_assignment.csv`
 
 Rerun Stage 1 checkpoint evaluation only if checkpoint files changed, test splits changed, metric definitions changed, evaluation outputs are missing/corrupted, or explicit reproduction is requested.
 """,
@@ -428,7 +438,13 @@ def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str,
     table_copy_rows: list[dict[str, Any]] = []
     selected_registry: dict[str, Any] = {}
 
-    for key, spec in REQUIRED_SELECTIONS.items():
+    required_selection_keys = tuple(config.required_selection_keys or REQUIRED_SELECTIONS.keys())
+    unknown_required_keys = [key for key in required_selection_keys if key not in REQUIRED_SELECTIONS]
+    if unknown_required_keys:
+        raise KeyError(f"Unknown required Stage 1 selection keys: {unknown_required_keys}")
+    required_specs = {key: REQUIRED_SELECTIONS[key] for key in required_selection_keys}
+
+    for key, spec in required_specs.items():
         source_dir = source_dir_for(config, spec)
         selection_csv = source_dir / spec["selection_csv"] if source_dir else None
         selected_path, path_warnings = configured_checkpoint_path(config, key, spec)
@@ -515,9 +531,20 @@ def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str,
             }
         )
 
+    downstream_run_specs = list(config.downstream_runs or default_downstream_runs())
     six_run_rows = []
     six_run_manifest = []
-    for run_name, domain, run_type, ae_key in SIX_RUNS:
+    for run_spec in downstream_run_specs:
+        run_name = run_spec["run"]
+        domain_key = str(run_spec["domain"]).lower()
+        domain = DOMAIN_LABELS.get(domain_key, str(run_spec["domain"]))
+        run_type = run_spec["type"]
+        ae_key = run_spec["ae_registry_key"]
+        if ae_key not in unified_manifest:
+            raise KeyError(
+                f"Downstream run {run_name!r} requires AE registry key {ae_key!r}, "
+                "but that key was not included in required_selection_keys."
+            )
         entry = unified_manifest[ae_key]
         six_run_rows.append(
             {
@@ -530,21 +557,21 @@ def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str,
                 "checksum": entry["model_state_checksum"],
                 "selection_reason": entry["selection_reason"],
                 "source_evaluation_folder": entry["source_evaluation_dir"],
-                "intended_stage3_data_split": domain.lower(),
-                "intended_stage4_data_split": domain.lower(),
+                "intended_stage3_data_split": domain_key,
+                "intended_stage4_data_split": domain_key,
                 "ae_registry_key": ae_key,
             }
         )
         six_run_manifest.append(
             {
                 "run": run_name,
-                "domain": domain.lower(),
+                "domain": domain_key,
                 "type": run_type,
                 "ae_registry_key": ae_key,
                 "ae_checkpoint_path": entry["checkpoint_path"],
                 "selection_reason": entry["selection_reason"],
-                "stage3_data_split": domain.lower(),
-                "stage4_data_split": domain.lower(),
+                "stage3_data_split": domain_key,
+                "stage4_data_split": domain_key,
             }
         )
 
@@ -578,11 +605,13 @@ def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str,
     write_json(registry_dir / "selected_checkpoint_validation.json", validation_rows)
     write_csv_rows(registry_dir / "checkpoint_checksums.csv", checksum_rows)
     write_csv_rows(downstream_dir / "six_run_ae_assignment.csv", six_run_rows)
+    write_csv_rows(downstream_dir / "selected_ae_branch_assignment.csv", six_run_rows)
     write_json(
         downstream_dir / "stage2_stage3_stage4_input_manifest.json",
         {
             "selected_ae_checkpoints": selected_registry,
             "six_stage2_stage3_stage4_runs": six_run_manifest,
+            "selected_stage2_stage3_stage4_runs": six_run_manifest,
             "selected_manifest": str(registry_dir / "selected_ae_checkpoints_for_stage2_stage3_stage4.json"),
             "validation_report": str(registry_dir / "selected_checkpoint_validation.json"),
         },
@@ -596,6 +625,8 @@ def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str,
             "all_selected_checkpoint_entries_valid": not blocking,
             "blocking_checkpoints": blocking_summary,
             "table_copies": table_copy_rows,
+            "required_selection_keys": list(required_selection_keys),
+            "downstream_run_count": len(six_run_manifest),
             "rerun_stage1_checkpoint_evaluation": False,
         },
     )

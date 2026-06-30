@@ -139,13 +139,16 @@ def semantic_retrieval_metrics(
     records: list[dict[str, Any]],
     *,
     prefix: str,
+    include_group_metrics: bool = True,
 ) -> dict[str, float]:
     text_n = F.normalize(text_embeddings.float(), dim=1, eps=1e-8)
     gen_n = F.normalize(generated_embeddings.float(), dim=1, eps=1e-8)
     text_to_generated = text_n @ gen_n.T
     generated_to_text = gen_n @ text_n.T
     masks = semantic_positive_masks(records)
-    out = semantic_group_summary(records)
+    if not include_group_metrics:
+        masks = {"strict_map": masks["strict_map"]}
+    out = semantic_group_summary(records) if include_group_metrics else {"semantic_eval_n": float(len(records))}
     for name, mask in masks.items():
         t2g = ranking_metrics(text_to_generated, mask, ks=(1, 5, 10, 50))
         g2t = ranking_metrics(generated_to_text, mask, ks=(1, 5, 10, 50))
@@ -203,6 +206,7 @@ def evaluate_generation_semantic_loader(
     prefix: str = "generation",
     include_raw: bool = True,
     include_clamped: bool = True,
+    include_group_metrics: bool = True,
 ) -> dict[str, float]:
     evaluator_text_cache = evaluator_text_cache or generation_text_cache
     generated_by_variant: dict[str, list[torch.Tensor]] = {}
@@ -242,7 +246,15 @@ def evaluate_generation_semantic_loader(
     }
     for variant, chunks in generated_by_variant.items():
         generated = torch.cat(chunks, dim=0)
-        out.update(semantic_retrieval_metrics(text, generated, records, prefix=f"{prefix}_{variant}"))
+        out.update(
+            semantic_retrieval_metrics(
+                text,
+                generated,
+                records,
+                prefix=f"{prefix}_{variant}",
+                include_group_metrics=include_group_metrics,
+            )
+        )
     default = f"{prefix}_clamped_strict_map"
     if f"{default}_mean_normalized_auc" in out:
         out[f"{prefix}_text_to_brain_normalized_auc"] = out[f"{default}_text_to_brain_normalized_auc"]

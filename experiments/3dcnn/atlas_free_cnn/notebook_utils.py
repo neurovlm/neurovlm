@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 
 DOMAIN_DIRS = {"pubmed": "01_pubmed", "nilearn": "02_nilearn", "neurovault": "03_neurovault"}
@@ -19,10 +20,16 @@ SPECIALIZED_BRANCHES = {
     "neurovault": "specialized_mixed_to_neurovault",
 }
 BRANCH_KINDS = ("baseline", "specialized")
+AE_BRANCH_MODES = ("mixed_only", "mixed_and_specialized", "specialized_only")
 NORMALIZED_STAGE3_DIRNAME = "stage3_normalized_specter"
 CORRECTED_STAGE4_DIRNAME = "corrected_stage4_normalized_specter"
+LEGACY_STAGE3_DIRNAME = "stage3_legacy_specter"
+CORRECTED_LEGACY_STAGE4_DIRNAME = "corrected_stage4_legacy_specter"
 NORMALIZED_STAGE3_CHECKPOINT = "best_val_normalized_recall_auc.pt"
 CORRECTED_STAGE4_CHECKPOINT = "best_val_generation_normalized_auc.pt"
+STAGE4_PRIMARY_SPATIAL_CHECKPOINT = "best_val_top5_dice.pt"
+STAGE4_SPATIAL_CORR_CHECKPOINT = "best_val_spatial_corr.pt"
+STAGE4_SEMANTIC_CHECKPOINT = "best_val_generation_normalized_auc.pt"
 DEFAULT_ATLAS_FREE_HF_REPO = "neurovlm/atlas_free_cnn_dataset"
 DEFAULT_TEXT_EMBEDDING_CONVENTION = "normalized_specter2"
 LEGACY_TEXT_EMBEDDING_CONVENTION = "legacy_specter2"
@@ -40,6 +47,10 @@ SPECTER2_ADAPTER_NAME = "adhoc_query"
 SPECTER2_BASE_MODEL_REPO = "allenai/specter2_aug2023refresh_base"
 SPECTER2_ADAPTER_REPO = "allenai/specter2_aug2023refresh_adhoc_query"
 TEXT_EMBEDDING_DIM = 768
+TEXT_EMBEDDING_CONVENTION_DIR_SUFFIXES = {
+    NORMALIZED_TEXT_EMBEDDING_CONVENTION: "normalized_specter",
+    LEGACY_TEXT_EMBEDDING_CONVENTION: "legacy_specter",
+}
 
 LOCKED_STAGE1_CHECKPOINT_NAMES = {
     "mixed_stage1a": "best_top1_dice.pt",
@@ -69,6 +80,47 @@ def run_cmd(cmd: list[str | os.PathLike[str]], cwd: str | Path | None = None, *,
     return result
 
 
+def run_subprocess_streaming(
+    cmd: Sequence[str | os.PathLike[str]],
+    env: Mapping[str, str | os.PathLike[str]] | None = None,
+    cwd: str | Path | None = None,
+    label: str | None = None,
+) -> subprocess.CompletedProcess[None]:
+    """Run a long command while forwarding stdout/stderr line-by-line."""
+
+    cmd_list = [str(part) for part in cmd]
+    if not cmd_list:
+        raise ValueError("cmd must contain at least one argument")
+
+    child_env = os.environ.copy()
+    if env is not None:
+        child_env.update({str(key): str(value) for key, value in env.items()})
+    child_env["PYTHONUNBUFFERED"] = "1"
+
+    command_text = shlex.join(cmd_list)
+    prefix = f"[{label}] " if label else ""
+    print(f"{prefix}$ {command_text}", flush=True)
+
+    proc = subprocess.Popen(
+        cmd_list,
+        cwd=cwd,
+        env=child_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(line, end="", flush=True)
+
+    returncode = proc.wait()
+    if returncode != 0:
+        label_text = f" [{label}]" if label else ""
+        raise RuntimeError(f"Command failed{label_text} with return code {returncode}: {command_text}")
+    return subprocess.CompletedProcess(cmd_list, returncode)
+
+
 def sha256_file(path: str | Path) -> str:
     h = hashlib.sha256()
     with Path(path).open("rb") as f:
@@ -77,62 +129,171 @@ def sha256_file(path: str | Path) -> str:
     return h.hexdigest()
 
 
-def six_branch_specs() -> list[dict[str, str]]:
+def normalize_ae_branch_mode(mode: str) -> str:
+    mode = str(mode).strip().lower()
+    if mode not in AE_BRANCH_MODES:
+        raise ValueError(f"AE_BRANCH_MODE must be one of {AE_BRANCH_MODES}; got {mode!r}")
+    return mode
+
+
+def _ae_branch_spec(domain: str, branch_kind: str) -> dict[str, str]:
+    if branch_kind == "baseline":
+        return {
+            "run": f"mixed_stage1a_on_{domain}",
+            "domain": domain,
+            "domain_dir": DOMAIN_DIRS[domain],
+            "branch_kind": "baseline",
+            "type": "baseline",
+            "branch": "baseline_mixed_stage1a",
+            "ae_registry_key": "mixed_stage1a",
+        }
+    if branch_kind == "specialized":
+        return {
+            "run": f"mixed_to_{domain}_stage1b_on_{domain}",
+            "domain": domain,
+            "domain_dir": DOMAIN_DIRS[domain],
+            "branch_kind": "specialized",
+            "type": "specialized",
+            "branch": SPECIALIZED_BRANCHES[domain],
+            "ae_registry_key": f"mixed_to_{domain}_stage1b",
+        }
+    raise ValueError(f"branch_kind must be one of {BRANCH_KINDS}; got {branch_kind!r}")
+
+
+def ae_branch_specs(mode: str = "mixed_and_specialized") -> list[dict[str, str]]:
+    mode = normalize_ae_branch_mode(mode)
     rows: list[dict[str, str]] = []
     for domain in ["pubmed", "nilearn", "neurovault"]:
-        rows.append(
-            {
-                "domain": domain,
-                "domain_dir": DOMAIN_DIRS[domain],
-                "branch_kind": "baseline",
-                "branch": "baseline_mixed_stage1a",
-                "ae_registry_key": "mixed_stage1a",
-            }
-        )
-        rows.append(
-            {
-                "domain": domain,
-                "domain_dir": DOMAIN_DIRS[domain],
-                "branch_kind": "specialized",
-                "branch": SPECIALIZED_BRANCHES[domain],
-                "ae_registry_key": f"mixed_to_{domain}_stage1b",
-            }
-        )
+        if mode in {"mixed_only", "mixed_and_specialized"}:
+            rows.append(_ae_branch_spec(domain, "baseline"))
+        if mode in {"mixed_and_specialized", "specialized_only"}:
+            rows.append(_ae_branch_spec(domain, "specialized"))
     return rows
 
 
-def stage_output_dir(run_root: str | Path, domain: str, branch: str, stage: str, *, layout: str = "6a_normalized_corrected") -> Path:
-    run_root = Path(run_root)
+def six_branch_specs() -> list[dict[str, str]]:
+    return ae_branch_specs("mixed_and_specialized")
+
+
+def selected_downstream_runs_for_ae_branch_mode(runs: list[dict[str, Any]], mode: str) -> list[dict[str, Any]]:
+    """Return manifest rows in the exact order selected by AE_BRANCH_MODE."""
+
+    by_name = {str(run.get("run", "")): run for run in runs}
+    selected: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for spec in ae_branch_specs(mode):
+        row = by_name.get(spec["run"])
+        if row is None:
+            missing.append(spec["run"])
+            continue
+        selected.append({**spec, **row})
+    if missing:
+        raise KeyError(f"Downstream manifest is missing runs required for AE_BRANCH_MODE={mode!r}: {missing}")
+    return selected
+
+
+def text_embedding_convention_dir_suffix(convention: str | None = DEFAULT_TEXT_EMBEDDING_CONVENTION) -> str:
+    """Return the output-directory suffix for a SPECTER cache convention."""
+
+    return TEXT_EMBEDDING_CONVENTION_DIR_SUFFIXES[_canonical_text_embedding_convention(convention)]
+
+
+def stage3_dirname_for_text_embedding_convention(convention: str | None = DEFAULT_TEXT_EMBEDDING_CONVENTION) -> str:
+    return f"stage3_{text_embedding_convention_dir_suffix(convention)}"
+
+
+def corrected_stage4_dirname_for_text_embedding_convention(convention: str | None = DEFAULT_TEXT_EMBEDDING_CONVENTION) -> str:
+    return f"corrected_stage4_{text_embedding_convention_dir_suffix(convention)}"
+
+
+def _text_convention_from_layout(layout: str | None, convention: str | None = None) -> str | None:
+    if convention is not None:
+        return _canonical_text_embedding_convention(convention)
     if layout in {"6a_normalized_corrected", "normalized_specter", "6a_normalized_specter"}:
-        dirname = NORMALIZED_STAGE3_DIRNAME if stage == "stage3" else CORRECTED_STAGE4_DIRNAME if stage == "stage4" else stage
+        return NORMALIZED_TEXT_EMBEDDING_CONVENTION
+    if layout in {"legacy_specter", "6a_legacy_specter"}:
+        return LEGACY_TEXT_EMBEDDING_CONVENTION
+    return None
+
+
+def stage_output_dir(
+    run_root: str | Path,
+    domain: str,
+    branch: str,
+    stage: str,
+    *,
+    layout: str = "6a_normalized_corrected",
+    text_embedding_convention: str | None = None,
+) -> Path:
+    run_root = Path(run_root)
+    convention = _text_convention_from_layout(layout, text_embedding_convention)
+    if convention is not None:
+        dirname = (
+            stage3_dirname_for_text_embedding_convention(convention)
+            if stage == "stage3"
+            else corrected_stage4_dirname_for_text_embedding_convention(convention)
+            if stage == "stage4"
+            else stage
+        )
     else:
         dirname = stage
     return run_root / DOMAIN_DIRS[domain] / branch / dirname
 
 
-def stage_checkpoint_path(run_root: str | Path, domain: str, branch: str, stage: str, *, layout: str = "6a_normalized_corrected") -> Path:
-    out_dir = stage_output_dir(run_root, domain, branch, stage, layout=layout)
-    if stage == "stage3" and layout in {"6a_normalized_corrected", "normalized_specter", "6a_normalized_specter"}:
-        return out_dir / "checkpoints" / NORMALIZED_STAGE3_CHECKPOINT
-    if stage == "stage4" and layout in {"6a_normalized_corrected", "normalized_specter", "6a_normalized_specter"}:
-        return out_dir / "checkpoints" / CORRECTED_STAGE4_CHECKPOINT
+def stage_checkpoint_path(
+    run_root: str | Path,
+    domain: str,
+    branch: str,
+    stage: str,
+    *,
+    layout: str = "6a_normalized_corrected",
+    text_embedding_convention: str | None = None,
+) -> Path:
+    out_dir = stage_output_dir(run_root, domain, branch, stage, layout=layout, text_embedding_convention=text_embedding_convention)
+    convention = _text_convention_from_layout(layout, text_embedding_convention)
     if stage == "stage3":
-        return out_dir / "checkpoints" / "best_ale_cnn.pt"
+        return out_dir / "checkpoints" / NORMALIZED_STAGE3_CHECKPOINT
+    if stage == "stage4" and convention is not None:
+        return out_dir / "checkpoints" / CORRECTED_STAGE4_CHECKPOINT
     return out_dir / "checkpoints" / "best_val_loss.pt"
 
 
-def discover_stage_outputs(run_root: str | Path, *, layout: str = "6a_normalized_corrected") -> list[dict[str, Any]]:
+def discover_stage_outputs(
+    run_root: str | Path,
+    *,
+    layout: str = "6a_normalized_corrected",
+    text_embedding_convention: str | None = None,
+    ae_branch_mode: str = "mixed_and_specialized",
+) -> list[dict[str, Any]]:
     rows = []
-    for spec in six_branch_specs():
-        stage3_dir = stage_output_dir(run_root, spec["domain"], spec["branch"], "stage3", layout=layout)
-        stage4_dir = stage_output_dir(run_root, spec["domain"], spec["branch"], "stage4", layout=layout)
+    for spec in ae_branch_specs(ae_branch_mode):
+        stage3_dir = stage_output_dir(run_root, spec["domain"], spec["branch"], "stage3", layout=layout, text_embedding_convention=text_embedding_convention)
+        stage4_dir = stage_output_dir(run_root, spec["domain"], spec["branch"], "stage4", layout=layout, text_embedding_convention=text_embedding_convention)
         rows.append(
             {
                 **spec,
                 "stage3_dir": str(stage3_dir),
-                "stage3_checkpoint": str(stage_checkpoint_path(run_root, spec["domain"], spec["branch"], "stage3", layout=layout)),
+                "stage3_checkpoint": str(
+                    stage_checkpoint_path(
+                        run_root,
+                        spec["domain"],
+                        spec["branch"],
+                        "stage3",
+                        layout=layout,
+                        text_embedding_convention=text_embedding_convention,
+                    )
+                ),
                 "stage4_dir": str(stage4_dir),
-                "stage4_checkpoint": str(stage_checkpoint_path(run_root, spec["domain"], spec["branch"], "stage4", layout=layout)),
+                "stage4_checkpoint": str(
+                    stage_checkpoint_path(
+                        run_root,
+                        spec["domain"],
+                        spec["branch"],
+                        "stage4",
+                        layout=layout,
+                        text_embedding_convention=text_embedding_convention,
+                    )
+                ),
             }
         )
     return rows
@@ -704,6 +865,7 @@ def text_embedding_metadata_fields(spec: dict[str, Any], audit: dict[str, Any] |
         "text_embedding_preprocessing": spec["preprocessing"],
         "text_embedding_dim": int(spec["expected_dim"]),
         "expect_unit_norm": bool(spec["expect_unit_norm"]),
+        "text_embedding_cache_path": spec["local_cache_path"],
         "text_embedding_cache_local_path": spec["local_cache_path"],
     }
 

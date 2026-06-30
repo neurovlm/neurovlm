@@ -11,6 +11,7 @@ import csv
 import hashlib
 import json
 import math
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,8 @@ from neurovlm.gnn.ale_cnn import count_parameters
 
 
 TEXT_TO_BRAIN_BATCH_CANDIDATES = [4096, 3072, 2048, 1536, 1024, 768, 512, 384, 256, 192, 128, 96, 64]
+
+SAVE_LEGACY_CHECKPOINT_ALIASES = False
 
 class PrimaryTextVolumeCollator:
     """Use exactly one primary text per map for text-to-brain training."""
@@ -539,6 +542,10 @@ def generation_semantic_auc(
     text_cache: dict[str, torch.Tensor],
     cfg: dict[str, Any],
     device: torch.device,
+    *,
+    include_raw: bool = True,
+    include_clamped: bool = True,
+    include_group_metrics: bool = True,
 ) -> dict[str, float]:
     collator = PrimaryTextVolumeCollator(_target_shape(cfg), text_rank=int(cfg.get("primary_text_rank", 0)))
     loader = DataLoader(
@@ -559,12 +566,24 @@ def generation_semantic_auc(
         device,
         evaluator_text_cache=text_cache,
         prefix="generation",
-        include_raw=True,
-        include_clamped=True,
+        include_raw=include_raw,
+        include_clamped=include_clamped,
+        include_group_metrics=include_group_metrics,
     )
 
 
 def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    branch_start = time.perf_counter()
+    timing_profile: dict[str, Any] = {
+        "data_cache_load_sec": 0.0,
+        "preflight_batch_size_sec": 0.0,
+        "train_epoch_sec": [],
+        "validation_eval_sec": [],
+        "generation_auc_eval_sec": [],
+        "artifact_save_sec": [],
+        "final_eval_sec": [],
+        "total_branch_sec": 0.0,
+    }
     cfg, architecture_report = apply_checkpoint_architecture(cfg)
     device_name = cfg.get("device", "auto")
     device = torch.device("cuda" if device_name == "auto" and torch.cuda.is_available() else "cpu" if device_name == "auto" else device_name)
@@ -633,10 +652,22 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     }
     if stage3_init_report["loaded_tensors"] != 0:
         raise RuntimeError("Corrected Stage 4 must not load Stage 3 contrastive projector tensors")
+    preflight_start = time.perf_counter()
     preflight = preflight_batch_size(autoencoder, text_projector, target_shape, cfg, device)
+    timing_profile["preflight_batch_size_sec"] = float(time.perf_counter() - preflight_start)
+    print(f"[timing] preflight_batch_size seconds={timing_profile['preflight_batch_size_sec']:.2f}", flush=True)
     cfg = dict(cfg)
     cfg["batch_size"] = int(preflight["selected_batch_size"])
     cfg["preflight"] = preflight
+    cfg.setdefault("generation_auc_val_interval", 5)
+    cfg.setdefault("run_duplicate_aware_val_every_epoch", False)
+    cfg.setdefault("run_raw_and_group_auc_during_training", False)
+    cfg.setdefault("run_full_debug_metrics_during_training", False)
+    cfg.setdefault("final_test_eval", True)
+    cfg.setdefault("compute_train_metrics", False)
+    cfg.setdefault("primary_checkpoint_metric", "val_top5_dice")
+    cfg.setdefault("force_generation_auc_for_early_stopping", False)
+    load_start = time.perf_counter()
     train_ds = UnifiedMapTextDataset(cfg["train_jsonl"])
     val_ds = UnifiedMapTextDataset(cfg["val_jsonl"])
     domain_report = {}
@@ -699,20 +730,26 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     stage3_semantic_models = None
     if cfg.get("stage3_contrastive_checkpoint"):
         stage3_semantic_models = load_stage3_contrastive_models(cfg["stage3_contrastive_checkpoint"], device)
+    timing_profile["data_cache_load_sec"] = float(time.perf_counter() - load_start)
+    print(f"[timing] data_cache_load seconds={timing_profile['data_cache_load_sec']:.2f}", flush=True)
     optimizer = torch.optim.AdamW(text_projector.parameters(), lr=float(cfg.get("lr", 1e-4)), weight_decay=float(cfg.get("weight_decay", 1e-4)))
     loss_cfg = _loss_cfg(cfg)
-    ckpt = CheckpointManager(
-        cfg.get("checkpoint_dir", "experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain/checkpoints"),
-        maximize={
+    _ckpt_maximize: dict[str, bool] = {
+        "val_spatial_corr": True,
+        "val_top5_dice": True,
+        "val_generation_normalized_auc": True,
+    }
+    if SAVE_LEGACY_CHECKPOINT_ALIASES:
+        _ckpt_maximize.update({
             "val_loss": False,
             "val_latent_mse": False,
             "val_reconstruction_mse": False,
-            "val_spatial_corr": True,
-            "val_top5_dice": True,
-            "val_generation_normalized_auc": True,
             "generation_top5_dice": True,
             "generation_spatial_correlation": True,
-        },
+        })
+    ckpt = CheckpointManager(
+        cfg.get("checkpoint_dir", "experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain/checkpoints"),
+        maximize=_ckpt_maximize,
     )
     history = []
     use_amp = bool(cfg.get("amp", device.type == "cuda"))
@@ -726,6 +763,16 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     last_val_metrics: dict[str, float] = {}
     max_epochs = int(cfg.get("epochs", 3))
     generation_auc_val_interval = int(cfg.get("generation_auc_val_interval", 5))
+    generation_auc_val_interval = max(1, generation_auc_val_interval)
+    run_duplicate_aware_val_every_epoch = bool(cfg.get("run_duplicate_aware_val_every_epoch", False))
+    run_raw_and_group_auc_during_training = bool(cfg.get("run_raw_and_group_auc_during_training", False))
+    run_full_debug_metrics_during_training = bool(cfg.get("run_full_debug_metrics_during_training", False))
+    training_include_raw_auc = bool(run_raw_and_group_auc_during_training or run_full_debug_metrics_during_training)
+    training_include_group_auc = bool(
+        run_duplicate_aware_val_every_epoch
+        or run_raw_and_group_auc_during_training
+        or run_full_debug_metrics_during_training
+    )
     early_stopping = bool(cfg.get("early_stopping", True))
     early_metric = str(cfg.get("early_stopping_metric", "val_generation_normalized_auc"))
     early_mode = str(cfg.get("early_stopping_mode", "max" if "auc" in early_metric or "corr" in early_metric or "dice" in early_metric else "min"))
@@ -733,6 +780,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     early_min_delta = float(cfg.get("early_stopping_min_delta", 0.0))
     early_metric_key = early_metric[4:] if early_metric.startswith("val_") else early_metric
     early_metric_requires_generation_auc = "generation" in early_metric_key and "auc" in early_metric_key
+    force_generation_auc_for_early_stopping = bool(cfg.get("force_generation_auc_for_early_stopping", False))
     best_early_value = -float("inf") if early_mode == "max" else float("inf")
     bad_val_checks = 0
     stop_reason = "max_epochs"
@@ -743,7 +791,9 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     runtime_batch_fallback = bool(cfg.get("runtime_batch_fallback", True))
     epoch = 1
     while epoch <= max_epochs:
+        validated_this_epoch = False
         try:
+            train_start = time.perf_counter()
             train_metrics = run_epoch(
                 autoencoder,
                 text_projector,
@@ -763,7 +813,12 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 show_progress=bool(cfg.get("progress", True)),
                 progress_desc=f"epoch {epoch} train",
             )
+            train_time = time.perf_counter() - train_start
+            timing_profile["train_epoch_sec"].append({"epoch": int(epoch), "seconds": float(train_time)})
+            print(f"[timing] train_epoch epoch={epoch} seconds={train_time:.2f}", flush=True)
             if epoch == 1 or epoch % val_interval == 0 or epoch == max_epochs:
+                validated_this_epoch = True
+                val_start = time.perf_counter()
                 last_val_metrics = run_epoch(
                     autoencoder,
                     text_projector,
@@ -782,14 +837,22 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                     show_progress=bool(cfg.get("progress", True)),
                     progress_desc=f"epoch {epoch} val",
                 )
+                val_time = time.perf_counter() - val_start
+                timing_profile["validation_eval_sec"].append({"epoch": int(epoch), "seconds": float(val_time)})
+                print(f"[timing] validation_eval epoch={epoch} seconds={val_time:.2f}", flush=True)
                 run_semantic_auc = (
                     epoch == 1
                     or epoch % generation_auc_val_interval == 0
                     or epoch == max_epochs
-                    or (early_stopping and early_metric_requires_generation_auc)
+                    or (
+                        early_stopping
+                        and early_metric_requires_generation_auc
+                        and force_generation_auc_for_early_stopping
+                    )
                 )
                 if stage3_semantic_models is not None and run_semantic_auc:
                     stage3_brain_encoder, stage3_text_projection = stage3_semantic_models
+                    generation_auc_start = time.perf_counter()
                     last_val_metrics.update(
                         generation_semantic_auc(
                             autoencoder,
@@ -800,8 +863,22 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                             text_cache,
                             cfg,
                             device,
+                            include_raw=training_include_raw_auc,
+                            include_clamped=True,
+                            include_group_metrics=training_include_group_auc,
                         )
                     )
+                    generation_auc_time = time.perf_counter() - generation_auc_start
+                    timing_profile["generation_auc_eval_sec"].append(
+                        {
+                            "epoch": int(epoch),
+                            "split": "val",
+                            "seconds": float(generation_auc_time),
+                            "include_raw": bool(training_include_raw_auc),
+                            "include_group_metrics": bool(training_include_group_auc),
+                        }
+                    )
+                    print(f"[timing] generation_auc_eval epoch={epoch} split=val seconds={generation_auc_time:.2f}", flush=True)
         except BaseException as exc:
             if not (runtime_batch_fallback and device.type == "cuda" and _is_cuda_oom(exc)):
                 raise
@@ -825,7 +902,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             )
             train_loader, val_loader = make_loaders(int(next_batch_size))
             continue
-        val_metrics = dict(last_val_metrics)
+        val_metrics = dict(last_val_metrics) if validated_this_epoch else {}
         row = {"epoch": epoch, **{f"train_{k}": v for k, v in train_metrics.items()}, **{f"val_{k}": v for k, v in val_metrics.items()}}
         history.append(row)
         payload = {
@@ -842,16 +919,23 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 "mode": early_mode,
                 "patience": early_patience,
                 "min_delta": early_min_delta,
-                "generation_auc_forced_each_validation": bool(early_metric_requires_generation_auc),
+                "generation_auc_forced_each_validation": bool(early_metric_requires_generation_auc and force_generation_auc_for_early_stopping),
+                "generation_auc_val_interval": generation_auc_val_interval,
+                "run_duplicate_aware_val_every_epoch": run_duplicate_aware_val_every_epoch,
+                "run_raw_and_group_auc_during_training": run_raw_and_group_auc_during_training,
+                "run_full_debug_metrics_during_training": run_full_debug_metrics_during_training,
                 "bad_val_checks": bad_val_checks,
                 "best_value": best_early_value,
             },
         }
+        save_start = time.perf_counter()
         ckpt.save_last(payload)
-        if val_metrics:
-            ckpt.maybe_save_best("val_loss", val_metrics.get("loss", float("inf")), payload)
-            ckpt.maybe_save_best("val_latent_mse", val_metrics.get("latent_mse", float("inf")), payload)
-            ckpt.maybe_save_best("val_reconstruction_mse", val_metrics.get("reconstruction_mse", float("inf")), payload)
+        stop_now = False
+        if validated_this_epoch and val_metrics:
+            if SAVE_LEGACY_CHECKPOINT_ALIASES:
+                ckpt.maybe_save_best("val_loss", val_metrics.get("loss", float("inf")), payload)
+                ckpt.maybe_save_best("val_latent_mse", val_metrics.get("latent_mse", float("inf")), payload)
+                ckpt.maybe_save_best("val_reconstruction_mse", val_metrics.get("reconstruction_mse", float("inf")), payload)
             ckpt.maybe_save_best("val_spatial_corr", val_metrics.get("spatial_corr", -1.0), payload)
             ckpt.maybe_save_best("val_top5_dice", val_metrics.get("top5_dice", 0.0), payload)
             if "generation_mean_normalized_auc" in val_metrics:
@@ -860,8 +944,9 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                     val_metrics.get("generation_mean_normalized_auc", 0.0),
                     payload,
                 )
-            ckpt.maybe_save_best("generation_top5_dice", val_metrics.get("top5_dice", 0.0), payload)
-            ckpt.maybe_save_best("generation_spatial_correlation", val_metrics.get("spatial_corr", -1.0), payload)
+            if SAVE_LEGACY_CHECKPOINT_ALIASES:
+                ckpt.maybe_save_best("generation_top5_dice", val_metrics.get("top5_dice", 0.0), payload)
+                ckpt.maybe_save_best("generation_spatial_correlation", val_metrics.get("spatial_corr", -1.0), payload)
             if early_stopping:
                 if early_metric_key not in val_metrics:
                     current = float("nan")
@@ -887,9 +972,15 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                             "current_value": current,
                             "bad_val_checks": bad_val_checks,
                         })
-                        break
+                        stop_now = True
+        save_time = time.perf_counter() - save_start
+        timing_profile["artifact_save_sec"].append({"epoch": int(epoch), "artifact": "checkpoints", "seconds": float(save_time)})
+        print(f"[timing] artifact_save epoch={epoch} artifact=checkpoints seconds={save_time:.2f}", flush=True)
         print(row)
+        if stop_now:
+            break
         epoch += 1
+    artifact_start = time.perf_counter()
     with (out_dir / "text_to_brain_config.json").open("w") as f:
         json.dump(cfg, f, indent=2)
     with (out_dir / "preflight.json").open("w") as f:
@@ -906,7 +997,11 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 "early_stopping_metric_key": early_metric_key,
                 "early_stopping_patience": early_patience,
                 "early_stopping_min_delta": early_min_delta,
-                "generation_auc_forced_each_validation": bool(early_metric_requires_generation_auc),
+                "generation_auc_forced_each_validation": bool(early_metric_requires_generation_auc and force_generation_auc_for_early_stopping),
+                "generation_auc_val_interval": generation_auc_val_interval,
+                "run_duplicate_aware_val_every_epoch": run_duplicate_aware_val_every_epoch,
+                "run_raw_and_group_auc_during_training": run_raw_and_group_auc_during_training,
+                "run_full_debug_metrics_during_training": run_full_debug_metrics_during_training,
                 "best_early_value": best_early_value,
                 "final_batch_size": int(cfg.get("batch_size", 0)),
                 "runtime_batch_fallbacks": cfg.get("runtime_batch_fallbacks", []),
@@ -914,19 +1009,34 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             f,
             indent=2,
         )
-    best_path = ckpt.out_dir / "best_val_generation_normalized_auc.pt"
+    artifact_time = time.perf_counter() - artifact_start
+    timing_profile["artifact_save_sec"].append({"artifact": "training_metadata", "seconds": float(artifact_time)})
+    print(f"[timing] artifact_save artifact=training_metadata seconds={artifact_time:.2f}", flush=True)
+    primary_checkpoint_metric = str(cfg.get("primary_checkpoint_metric", "val_generation_normalized_auc"))
+    if primary_checkpoint_metric.startswith("best_"):
+        primary_checkpoint_metric = primary_checkpoint_metric.removeprefix("best_")
+    if primary_checkpoint_metric.endswith(".pt"):
+        primary_checkpoint_metric = primary_checkpoint_metric[:-3]
+    best_path = ckpt.out_dir / f"best_{primary_checkpoint_metric}.pt"
     if not best_path.exists():
-        best_path = ckpt.out_dir / "best_val_loss.pt"
+        for fallback_metric in ["val_generation_normalized_auc", "val_top5_dice", "val_spatial_corr", "val_loss"]:
+            fallback_path = ckpt.out_dir / f"best_{fallback_metric}.pt"
+            if fallback_path.exists():
+                best_path = fallback_path
+                break
     if best_path.exists():
         best_payload = torch.load(best_path, map_location=device, weights_only=False)
         text_projector.load_state_dict(best_payload.get("generative_text_to_ae_latent") or best_payload["text_projector"])
         text_projector.eval()
     eval_specs: dict[str, str] = {}
-    if cfg.get("test_jsonl"):
-        eval_specs["mixed_test"] = str(cfg["test_jsonl"])
-    for key, value in (cfg.get("eval_jsonls") or {}).items():
-        if value:
-            eval_specs[str(key)] = str(value)
+    if bool(cfg.get("final_test_eval", True)):
+        if cfg.get("test_jsonl"):
+            eval_specs["mixed_test"] = str(cfg["test_jsonl"])
+        for key, value in (cfg.get("eval_jsonls") or {}).items():
+            if value:
+                eval_specs[str(key)] = str(value)
+    else:
+        print("Skipping final text-to-brain generation eval because final_test_eval=False", flush=True)
     generation_eval_rows: list[dict[str, Any]] = []
     for name, path in eval_specs.items():
         if not Path(path).exists():
@@ -935,6 +1045,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         eval_ds = UnifiedMapTextDataset(path)
         if cfg.get("domain"):
             filter_dataset_to_domain(eval_ds, str(cfg["domain"]))
+        final_eval_start = time.perf_counter()
         eval_rows = evaluate_generation_dataset(
             autoencoder,
             text_projector,
@@ -946,8 +1057,12 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             name,
             metrics_device=metrics_device,
         )
+        final_eval_time = time.perf_counter() - final_eval_start
+        timing_profile["final_eval_sec"].append({"split": name, "metric_family": "spatial_generation", "seconds": float(final_eval_time)})
+        print(f"[timing] final_eval split={name} metric_family=spatial_generation seconds={final_eval_time:.2f}", flush=True)
         if stage3_semantic_models is not None:
             stage3_brain_encoder, stage3_text_projection = stage3_semantic_models
+            generation_auc_start = time.perf_counter()
             semantic = generation_semantic_auc(
                 autoencoder,
                 text_projector,
@@ -957,19 +1072,52 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 text_cache,
                 cfg,
                 device,
+                include_raw=True,
+                include_clamped=True,
+                include_group_metrics=True,
             )
+            generation_auc_time = time.perf_counter() - generation_auc_start
+            timing_profile["generation_auc_eval_sec"].append(
+                {
+                    "split": name,
+                    "seconds": float(generation_auc_time),
+                    "include_raw": True,
+                    "include_group_metrics": True,
+                    "final_eval": True,
+                }
+            )
+            print(f"[timing] generation_auc_eval split={name} final_eval=True seconds={generation_auc_time:.2f}", flush=True)
             for row in eval_rows:
                 if row.get("source") == "all":
                     row.update(semantic)
         generation_eval_rows.extend(eval_rows)
     if generation_eval_rows:
+        artifact_start = time.perf_counter()
         with (out_dir / "generation_eval_metrics.json").open("w") as f:
             json.dump(generation_eval_rows, f, indent=2)
         with (out_dir / "generation_eval_metrics.csv").open("w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(generation_eval_rows[0].keys()))
             writer.writeheader()
             writer.writerows(generation_eval_rows)
-    return {"history": history, "checkpoint_dir": str(ckpt.out_dir), "best_checkpoint": str(best_path)}
+        artifact_time = time.perf_counter() - artifact_start
+        timing_profile["artifact_save_sec"].append({"artifact": "generation_eval_metrics", "seconds": float(artifact_time)})
+        print(f"[timing] artifact_save artifact=generation_eval_metrics seconds={artifact_time:.2f}", flush=True)
+    timing_profile["total_branch_sec"] = float(time.perf_counter() - branch_start)
+    print(f"[timing] total_branch seconds={timing_profile['total_branch_sec']:.2f}", flush=True)
+    timing_profile["train_epoch_time_sec"] = float(sum(r["seconds"] for r in timing_profile.get("train_epoch_sec", [])))
+    timing_profile["val_metric_time_sec"] = float(sum(r["seconds"] for r in timing_profile.get("validation_eval_sec", [])))
+    timing_profile["generation_auc_eval_time_sec"] = float(sum(r["seconds"] for r in timing_profile.get("generation_auc_eval_sec", [])))
+    timing_profile["checkpoint_save_time_sec"] = float(sum(r["seconds"] for r in timing_profile.get("artifact_save_sec", [])))
+    timing_profile["branch_total_time_sec"] = timing_profile["total_branch_sec"]
+    artifact_start = time.perf_counter()
+    with (out_dir / "timing_profile.json").open("w") as f:
+        json.dump(timing_profile, f, indent=2)
+    artifact_time = time.perf_counter() - artifact_start
+    timing_profile["artifact_save_sec"].append({"artifact": "timing_profile", "seconds": float(artifact_time)})
+    print(f"[timing] artifact_save artifact=timing_profile seconds={artifact_time:.2f}", flush=True)
+    with (out_dir / "timing_profile.json").open("w") as f:
+        json.dump(timing_profile, f, indent=2)
+    return {"history": history, "checkpoint_dir": str(ckpt.out_dir), "best_checkpoint": str(best_path), "timing_profile": timing_profile}
 
 
 def main() -> None:
