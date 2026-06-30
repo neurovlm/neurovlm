@@ -14,7 +14,6 @@ from atlas_free_cnn.notebook_utils import (
     CORRECTED_STAGE4_CHECKPOINT,
     CORRECTED_STAGE4_DIRNAME,
     DOMAIN_DIRS,
-    LEGACY_NORMALIZED_STAGE4_DIRNAME,
     NORMALIZED_STAGE3_CHECKPOINT,
     NORMALIZED_STAGE3_DIRNAME,
     SPECIALIZED_BRANCHES,
@@ -343,15 +342,12 @@ def _downstream_stage_dirs(
     stage_name: str,
     *,
     layout: str | None = None,
-    include_legacy_stage4: bool = False,
 ) -> list[Path]:
     if layout in {"normalized_specter", "6a_normalized_specter"}:
         if stage_name == "stage3":
             patterns = ["[0-9][0-9]_*/*/stage3_normalized_specter"]
         elif stage_name == "stage4":
             patterns = ["[0-9][0-9]_*/*/corrected_stage4_normalized_specter"]
-            if include_legacy_stage4:
-                patterns.append("[0-9][0-9]_*/*/legacy_contrastive_initialized_stage4_normalized_specter")
         else:
             patterns = [f"[0-9][0-9]_*/*/{stage_name}"]
     elif stage_name == "stage3":
@@ -376,22 +372,16 @@ def _expected_downstream_stage_dirs(
     stage_name: str,
     *,
     layout: str | None = None,
-    include_legacy_stage4: bool = False,
 ) -> list[Path]:
     if layout not in {"normalized_specter", "6a_normalized_specter", "6a_normalized_corrected"}:
-        return _downstream_stage_dirs(run, stage_name, layout=layout, include_legacy_stage4=include_legacy_stage4)
+        return _downstream_stage_dirs(run, stage_name, layout=layout)
     if stage_name not in {"stage3", "stage4"}:
-        return _downstream_stage_dirs(run, stage_name, layout=layout, include_legacy_stage4=include_legacy_stage4)
+        return _downstream_stage_dirs(run, stage_name, layout=layout)
     dirname = NORMALIZED_STAGE3_DIRNAME if stage_name == "stage3" else CORRECTED_STAGE4_DIRNAME
     paths = [
         run / spec["domain_dir"] / spec["branch"] / dirname
         for spec in six_branch_specs()
     ]
-    if stage_name == "stage4" and include_legacy_stage4:
-        paths.extend(
-            run / spec["domain_dir"] / spec["branch"] / LEGACY_NORMALIZED_STAGE4_DIRNAME
-            for spec in six_branch_specs()
-        )
     return paths
 
 
@@ -400,7 +390,6 @@ def write_status_report(
     requested: dict[str, bool],
     *,
     layout: str | None = None,
-    include_legacy_stage4: bool = False,
 ) -> list[dict[str, Any]]:
     run = Path(run_dir)
     stage_dirs = _stage_dirs_for_run(run)
@@ -418,12 +407,7 @@ def write_status_report(
     )
     stage5_requested = bool(requested.get("stage5", requested.get("stage5_generation_eval", False)))
     stage3_dirs = _expected_downstream_stage_dirs(run, "stage3", layout=layout)
-    stage4_dirs = _expected_downstream_stage_dirs(
-        run,
-        "stage4",
-        layout=layout,
-        include_legacy_stage4=include_legacy_stage4,
-    )
+    stage4_dirs = _expected_downstream_stage_dirs(run, "stage4", layout=layout)
     stage3_status = (
         _combine_stage_statuses(
             "stage3",

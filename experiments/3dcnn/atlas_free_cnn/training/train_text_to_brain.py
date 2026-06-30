@@ -46,7 +46,6 @@ from atlas_free_cnn.training.model_wrappers import (
     build_cnn_autoencoder,
     build_generative_text_to_ae_latent,
     build_text_projection,
-    build_text_to_brain_projection,
     load_autoencoder_checkpoint,
 )
 from atlas_free_cnn.training.source_sampling import canonical_source
@@ -603,7 +602,6 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError(f"Corrected Stage 4 requires frozen AE encoder/decoder; found {trainable_ae} trainable AE parameters")
     projection_cfg = cfg.get("generative_text_to_ae_latent", cfg.get("text_to_brain_projection", {}))
     projector_name = str(projection_cfg.get("name", "generative_text_to_ae_latent"))
-    legacy_stage4 = bool(cfg.get("legacy_contrastive_initialized_stage4", False))
     input_dim = int(projection_cfg.get("in_dim", 768))
     hidden_dim = int(projection_cfg.get("hidden_dim", cfg.get("hidden_dim", 512)))
     latent_dim = int(model_cfg.get("latent_dim", 384))
@@ -611,64 +609,29 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError(f"Corrected Stage 4 requires 768-d processed SPECTER2 embeddings, got {input_dim}")
     if latent_dim != 384:
         raise RuntimeError(f"Corrected Stage 4 requires AE latent_dim=384, got {latent_dim}")
-    if legacy_stage4:
-        text_projector = build_text_to_brain_projection(
-            cfg.get("text_projection_init", "random"),
-            device=device,
-            in_dim=input_dim,
-            hidden_dim=hidden_dim,
-            depth=int(projection_cfg.get("depth", cfg.get("depth", 2))),
-            dropout=float(projection_cfg.get("dropout", cfg.get("dropout", 0.1))),
-            out_dim=latent_dim,
-        )
-    else:
-        if cfg.get("text_projection_init", "random") not in {"random", "scratch", "fresh"}:
-            raise RuntimeError(
-                "Corrected Stage 4 generative_text_to_ae_latent must be initialized fresh. "
-                "Set legacy_contrastive_initialized_stage4=True to reproduce the old path."
-            )
-        text_projector = build_generative_text_to_ae_latent(
-            device=device,
-            in_dim=input_dim,
-            hidden_dim=hidden_dim,
-            latent_dim=latent_dim,
-        )
+    text_projector = build_generative_text_to_ae_latent(
+        device=device,
+        in_dim=input_dim,
+        hidden_dim=hidden_dim,
+        latent_dim=latent_dim,
+    )
     stage3_init_report = {
         "stage3_checkpoint": cfg.get("stage3_contrastive_checkpoint", ""),
         "loaded_tensors": 0,
         "projector_name": projector_name,
-        "legacy_contrastive_initialized_stage4": legacy_stage4,
         "note": "Corrected Stage 4 initializes the generative text-to-AE-latent projector fresh and does not load Stage 3 contrastive text projection tensors.",
     }
-    if legacy_stage4 and cfg.get("stage3_contrastive_checkpoint"):
-        stage3_payload = torch.load(cfg["stage3_contrastive_checkpoint"], map_location="cpu", weights_only=False)
-        stage3_state = stage3_payload.get("text_proj") or stage3_payload.get("text_projection") or {}
-        current_state = text_projector.state_dict()
-        compatible = {
-            key: value
-            for key, value in stage3_state.items()
-            if key in current_state and tuple(value.shape) == tuple(current_state[key].shape)
-        }
-        current_state.update(compatible)
-        text_projector.load_state_dict(current_state)
-        stage3_init_report = {
-            "stage3_checkpoint": cfg["stage3_contrastive_checkpoint"],
-            "checkpoint_tensors": len(stage3_state),
-            "loaded_tensors": len(compatible),
-            "loaded_keys": sorted(compatible),
-            "note": "Stage 4 projection is run-specific; compatible tensors from the matching Stage 3 text projection are used as initialization.",
-        }
     architecture_report["matching_stage3_text_projection_initialization"] = stage3_init_report
     architecture_report["corrected_stage4_projector"] = {
         "projector_name": projector_name,
         "input_dim": input_dim,
         "hidden_dim": hidden_dim,
         "latent_dim": latent_dim,
-        "fresh_initialization": not legacy_stage4,
+        "fresh_initialization": True,
         "loads_stage3_projection_tensors": bool(stage3_init_report.get("loaded_tensors", 0)),
         "targets": "raw frozen-autoencoder latent",
     }
-    if not legacy_stage4 and stage3_init_report["loaded_tensors"] != 0:
+    if stage3_init_report["loaded_tensors"] != 0:
         raise RuntimeError("Corrected Stage 4 must not load Stage 3 contrastive projector tensors")
     preflight = preflight_batch_size(autoencoder, text_projector, target_shape, cfg, device)
     cfg = dict(cfg)

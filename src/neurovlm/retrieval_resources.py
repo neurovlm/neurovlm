@@ -25,6 +25,7 @@ from huggingface_hub import hf_hub_download
 
 from neurovlm.models import Specter, ProjHead, NeuroAutoEncoder
 from neurovlm.io import load_model
+from neurovlm.gnn.ale_cnn import ALE3DCNNAutoEncoder
 
 __all__ = [
     "_load_pubmed_dataframe",
@@ -71,6 +72,10 @@ __all__ = [
     "_load_latent_kg_mesh",
     "_load_llm_neuro_terms_dataset",
     "_load_latent_llm_neuro_terms",
+    "_load_mixed_ae",
+    "_load_pubmed_finetuned_ae",
+    "_load_nilearn_finetuned_ae",
+    "_load_neurovault_finetuned_ae",
 ]
 
 
@@ -930,3 +935,57 @@ def _load_latent_llm_neuro_terms() -> Tuple[torch.Tensor, np.ndarray]:
     latent = latent_payload["latent"]
     terms = np.asarray(latent_payload["term"])
     return latent, terms
+
+
+def _build_ale_autoencoder_from_payload(payload: dict) -> ALE3DCNNAutoEncoder:
+    cfg = payload["config"]["model"]
+    target_shape = tuple(payload["target_shape"])
+    model = ALE3DCNNAutoEncoder(
+        output_shape=target_shape,
+        base_channels=cfg["base_channels"],
+        num_blocks=cfg["num_blocks"],
+        latent_dim=cfg["latent_dim"],
+        dropout=cfg["dropout"],
+        norm=cfg["norm"],
+        pooling=cfg["pooling"],
+        encoder_arch=cfg.get("encoder_arch", "plain"),
+        blocks_per_stage=cfg.get("blocks_per_stage", 2),
+        use_dilation=cfg.get("use_dilation", False),
+        multi_scale=cfg.get("multi_scale", False),
+        global_context=cfg.get("global_context", "none"),
+    )
+    model.load_state_dict(payload["model"], strict=True)
+    model.eval()
+    return model
+
+
+@lru_cache(maxsize=1)
+def _load_mixed_ae() -> ALE3DCNNAutoEncoder:
+    """Load the mixed-source pretrained AE (Stage 1A) from HuggingFace."""
+    path = _download_from_hf("neurovlm/3d_cnn", "mixed_ae_best_top1_dice.pt", repo_type="model")
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    return _build_ale_autoencoder_from_payload(payload)
+
+
+@lru_cache(maxsize=1)
+def _load_pubmed_finetuned_ae() -> ALE3DCNNAutoEncoder:
+    """Load the PubMed domain-finetuned AE (Stage 1B) from HuggingFace."""
+    path = _download_from_hf("neurovlm/3d_cnn", "pubmed_finetuned_ae_best_top1_dice.pt", repo_type="model")
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    return _build_ale_autoencoder_from_payload(payload)
+
+
+@lru_cache(maxsize=1)
+def _load_nilearn_finetuned_ae() -> ALE3DCNNAutoEncoder:
+    """Load the Nilearn domain-finetuned AE (Stage 1B) from HuggingFace."""
+    path = _download_from_hf("neurovlm/3d_cnn", "nilearn_finetuned_ae_best_val_loss.pt", repo_type="model")
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    return _build_ale_autoencoder_from_payload(payload)
+
+
+@lru_cache(maxsize=1)
+def _load_neurovault_finetuned_ae() -> ALE3DCNNAutoEncoder:
+    """Load the NeuroVault domain-finetuned AE (Stage 1B) from HuggingFace."""
+    path = _download_from_hf("neurovlm/3d_cnn", "neurovault_finetuned_ae_best_top5_dice.pt", repo_type="model")
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    return _build_ale_autoencoder_from_payload(payload)

@@ -226,7 +226,8 @@ def run_epoch(autoencoder, text_proj, loader, optimizer, scaler, args, device, c
                 scaler.update()
         losses.append(float(loss.detach().cpu()))
         parts_rows.append({k: float(v.detach().float().cpu()) for k, v in parts.items()})
-        metric_rows.append(generation_metrics(pred.detach().clamp(0.0, 1.0), x.detach(), include_voxel_auroc=False))
+        if not train:
+            metric_rows.append(generation_metrics(pred.detach().clamp(0.0, 1.0), x.detach(), include_voxel_auroc=False))
     out = {k: float(np.mean([row[k] for row in metric_rows])) for k in metric_rows[0]} if metric_rows else {}
     for key in parts_rows[0] if parts_rows else []:
         out[f"loss_{key}"] = float(np.mean([row[key] for row in parts_rows]))

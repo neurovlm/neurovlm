@@ -21,7 +21,6 @@ SPECIALIZED_BRANCHES = {
 BRANCH_KINDS = ("baseline", "specialized")
 NORMALIZED_STAGE3_DIRNAME = "stage3_normalized_specter"
 CORRECTED_STAGE4_DIRNAME = "corrected_stage4_normalized_specter"
-LEGACY_NORMALIZED_STAGE4_DIRNAME = "legacy_contrastive_initialized_stage4_normalized_specter"
 NORMALIZED_STAGE3_CHECKPOINT = "best_val_normalized_recall_auc.pt"
 CORRECTED_STAGE4_CHECKPOINT = "best_val_generation_normalized_auc.pt"
 DEFAULT_ATLAS_FREE_HF_REPO = "neurovlm/atlas_free_cnn_dataset"
