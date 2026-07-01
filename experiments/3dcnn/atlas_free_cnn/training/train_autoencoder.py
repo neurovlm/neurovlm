@@ -705,7 +705,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     early_metric = str(cfg.get("early_stopping_metric", "val_loss"))
     early_metric_key = validation_metric_key(early_metric)
     early_maximize = metric_higher_is_better(early_metric)
-    early_patience = int(cfg.get("early_stopping_patience", 25))
+    early_patience = int(cfg.get("early_stopping_patience", 10))
     early_min_delta = float(cfg.get("early_stopping_min_delta", 0.0))
     best_early_value = -float("inf") if early_maximize else float("inf")
     bad_val_checks = 0
