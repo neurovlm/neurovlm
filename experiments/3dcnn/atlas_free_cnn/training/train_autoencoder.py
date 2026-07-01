@@ -488,6 +488,7 @@ def _checkpoint_eval_specs(checkpoint_dir: Path, cfg: dict[str, Any]) -> list[tu
         "best_spatial_corr",
         "best_top1_dice",
         "best_top5_dice",
+        "best_top10_dice",
         "best_foreground_mse",
     ]
     names = [str(v) for v in cfg.get("eval_checkpoint_names", default_names)]
@@ -562,6 +563,7 @@ def evaluate_saved_checkpoints_from_config(cfg: dict[str, Any] | str | Path) -> 
 
 
 def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    _t0 = time.time()
     cfg = apply_ae_recipe_defaults(cfg)
     device_name = cfg.get("device", "auto")
     device = torch.device("cuda" if device_name == "auto" and torch.cuda.is_available() else "cpu" if device_name == "auto" else device_name)
@@ -580,6 +582,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     train_ds = filter_data_mode(UnifiedMapTextDataset(cfg["train_jsonl"]), data_mode)
     val_ds = filter_data_mode(UnifiedMapTextDataset(cfg["val_jsonl"]), data_mode)
     test_ds = filter_data_mode(UnifiedMapTextDataset(cfg["test_jsonl"]), data_mode) if cfg.get("test_jsonl") else None
+    _t_dataset = time.time()
     split_counts = {
         "train": source_counts(train_ds),
         "val": source_counts(val_ds),
@@ -595,7 +598,9 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     print({"data_mode": data_mode, "source_counts_by_split": split_counts})
 
     model = build_model(cfg, target_shape, device)
+    _t_model = time.time()
     preflight = preflight_batch_size(model, target_shape, cfg, device)
+    _t_preflight = time.time()
     batch_size = int(preflight["selected_batch_size"])
     cfg = dict(cfg)
     cfg["batch_size"] = batch_size
@@ -652,6 +657,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             pass
         else:
             raise ValueError("freeze_mode must be none, encoder, decoder, all_but_decoder, train_all, or encoder_decoder")
+    _save_legacy_aliases = bool(cfg.get("save_legacy_ae_checkpoint_aliases", False))
     ckpt = CheckpointManager(
         checkpoint_dir,
         maximize={
@@ -659,6 +665,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             "spatial_corr": True,
             "top1_dice": True,
             "top5_dice": True,
+            "top10_dice": True,
             "foreground_mse": False,
         },
     )
@@ -746,22 +753,25 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 "best_value": best_early_value,
             },
         }
-        ckpt.save_last(payload)
-        ckpt.save("last_cnn_autoencoder.pt", payload)
+        ckpt.save_last(payload, epoch=epoch)
+        if _save_legacy_aliases:
+            ckpt.save("last_cnn_autoencoder.pt", payload)
         if val_metrics:
             _improved = {
-                "val_loss": ckpt.maybe_save_best("val_loss", float(val_metrics.get("loss", math.inf)), payload),
-                "spatial_corr": ckpt.maybe_save_best("spatial_corr", float(val_metrics.get("spatial_corr", -1.0)), payload),
-                "top1_dice": ckpt.maybe_save_best("top1_dice", float(val_metrics.get("top1_dice", 0.0)), payload),
-                "top5_dice": ckpt.maybe_save_best("top5_dice", float(val_metrics.get("top5_dice", 0.0)), payload),
-                "foreground_mse": ckpt.maybe_save_best("foreground_mse", float(val_metrics.get("foreground_mse", math.inf)), payload),
+                "val_loss": ckpt.maybe_save_best("val_loss", float(val_metrics.get("loss", math.inf)), payload, epoch=epoch),
+                "spatial_corr": ckpt.maybe_save_best("spatial_corr", float(val_metrics.get("spatial_corr", -1.0)), payload, epoch=epoch),
+                "top1_dice": ckpt.maybe_save_best("top1_dice", float(val_metrics.get("top1_dice", 0.0)), payload, epoch=epoch),
+                "top5_dice": ckpt.maybe_save_best("top5_dice", float(val_metrics.get("top5_dice", 0.0)), payload, epoch=epoch),
+                "top10_dice": ckpt.maybe_save_best("top10_dice", float(val_metrics.get("top10_dice", 0.0)), payload, epoch=epoch),
+                "foreground_mse": ckpt.maybe_save_best("foreground_mse", float(val_metrics.get("foreground_mse", math.inf)), payload, epoch=epoch),
             }
             selection = str(cfg.get("checkpoint_selection_metric", "best_val_loss"))
             metric_name = selection.removeprefix("best_")
-            if metric_name == "last":
-                ckpt.save("best_cnn_autoencoder.pt", payload)
-            elif _improved.get(metric_name):
-                ckpt.save("best_cnn_autoencoder.pt", payload)
+            if _save_legacy_aliases:
+                if metric_name == "last":
+                    ckpt.save("best_cnn_autoencoder.pt", payload)
+                elif _improved.get(metric_name):
+                    ckpt.save("best_cnn_autoencoder.pt", payload)
             if early_stopping:
                 metric_key = early_metric[4:] if early_metric.startswith("val_") else early_metric
                 current = float(val_metrics.get(metric_key, math.inf))
@@ -782,6 +792,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                     })
                     break
         print(row)
+    _t_train_end = time.time()
     with (out_dir / "history.json").open("w") as f:
         json.dump(history, f, indent=2)
     _write_csv(metrics_dir / "train_history.csv", [
@@ -808,13 +819,15 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             indent=2,
         )
 
+    _sel_metric = str(cfg.get("checkpoint_selection_metric", "best_val_loss"))
+    _selection_ckpt = checkpoint_dir / AE_SELECTION_TO_FILE.get(_sel_metric, "best_val_loss.pt")
     eval_rows = []
     if bool(cfg.get("final_eval", True)):
-        _selection_ckpt = checkpoint_dir / AE_SELECTION_TO_FILE.get(
-            str(cfg.get("checkpoint_selection_metric", "best_val_loss")), "best_val_loss.pt"
-        )
         if _selection_ckpt.exists():
+            print(f"Final eval: loading selected checkpoint {_selection_ckpt.name} ({_sel_metric})", flush=True)
             _load_model_checkpoint_for_eval(model, _selection_ckpt, device)
+        else:
+            print(f"Final eval: selected checkpoint {_selection_ckpt} not found; using last in-memory model state", flush=True)
     for split_name, ds in [("train", train_ds), ("val", val_ds), ("test", test_ds)]:
         if ds is not None and bool(cfg.get("final_eval", True)):
             eval_rows.extend(evaluate_by_source(model, ds, cfg, device, split_name))
@@ -832,6 +845,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         split_map = {"train": train_ds, "val": val_ds, "test": test_ds}
         eval_checkpoint_splits = [str(v) for v in cfg.get("eval_checkpoint_splits", ["val", "test"])]
         for checkpoint_name, checkpoint_path in _checkpoint_eval_specs(checkpoint_dir, cfg):
+            print(f"Per-checkpoint eval: {checkpoint_name}", flush=True)
             _load_model_checkpoint_for_eval(model, checkpoint_path, device)
             for split_name in eval_checkpoint_splits:
                 ds = split_map.get(split_name)
@@ -849,9 +863,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         if checkpoint_rows:
             _write_csv(metrics_dir / "reconstruction_summary_by_checkpoint_source.csv", checkpoint_rows)
             _write_csv(metrics_dir / "checkpoint_reconstruction_metrics.csv", checkpoint_rows)
-        last_path = checkpoint_dir / "last.pt"
-        if last_path.exists():
-            _load_model_checkpoint_for_eval(model, last_path, device)
+    _t_final_eval = time.time()
     leaderboard_rows = []
     for name, value in sorted(ckpt.best.items()):
         leaderboard_rows.append(
@@ -860,6 +872,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 "best_value": value,
                 "checkpoint_path": str(ckpt.out_dir / f"best_{name}.pt"),
                 "maximize": ckpt.maximize.get(name, True),
+                "epoch": ckpt._best_epochs.get(name),
             }
         )
     _write_csv(metrics_dir / "checkpoint_leaderboard.csv", leaderboard_rows)
@@ -867,13 +880,33 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         plot_ds = test_ds or val_ds
         for src in ["pubmed", "neurovault", "nilearn"]:
             save_qualitative_plots(model, plot_ds, cfg, device, plots_dir / "recon_examples" / src, src)
+    _t_end = time.time()
+    _train_times = [float(r.get("train_epoch_time_sec", 0)) for r in history if r.get("train_epoch_time_sec")]
+    _val_times = [float(r.get("val_epoch_time_sec", 0)) for r in history if r.get("val_epoch_time_sec")]
+    timing_profile = {
+        "total_sec": _t_end - _t0,
+        "dataset_construction_sec": _t_dataset - _t0,
+        "model_construction_sec": _t_model - _t_dataset,
+        "preflight_sec": _t_preflight - _t_model,
+        "training_sec": _t_train_end - _t_preflight,
+        "final_eval_sec": _t_final_eval - _t_train_end,
+        "artifact_save_sec": _t_end - _t_final_eval,
+        "avg_epoch_train_sec": float(sum(_train_times) / max(1, len(_train_times))) if _train_times else None,
+        "avg_epoch_val_sec": float(sum(_val_times) / max(1, len(_val_times))) if _val_times else None,
+        "n_epochs": len(history),
+        "ae_variant": cfg.get("ae_variant", cfg.get("ae_training_recipe")),
+    }
+    with (out_dir / "timing_profile.json").open("w") as f:
+        json.dump(timing_profile, f, indent=2)
+    print({"timing_profile": timing_profile}, flush=True)
     return {
         "history": history,
         "checkpoint_dir": str(ckpt.out_dir),
-        "best_checkpoint": str(ckpt.out_dir / "best_cnn_autoencoder.pt"),
+        "best_checkpoint": str(_selection_ckpt),
         "checkpoint_leaderboard": leaderboard_rows,
         "preflight": preflight,
         "source_counts_by_split": split_counts,
+        "timing_profile": timing_profile,
     }
 
 

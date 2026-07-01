@@ -52,6 +52,7 @@ AE_SELECTION_TO_FILE = {
     "best_spatial_corr": "best_spatial_corr.pt",
     "best_top1_dice": "best_top1_dice.pt",
     "best_top5_dice": "best_top5_dice.pt",
+    "best_top10_dice": "best_top10_dice.pt",
     "best_foreground_mse": "best_foreground_mse.pt",
     "last": "last.pt",
 }
