@@ -34,7 +34,7 @@ except ImportError:  # pragma: no cover
 from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
 from atlas_free_cnn.pipeline_outputs import AE_SELECTION_TO_FILE, git_info
 from atlas_free_cnn.training.autoencoder_losses import AutoencoderLossConfig, reconstruction_loss
-from atlas_free_cnn.training.checkpointing import CheckpointManager
+from atlas_free_cnn.training.checkpointing import CheckpointManager, metric_direction, metric_higher_is_better
 from atlas_free_cnn.training.datasets import UnifiedMapTextDataset
 from atlas_free_cnn.training.model_wrappers import build_cnn_autoencoder
 from atlas_free_cnn.training.source_sampling import (
@@ -48,6 +48,14 @@ from neurovlm.gnn.ale_cnn import count_parameters
 
 
 AUTOENCODER_BATCH_CANDIDATES = [1024, 768, 512, 384, 256, 192, 128, 96, 64]
+AE_CHECKPOINT_METRICS = [
+    "val_loss",
+    "spatial_corr",
+    "top1_dice",
+    "top5_dice",
+    "top10_dice",
+    "foreground_mse",
+]
 MODEL_SIZE_PRESETS = {
     "base": {"base_channels": 48, "num_blocks": 4, "latent_dim": 384},
     "wide": {"base_channels": 64, "num_blocks": 4, "latent_dim": 384},
@@ -511,6 +519,28 @@ def _load_model_checkpoint_for_eval(model, checkpoint_path: Path, device: torch.
     model.eval()
 
 
+def validation_metric_key(metric_name: str) -> str:
+    metric = str(metric_name).strip()
+    if metric.endswith(".pt"):
+        metric = metric[:-3]
+    if metric.startswith("best_"):
+        metric = metric.removeprefix("best_")
+    if metric == "last":
+        raise ValueError("'last' is not a validation metric")
+    if metric.startswith("val_"):
+        metric = metric.removeprefix("val_")
+    if metric in {"loss", "mse", "spatial_corr", "top1_dice", "top5_dice", "top10_dice", "foreground_mse", "mae", "reconstruction_mse"}:
+        return "loss" if metric in {"loss", "mse"} else metric
+    metric_direction(metric_name)
+    return metric
+
+
+def metric_improved(current: float, best: float, metric_name: str, min_delta: float = 0.0) -> bool:
+    if metric_higher_is_better(metric_name):
+        return current > best + min_delta
+    return current < best - min_delta
+
+
 def evaluate_saved_checkpoints_from_config(cfg: dict[str, Any] | str | Path) -> list[dict[str, Any]]:
     """Evaluate every saved AE checkpoint for an existing run without retraining."""
 
@@ -658,17 +688,11 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         else:
             raise ValueError("freeze_mode must be none, encoder, decoder, all_but_decoder, train_all, or encoder_decoder")
     _save_legacy_aliases = bool(cfg.get("save_legacy_ae_checkpoint_aliases", False))
-    ckpt = CheckpointManager(
-        checkpoint_dir,
-        maximize={
-            "val_loss": False,
-            "spatial_corr": True,
-            "top1_dice": True,
-            "top5_dice": True,
-            "top10_dice": True,
-            "foreground_mse": False,
-        },
-    )
+    _selection_metric = str(cfg.get("checkpoint_selection_metric", "best_val_loss"))
+    if _selection_metric != "last":
+        validation_metric_key(_selection_metric)
+    _checkpoint_maximize = {metric: metric_higher_is_better(metric) for metric in AE_CHECKPOINT_METRICS}
+    ckpt = CheckpointManager(checkpoint_dir, maximize=_checkpoint_maximize, require_explicit_direction=True)
     use_amp = bool(cfg.get("amp", device.type == "cuda"))
     scaler = torch.cuda.amp.GradScaler(enabled=bool(use_amp and device.type == "cuda"))
     history: list[dict[str, Any]] = []
@@ -679,9 +703,11 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     max_epochs = int(cfg.get("epochs", 200))
     early_stopping = bool(cfg.get("early_stopping", True))
     early_metric = str(cfg.get("early_stopping_metric", "val_loss"))
+    early_metric_key = validation_metric_key(early_metric)
+    early_maximize = metric_higher_is_better(early_metric)
     early_patience = int(cfg.get("early_stopping_patience", 25))
     early_min_delta = float(cfg.get("early_stopping_min_delta", 0.0))
-    best_early_value = float("inf")
+    best_early_value = -float("inf") if early_maximize else float("inf")
     bad_val_checks = 0
     stop_reason = "max_epochs"
     for epoch in range(1, max_epochs + 1):
@@ -747,6 +773,8 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             "early_stopping": {
                 "enabled": early_stopping,
                 "metric": early_metric,
+                "metric_key": early_metric_key,
+                "mode": metric_direction(early_metric),
                 "patience": early_patience,
                 "min_delta": early_min_delta,
                 "bad_val_checks": bad_val_checks,
@@ -773,9 +801,10 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 elif _improved.get(metric_name):
                     ckpt.save("best_cnn_autoencoder.pt", payload)
             if early_stopping:
-                metric_key = early_metric[4:] if early_metric.startswith("val_") else early_metric
-                current = float(val_metrics.get(metric_key, math.inf))
-                if current < best_early_value - early_min_delta:
+                if early_metric_key not in val_metrics:
+                    raise KeyError(f"Early-stopping metric {early_metric!r} resolved to missing validation metric {early_metric_key!r}")
+                current = float(val_metrics[early_metric_key])
+                if metric_improved(current, best_early_value, early_metric, early_min_delta):
                     best_early_value = current
                     bad_val_checks = 0
                 else:
@@ -811,6 +840,8 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 "epochs_completed": len(history),
                 "early_stopping": early_stopping,
                 "early_stopping_metric": early_metric,
+                "early_stopping_metric_key": early_metric_key,
+                "early_stopping_mode": metric_direction(early_metric),
                 "early_stopping_patience": early_patience,
                 "early_stopping_min_delta": early_min_delta,
                 "best_early_value": best_early_value,

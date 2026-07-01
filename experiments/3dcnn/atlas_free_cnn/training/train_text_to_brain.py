@@ -32,7 +32,12 @@ except ImportError:  # pragma: no cover
 
 from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
 from atlas_free_cnn.evaluation.stage4_semantic import evaluate_generation_semantic_loader
-from atlas_free_cnn.training.checkpointing import CheckpointManager
+from atlas_free_cnn.notebook_utils import (
+    STAGE4_PRIMARY_SPATIAL_CHECKPOINT,
+    STAGE4_SEMANTIC_CHECKPOINT,
+    STAGE4_SPATIAL_CORR_CHECKPOINT,
+)
+from atlas_free_cnn.training.checkpointing import CheckpointManager, metric_higher_is_better
 from atlas_free_cnn.training.datasets import UnifiedMapTextDataset
 from atlas_free_cnn.training.generation_losses import GenerationLossConfig
 from atlas_free_cnn.training.generation_losses import (
@@ -75,6 +80,21 @@ def _checkpoint_metric_from_name(name: str) -> str:
     if metric.startswith("best_"):
         metric = metric.removeprefix("best_")
     return metric
+
+
+def _metric_value_for_checkpoint(metric_name: str, val_metrics: dict[str, Any]) -> float:
+    key = metric_name.removeprefix("val_")
+    if key == "generation_normalized_auc":
+        key = "generation_mean_normalized_auc"
+    defaults = {
+        "loss": float("inf"),
+        "latent_mse": float("inf"),
+        "reconstruction_mse": float("inf"),
+        "spatial_corr": -1.0,
+        "top5_dice": 0.0,
+        "generation_mean_normalized_auc": 0.0,
+    }
+    return float(val_metrics.get(key, defaults.get(key, 0.0)))
 
 
 class PrimaryTextVolumeCollator:
@@ -681,9 +701,9 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     cfg["preflight"] = preflight
     cfg.setdefault("compute_semantic_auc_during_training", False)
     cfg.setdefault("generation_auc_val_interval", 5)
-    cfg.setdefault("stage4_primary_checkpoint", "best_val_top5_dice.pt")
-    cfg.setdefault("stage4_spatial_corr_checkpoint", "best_val_spatial_corr.pt")
-    cfg.setdefault("stage4_semantic_checkpoint", "best_val_generation_normalized_auc.pt")
+    cfg.setdefault("stage4_primary_checkpoint", STAGE4_PRIMARY_SPATIAL_CHECKPOINT)
+    cfg.setdefault("stage4_spatial_corr_checkpoint", STAGE4_SPATIAL_CORR_CHECKPOINT)
+    cfg.setdefault("stage4_semantic_checkpoint", STAGE4_SEMANTIC_CHECKPOINT)
     cfg.setdefault("run_duplicate_aware_val_every_epoch", False)
     cfg.setdefault("run_raw_and_group_auc_during_training", False)
     cfg.setdefault("run_full_debug_metrics_during_training", False)
@@ -760,12 +780,15 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     print(f"[timing] data_cache_load seconds={timing_profile['data_cache_load_sec']:.2f}", flush=True)
     optimizer = torch.optim.AdamW(text_projector.parameters(), lr=float(cfg.get("lr", 1e-4)), weight_decay=float(cfg.get("weight_decay", 1e-4)))
     loss_cfg = _loss_cfg(cfg)
+    primary_checkpoint_metric = _checkpoint_metric_from_name(str(cfg["stage4_primary_checkpoint"]))
+    spatial_corr_checkpoint_metric = _checkpoint_metric_from_name(str(cfg["stage4_spatial_corr_checkpoint"]))
+    semantic_checkpoint_metric = _checkpoint_metric_from_name(str(cfg["stage4_semantic_checkpoint"]))
     _ckpt_maximize: dict[str, bool] = {
-        "val_spatial_corr": True,
-        "val_top5_dice": True,
+        primary_checkpoint_metric: metric_higher_is_better(primary_checkpoint_metric),
+        spatial_corr_checkpoint_metric: metric_higher_is_better(spatial_corr_checkpoint_metric),
     }
     if compute_semantic_auc_during_training:
-        _ckpt_maximize["val_generation_normalized_auc"] = True
+        _ckpt_maximize[semantic_checkpoint_metric] = metric_higher_is_better(semantic_checkpoint_metric)
     if SAVE_LEGACY_CHECKPOINT_ALIASES:
         _ckpt_maximize.update({
             "val_loss": False,
@@ -777,6 +800,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     ckpt = CheckpointManager(
         cfg.get("checkpoint_dir", "experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain/checkpoints"),
         maximize=_ckpt_maximize,
+        require_explicit_direction=True,
     )
     history = []
     use_amp = bool(cfg.get("amp", device.type == "cuda"))
@@ -966,20 +990,31 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             },
         }
         save_start = time.perf_counter()
-        ckpt.save_last(payload)
+        ckpt.save_last(payload, epoch=epoch)
         stop_now = False
         if validated_this_epoch and val_metrics:
             if SAVE_LEGACY_CHECKPOINT_ALIASES:
                 ckpt.maybe_save_best("val_loss", val_metrics.get("loss", float("inf")), payload)
                 ckpt.maybe_save_best("val_latent_mse", val_metrics.get("latent_mse", float("inf")), payload)
                 ckpt.maybe_save_best("val_reconstruction_mse", val_metrics.get("reconstruction_mse", float("inf")), payload)
-            ckpt.maybe_save_best("val_spatial_corr", val_metrics.get("spatial_corr", -1.0), payload)
-            ckpt.maybe_save_best("val_top5_dice", val_metrics.get("top5_dice", 0.0), payload)
+            ckpt.maybe_save_best(
+                spatial_corr_checkpoint_metric,
+                _metric_value_for_checkpoint(spatial_corr_checkpoint_metric, val_metrics),
+                payload,
+                epoch=epoch,
+            )
+            ckpt.maybe_save_best(
+                primary_checkpoint_metric,
+                _metric_value_for_checkpoint(primary_checkpoint_metric, val_metrics),
+                payload,
+                epoch=epoch,
+            )
             if compute_semantic_auc_during_training and "generation_mean_normalized_auc" in val_metrics:
                 ckpt.maybe_save_best(
-                    "val_generation_normalized_auc",
-                    val_metrics.get("generation_mean_normalized_auc", 0.0),
+                    semantic_checkpoint_metric,
+                    _metric_value_for_checkpoint(semantic_checkpoint_metric, val_metrics),
                     payload,
+                    epoch=epoch,
                 )
             if SAVE_LEGACY_CHECKPOINT_ALIASES:
                 ckpt.maybe_save_best("generation_top5_dice", val_metrics.get("top5_dice", 0.0), payload)

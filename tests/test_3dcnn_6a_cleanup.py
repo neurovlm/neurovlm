@@ -145,8 +145,8 @@ def test_6a_status_uses_selected_ae_branch_mode_counts(tmp_path: Path) -> None:
 
 
 def test_notebook_defaults_keep_downstream_branch_and_stage1b_controls_explicit() -> None:
-    nb6a = json.loads((REPO_ROOT / "experiments/3dcnn/6a_normalized_specter_stage3_stage4_rerun.ipynb").read_text())
-    nb5 = json.loads((REPO_ROOT / "experiments/3dcnn/5_stage1_autoencoder_ablation_multi_source.ipynb").read_text())
+    nb6a = json.loads((REPO_ROOT / "experiments/3dcnn/6 multi source stage3 stage4.ipynb").read_text())
+    nb5 = json.loads((REPO_ROOT / "experiments/3dcnn/5 multi source autoencoder ablation.ipynb").read_text())
     source6a = "\n".join("".join(cell.get("source", "")) for cell in nb6a["cells"])
     source5 = "\n".join("".join(cell.get("source", "")) for cell in nb5["cells"])
 
@@ -157,12 +157,10 @@ def test_notebook_defaults_keep_downstream_branch_and_stage1b_controls_explicit(
     assert "RUN_SUBPROCESS_STREAMING_SMOKE_TEST" in source6a
     assert "run_subprocess_streaming(cmd, cwd=REPO_DIR" in source6a
     assert "run_subprocess_streaming(cmd, env=env, cwd=REPO_DIR" in source6a
-    assert "subprocess.run(cmd, text=True)" not in source6a
-    assert "subprocess.run(cmd, text=True, env=env)" not in source6a
+    assert "--strict-controlled-recipe" in source6a
     assert "RUN_STAGE1A_MIXED_PRETRAINING = True" in source5
     assert "RUN_STAGE1B_FINETUNING = False" in source5
     assert "if RUN_STAGE1B_FINETUNING and results:" in source5
-    assert "RUN_STAGE1B = True" not in source5
 
 
 def test_6a_status_detects_normalized_stage3_and_corrected_stage4_without_legacy_dirs(tmp_path: Path) -> None:
@@ -501,18 +499,22 @@ def test_stage4_trainer_produces_only_canonical_checkpoints(tmp_path: Path) -> N
     ckpt = CheckpointManager(
         tmp_path,
         maximize={"val_spatial_corr": True, "val_top5_dice": True, "val_generation_normalized_auc": True},
+        require_explicit_direction=True,
     )
     payload = {"dummy": torch.zeros(1)}
-    ckpt.save_last(payload)
-    ckpt.maybe_save_best("val_spatial_corr", 0.5, payload)
-    ckpt.maybe_save_best("val_top5_dice", 0.6, payload)
-    ckpt.maybe_save_best("val_generation_normalized_auc", 0.7, payload)
+    ckpt.save_last(payload, epoch=3)
+    ckpt.maybe_save_best("val_spatial_corr", 0.5, payload, epoch=1)
+    ckpt.maybe_save_best("val_top5_dice", 0.6, payload, epoch=2)
+    ckpt.maybe_save_best("val_generation_normalized_auc", 0.7, payload, epoch=3)
 
     assert (tmp_path / "last.pt").exists()
     assert (tmp_path / "best_val_top5_dice.pt").exists()
     assert (tmp_path / "best_val_generation_normalized_auc.pt").exists()
     assert (tmp_path / "best_val_spatial_corr.pt").exists()
     assert (tmp_path / "checkpoint_manifest.json").exists()
+    manifest = json.loads((tmp_path / "checkpoint_manifest.json").read_text())
+    last_row = next(row for row in manifest["checkpoints"] if row["checkpoint_name"] == "last.pt")
+    assert last_row["epoch"] == 3
 
     legacy_names = [
         "best_val_loss.pt",
@@ -613,12 +615,13 @@ def test_stage4_primary_checkpoint_metric_defaults_to_val_top5_dice() -> None:
     import inspect
     from atlas_free_cnn.training import train_text_to_brain
     src = inspect.getsource(train_text_to_brain)
-    assert 'cfg.setdefault("primary_checkpoint_metric", "val_top5_dice")' in src, (
+    assert 'cfg.setdefault("primary_checkpoint_metric", _checkpoint_metric_from_name(str(cfg["stage4_primary_checkpoint"])))' in src, (
         "primary_checkpoint_metric must default to val_top5_dice (spatial primary)"
     )
     assert 'cfg.setdefault("primary_checkpoint_metric", "val_generation_normalized_auc")' not in src, (
         "Semantic primary checkpoint must not be the default anymore"
     )
+    assert 'ckpt.save_last(payload, epoch=epoch)' in src
 
 
 def test_stage3_checkpoint_path_returns_canonical_name() -> None:

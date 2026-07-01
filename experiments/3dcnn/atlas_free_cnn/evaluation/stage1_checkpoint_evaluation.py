@@ -48,6 +48,7 @@ from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
 from atlas_free_cnn.training.autoencoder_losses import AutoencoderLossConfig
 from atlas_free_cnn.training.datasets import UnifiedMapTextDataset
 from atlas_free_cnn.training.generation_losses import apply_prediction_activation
+from atlas_free_cnn.training.checkpointing import metric_direction, metric_higher_is_better
 from atlas_free_cnn.training.source_sampling import canonical_source, source_detail
 from atlas_free_cnn.training.train_autoencoder import (
     VolumeCollator,
@@ -440,6 +441,20 @@ def checkpoint_metric_name(checkpoint_name: str, payload: dict[str, Any]) -> str
     return "last"
 
 
+def selection_sort_value(row: dict[str, Any], metric_name: str, default: float = float("nan")) -> float:
+    value = safe_float(row.get(metric_name), default)
+    if metric_higher_is_better(metric_name):
+        return value
+    return -value
+
+
+def comparison_higher_is_better(metric_name: str) -> bool:
+    try:
+        return metric_higher_is_better(metric_name)
+    except ValueError:
+        return True
+
+
 def saved_val_score(metric_name: str, val_metrics: dict[str, Any]) -> Any:
     aliases = {
         "val_loss": "loss",
@@ -498,6 +513,7 @@ def build_checkpoint_manifest(registry: dict[str, dict[str, Any]]) -> tuple[list
                         "is_alias": item["checkpoint_name"] != canonical,
                         "alias_of": "" if item["checkpoint_name"] == canonical else canonical,
                         "saved_checkpoint_selection_metric": metric_name,
+                        "saved_checkpoint_selection_direction": "n/a" if metric_name == "last" else metric_direction(metric_name),
                         "saved_validation_score": saved_val_score(metric_name, val_metrics),
                         "saved_validation_metrics": json.dumps(json_ready(val_metrics)),
                         "load_status": "manifest_ok",
@@ -513,6 +529,7 @@ def build_checkpoint_manifest(registry: dict[str, dict[str, Any]]) -> tuple[list
                         "is_alias": False,
                         "alias_of": "",
                         "saved_checkpoint_selection_metric": checkpoint_metric_name(item["checkpoint_name"], {}),
+                        "saved_checkpoint_selection_direction": "n/a",
                         "saved_validation_score": None,
                         "saved_validation_metrics": "{}",
                         "load_status": "manifest_failed",
@@ -972,6 +989,7 @@ def base_comparison_prefix(
         "alias_status": "alias" if checkpoint_row.get("is_alias") else "canonical",
         "checkpoint_epoch": checkpoint_row.get("checkpoint_epoch"),
         "saved_checkpoint_selection_metric": checkpoint_row.get("saved_checkpoint_selection_metric"),
+        "saved_checkpoint_selection_direction": checkpoint_row.get("saved_checkpoint_selection_direction"),
         "saved_validation_score": checkpoint_row.get("saved_validation_score"),
         "test_split_fingerprint": fingerprints[test_domain]["fingerprint"],
         "model_state_checksum": checkpoint_row.get("model_state_checksum"),
@@ -983,7 +1001,9 @@ def stage1a_row_key(row: dict[str, Any]) -> tuple[str, str, str]:
     return (str(row.get("variant", "")), str(row.get("checkpoint_name", "")), str(row.get("test_domain", "")))
 
 
-def minmax_normalize(rows: list[dict[str, Any]], key: str, *, higher_is_better: bool) -> dict[tuple[str, str, str], float]:
+def minmax_normalize(rows: list[dict[str, Any]], key: str, *, higher_is_better: bool | None = None) -> dict[tuple[str, str, str], float]:
+    if higher_is_better is None:
+        higher_is_better = metric_higher_is_better(key)
     vals = []
     row_keys = []
     for row in rows:
@@ -1156,10 +1176,10 @@ def create_stage1a_selection(
         write_csv(output_root / "01_stage1a/mixed_stage1a_checkpoint_selection.csv", [])
         return [], None
 
-    spatial_norm = minmax_normalize(rows, "spatial_corr", higher_is_better=True)
-    top5_norm = minmax_normalize(rows, "top5_dice", higher_is_better=True)
-    fg_norm = minmax_normalize(rows, "foreground_mse", higher_is_better=False)
-    mse_norm = minmax_normalize(rows, "reconstruction_mse", higher_is_better=False)
+    spatial_norm = minmax_normalize(rows, "spatial_corr")
+    top5_norm = minmax_normalize(rows, "top5_dice")
+    fg_norm = minmax_normalize(rows, "foreground_mse")
+    mse_norm = minmax_normalize(rows, "reconstruction_mse")
 
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -1284,10 +1304,10 @@ def create_stage1b_selection(
         ]
         rows.sort(
             key=lambda r: (
-                safe_float(r.get("top5_dice"), -1),
-                safe_float(r.get("spatial_corr"), -1),
-                -safe_float(r.get("foreground_mse"), 1e9),
-                -safe_float(r.get("reconstruction_mse"), 1e9),
+                selection_sort_value(r, "top5_dice", -1),
+                selection_sort_value(r, "spatial_corr", -1),
+                selection_sort_value(r, "foreground_mse", 1e9),
+                selection_sort_value(r, "reconstruction_mse", 1e9),
             ),
             reverse=True,
         )
@@ -1401,7 +1421,7 @@ def create_baseline_vs_specialized(
             s_mean = sum(s for _, s in pairs) / len(pairs)
             diff = s_mean - b_mean
             rel = diff / abs(b_mean) * 100.0 if b_mean else float("nan")
-            higher = metric not in {"reconstruction_mse", "mae", "foreground_mse"}
+            higher = comparison_higher_is_better(metric)
             winner = "specialized" if (s_mean > b_mean if higher else s_mean < b_mean) else "baseline"
             ci_low, ci_high = paired_bootstrap_diff_ci(
                 [b for b, _ in pairs],

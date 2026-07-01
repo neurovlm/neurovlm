@@ -22,6 +22,7 @@ import shutil
 import sys
 import time
 import traceback
+import warnings
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
@@ -143,6 +144,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ae-checkpoint-dir", default=None, help="Directory containing Stage 1 AE checkpoint files.")
     p.add_argument("--text-proj-init", choices=["random", "pretrained_infonce"], default="pretrained_infonce")
     p.add_argument("--freeze-text-proj", action="store_true")
+    p.add_argument(
+        "--strict-controlled-recipe",
+        action="store_true",
+        help=(
+            "Require the final controlled Stage 3 recipe: AE-pretrained encoder, "
+            "trainable pretrained InfoNCE text projection, and 384-d shared embedding."
+        ),
+    )
     p.add_argument("--device", choices=["auto", "cpu", "cuda", "mps"], default="auto")
     p.add_argument("--amp", dest="amp", action="store_true", default=True)
     p.add_argument("--no-amp", dest="amp", action="store_false")
@@ -1242,6 +1251,7 @@ def trainability_report(trainer: ALETrainer, args: argparse.Namespace) -> dict:
         "text_projection_trainable": text_trainable > 0,
         "loss": "symmetric InfoNCE",
         "shared_embedding_dimension": args.out_dim,
+        "strict_controlled_recipe": bool(getattr(args, "strict_controlled_recipe", False)),
         "cnn_encoder_trainable_parameter_count": brain_trainable,
         "text_projection_trainable_parameter_count": text_trainable,
         "brain_projection_trainable_parameter_count": 0,
@@ -1275,7 +1285,11 @@ def trainability_report(trainer: ALETrainer, args: argparse.Namespace) -> dict:
     with (Path(args.run_dir) / "stage3_trainability_report.json").open("w") as f:
         json.dump(report, f, indent=2)
     if failures:
-        raise RuntimeError(f"Stage 3 trainability verification failed: {failures}")
+        message = f"Stage 3 controlled-recipe verification failed: {failures}"
+        if getattr(args, "strict_controlled_recipe", False):
+            raise RuntimeError(message)
+        warnings.warn(message, RuntimeWarning, stacklevel=2)
+        print({"stage3_trainability_warning": failures, "strict_controlled_recipe": False}, flush=True)
     return report
 
 

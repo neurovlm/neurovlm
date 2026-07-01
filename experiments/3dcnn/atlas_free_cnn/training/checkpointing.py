@@ -17,6 +17,63 @@ DEFAULT_COMBINED_SCORE_WEIGHTS = {
     "generation_semantic_mesh_recall_at_10": 0.15,
 }
 
+MINIMIZE_METRICS = {
+    "val_loss",
+    "loss",
+    "mse",
+    "reconstruction_mse",
+    "foreground_mse",
+    "mae",
+    "latent_mse",
+    "val_latent_mse",
+    "val_reconstruction_mse",
+}
+
+MAXIMIZE_METRICS = {
+    "spatial_corr",
+    "top1_dice",
+    "top5_dice",
+    "top10_dice",
+    "top1_overlap",
+    "top5_overlap",
+    "top10_overlap",
+    "generation_normalized_auc",
+    "generation_mean_normalized_auc",
+    "val_generation_normalized_auc",
+    "val_spatial_corr",
+    "val_top5_dice",
+    "generation_top5_dice",
+    "generation_spatial_correlation",
+}
+
+
+def canonical_metric_name(metric_name: str) -> str:
+    metric = str(metric_name).strip()
+    if metric.endswith(".pt"):
+        metric = metric[:-3]
+    if metric.startswith("best_"):
+        metric = metric.removeprefix("best_")
+    return metric
+
+
+def metric_direction(metric_name: str) -> str:
+    metric = canonical_metric_name(metric_name)
+    if metric in MAXIMIZE_METRICS:
+        return "maximize"
+    if metric in MINIMIZE_METRICS:
+        return "minimize"
+    if metric.startswith("val_"):
+        base = metric.removeprefix("val_")
+        if base in MAXIMIZE_METRICS:
+            return "maximize"
+        if base in MINIMIZE_METRICS:
+            return "minimize"
+    raise ValueError(f"Unknown checkpoint/selection metric direction for {metric_name!r}")
+
+
+def metric_higher_is_better(metric_name: str) -> bool:
+    return metric_direction(metric_name) == "maximize"
+
 
 def combined_score(metrics: dict[str, float], weights: dict[str, float] | None = None) -> float:
     weights = weights or DEFAULT_COMBINED_SCORE_WEIGHTS
@@ -26,10 +83,17 @@ def combined_score(metrics: dict[str, float], weights: dict[str, float] | None =
 class CheckpointManager:
     """Save last and best checkpoints by named metric."""
 
-    def __init__(self, out_dir: str | Path, *, maximize: dict[str, bool] | None = None):
+    def __init__(
+        self,
+        out_dir: str | Path,
+        *,
+        maximize: dict[str, bool] | None = None,
+        require_explicit_direction: bool = False,
+    ):
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.maximize = maximize or {}
+        self.require_explicit_direction = bool(require_explicit_direction)
         self.best: dict[str, float] = {}
         self._best_epochs: dict[str, int] = {}
         self._last_epoch: int | None = None
@@ -42,10 +106,19 @@ class CheckpointManager:
     def save_last(self, payload: dict[str, Any], *, epoch: int | None = None) -> Path:
         if epoch is not None:
             self._last_epoch = epoch
-        return self.save("last.pt", payload)
+        path = self.save("last.pt", payload)
+        self.write_manifest()
+        return path
+
+    def _maximize_for(self, metric_name: str) -> bool:
+        if metric_name in self.maximize:
+            return bool(self.maximize[metric_name])
+        if self.require_explicit_direction:
+            raise ValueError(f"Missing explicit checkpoint direction for {metric_name!r}")
+        return True
 
     def maybe_save_best(self, metric_name: str, metric_value: float, payload: dict[str, Any], *, epoch: int | None = None) -> bool:
-        maximize = self.maximize.get(metric_name, True)
+        maximize = self._maximize_for(metric_name)
         old = self.best.get(metric_name)
         is_better = old is None or (metric_value > old if maximize else metric_value < old)
         if is_better:
@@ -59,7 +132,7 @@ class CheckpointManager:
     def write_manifest(self) -> None:
         rows = []
         for metric_name, value in sorted(self.best.items()):
-            maximize = self.maximize.get(metric_name, True)
+            maximize = self._maximize_for(metric_name)
             path = self.out_dir / f"best_{metric_name}.pt"
             rows.append({
                 "checkpoint_name": f"best_{metric_name}.pt",
@@ -82,4 +155,3 @@ class CheckpointManager:
         })
         with (self.out_dir / "checkpoint_manifest.json").open("w") as f:
             json.dump({"checkpoints": rows, "best": self.best, "maximize": self.maximize}, f, indent=2)
-
