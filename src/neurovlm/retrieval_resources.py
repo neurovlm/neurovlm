@@ -64,6 +64,8 @@ __all__ = [
     "_load_atlas_free_cnn_volumes",
     "_load_atlas_free_cnn_rows",
     "_load_atlas_free_cnn_text_pairs",
+    "_load_ale_only_cache_path",
+    "_load_ale_only_cache",
     "_load_atlas_free_cnn_normalized_specter2_cache",
     "_load_atlas_free_cnn_normalized_specter2_embeddings",
     "_load_latent_ngram",
@@ -77,6 +79,13 @@ __all__ = [
     "_load_nilearn_finetuned_ae",
     "_load_neurovault_finetuned_ae",
 ]
+
+
+ATLAS_FREE_CNN_DATASET_REPO = "neurovlm/atlas_free_cnn_dataset"
+ALE_ONLY_CACHE_FILENAMES = {
+    "atlas_free": "atlas_free_4mm_fwhm9_crop_float16.pt",
+    "difumo_compatible": "difumo_compatible_4mm_fwhm9_crop_float16.pt",
+}
 
 
 def _download_from_hf(repo_id: str, filename: str, repo_type: str = "dataset") -> str:
@@ -611,6 +620,78 @@ def _load_pubmed_images() -> torch.Tensor:
         map_location="cpu"
     ).values()
     return images, pmids
+
+
+def _ale_only_cache_filename(
+    mode: str = "atlas_free",
+    *,
+    resolution_mm: int | float = 4,
+    kernel_fwhm_mm: int | float = 9,
+    crop_to_brain: bool = True,
+    cache_dtype: str = "float16",
+) -> str:
+    """Return the uploaded ALE-only cache filename for the legacy notebooks."""
+
+    mode = str(mode)
+    if mode not in ALE_ONLY_CACHE_FILENAMES:
+        raise ValueError(f"Unknown ALE-only cache mode {mode!r}; expected one of {sorted(ALE_ONLY_CACHE_FILENAMES)}")
+    if int(float(resolution_mm)) != 4 or float(kernel_fwhm_mm) != 9.0 or not bool(crop_to_brain) or str(cache_dtype) != "float16":
+        raise ValueError(
+            "Only the uploaded 4 mm, FWHM 9, cropped, float16 ALE-only caches are available on Hugging Face."
+        )
+    return ALE_ONLY_CACHE_FILENAMES[mode]
+
+
+@lru_cache(maxsize=8)
+def _load_ale_only_cache_path(
+    mode: str = "atlas_free",
+    *,
+    resolution_mm: int | float = 4,
+    kernel_fwhm_mm: int | float = 9,
+    crop_to_brain: bool = True,
+    cache_dtype: str = "float16",
+    repo_id: str = ATLAS_FREE_CNN_DATASET_REPO,
+) -> str:
+    """Download or resolve the legacy ALE-only cache from Hugging Face.
+
+    This is for the older ALE-only notebooks that still train from the PubMed
+    ALE cache directly instead of the current multi-source tensor pack.
+    """
+
+    filename = _ale_only_cache_filename(
+        mode,
+        resolution_mm=resolution_mm,
+        kernel_fwhm_mm=kernel_fwhm_mm,
+        crop_to_brain=crop_to_brain,
+        cache_dtype=cache_dtype,
+    )
+    return _download_from_hf(repo_id, filename, repo_type="dataset")
+
+
+@lru_cache(maxsize=8)
+def _load_ale_only_cache(
+    mode: str = "atlas_free",
+    *,
+    resolution_mm: int | float = 4,
+    kernel_fwhm_mm: int | float = 9,
+    crop_to_brain: bool = True,
+    cache_dtype: str = "float16",
+    repo_id: str = ATLAS_FREE_CNN_DATASET_REPO,
+) -> dict:
+    """Load the legacy ALE-only cache payload from Hugging Face."""
+
+    path = _load_ale_only_cache_path(
+        mode,
+        resolution_mm=resolution_mm,
+        kernel_fwhm_mm=kernel_fwhm_mm,
+        crop_to_brain=crop_to_brain,
+        cache_dtype=cache_dtype,
+        repo_id=repo_id,
+    )
+    payload = torch.load(path, weights_only=False, map_location="cpu")
+    if not isinstance(payload, dict):
+        raise TypeError(f"Expected {path} to contain a dict payload.")
+    return payload
 
 
 @lru_cache(maxsize=1)
