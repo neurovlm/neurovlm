@@ -23,4 +23,6 @@ Notebooks 1-3 are exploratory ALE-only work: baseline encoders, autoencoder pret
 
 Notebooks 5-7 are the current multi-source pipeline. Notebook 5 builds and fine-tunes autoencoders, notebook 5b selects AE checkpoints on held-out splits, notebook 6 trains the legacy SPECTER downstream branches, notebook 6a reruns the corrected normalized-SPECTER branches, and notebook 7 evaluates the completed Stage 3/4 outputs.
 
+Stage 4 training is spatial-first by default: semantic AUC is disabled during training, the primary checkpoint is `best_val_top5_dice.pt`, and the semantic-selected checkpoint is not produced unless semantic AUC is explicitly enabled. Notebook 7 can compute semantic AUC later as a final diagnostic for the spatial-primary checkpoint.
+
 The old decoder-only text-to-brain notebook was removed because Stage 4 generation is now handled in the controlled downstream notebooks and diagnostics.

@@ -44,6 +44,14 @@ The text-to-brain order is:
 2. Use that projection plus the frozen AE decoder to generate maps.
 3. Evaluate generated maps on the held-out mixed test set by source.
 
+Stage 4 training is spatial-fidelity focused by default:
+
+- Stage 4 training semantic AUC: disabled
+- Stage 4 primary checkpoint: `best_val_top5_dice.pt`
+- Stage 4 secondary spatial checkpoint: `best_val_spatial_corr.pt`
+- Stage 4 semantic checkpoint: not produced during training unless semantic AUC is explicitly enabled
+- Stage 4 semantic diagnostics: available in Notebook 7 final evaluation
+
 To add the separate network-map test set used by brain-to-text semantic
 evaluation:
 

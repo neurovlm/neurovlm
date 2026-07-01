@@ -27,6 +27,8 @@ LEGACY_STAGE3_DIRNAME = "stage3_legacy_specter"
 CORRECTED_LEGACY_STAGE4_DIRNAME = "corrected_stage4_legacy_specter"
 NORMALIZED_STAGE3_CHECKPOINT = "best_val_normalized_recall_auc.pt"
 CORRECTED_STAGE4_CHECKPOINT = "best_val_generation_normalized_auc.pt"
+STAGE4_COMPUTE_SEMANTIC_AUC_DURING_TRAINING = False
+GENERATION_AUC_VAL_INTERVAL = 5
 STAGE4_PRIMARY_SPATIAL_CHECKPOINT = "best_val_top5_dice.pt"
 STAGE4_SPATIAL_CORR_CHECKPOINT = "best_val_spatial_corr.pt"
 STAGE4_SEMANTIC_CHECKPOINT = "best_val_generation_normalized_auc.pt"
@@ -254,7 +256,7 @@ def stage_checkpoint_path(
     if stage == "stage3":
         return out_dir / "checkpoints" / NORMALIZED_STAGE3_CHECKPOINT
     if stage == "stage4" and convention is not None:
-        return out_dir / "checkpoints" / CORRECTED_STAGE4_CHECKPOINT
+        return out_dir / "checkpoints" / STAGE4_PRIMARY_SPATIAL_CHECKPOINT
     return out_dir / "checkpoints" / "best_val_loss.pt"
 
 

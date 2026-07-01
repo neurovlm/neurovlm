@@ -510,7 +510,7 @@ def write_status_report(
         stage5_status = {
             "stage": "stage5",
             "status": "covered by stage4 trainer outputs",
-            "warnings": ["Generation semantic/spatial evaluation was written by Stage 4 trainer runs."],
+            "warnings": ["Stage 4 trainer runs write spatial generation evaluation by default; semantic AUC diagnostics are available in Notebook 7."],
         }
     statuses = [
         detect_stage_status("stage1", requested=requested.get("stage1", False), stage_dir=run / stage_dirs["stage1"]),
@@ -565,6 +565,12 @@ Main files to inspect:
 - `01_stage1_ae_pretraining/metrics/reconstruction_summary_by_source.csv`
 - `04_stage3_contrastive/metrics/test_metrics.json`
 - `06_stage5_generation_eval/metrics/generation_eval_metrics.json`
+
+Stage 4 checkpoint policy:
+- Stage 4 training semantic AUC: disabled by default
+- Stage 4 primary checkpoint: `best_val_top5_dice.pt`
+- Stage 4 semantic checkpoint: not produced during training unless explicitly enabled
+- Stage 4 semantic diagnostics: available in Notebook 7 final evaluation
 
 Warnings or failed stages:
 {warning_lines}

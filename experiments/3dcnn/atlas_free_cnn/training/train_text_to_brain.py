@@ -57,6 +57,26 @@ TEXT_TO_BRAIN_BATCH_CANDIDATES = [4096, 3072, 2048, 1536, 1024, 768, 512, 384, 2
 
 SAVE_LEGACY_CHECKPOINT_ALIASES = False
 
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _checkpoint_metric_from_name(name: str) -> str:
+    metric = str(name).strip()
+    if metric.endswith(".pt"):
+        metric = metric[:-3]
+    if metric.startswith("best_"):
+        metric = metric.removeprefix("best_")
+    return metric
+
+
 class PrimaryTextVolumeCollator:
     """Use exactly one primary text per map for text-to-brain training."""
 
@@ -659,14 +679,20 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     cfg = dict(cfg)
     cfg["batch_size"] = int(preflight["selected_batch_size"])
     cfg["preflight"] = preflight
+    cfg.setdefault("compute_semantic_auc_during_training", False)
     cfg.setdefault("generation_auc_val_interval", 5)
+    cfg.setdefault("stage4_primary_checkpoint", "best_val_top5_dice.pt")
+    cfg.setdefault("stage4_spatial_corr_checkpoint", "best_val_spatial_corr.pt")
+    cfg.setdefault("stage4_semantic_checkpoint", "best_val_generation_normalized_auc.pt")
     cfg.setdefault("run_duplicate_aware_val_every_epoch", False)
     cfg.setdefault("run_raw_and_group_auc_during_training", False)
     cfg.setdefault("run_full_debug_metrics_during_training", False)
     cfg.setdefault("final_test_eval", True)
     cfg.setdefault("compute_train_metrics", False)
-    cfg.setdefault("primary_checkpoint_metric", "val_top5_dice")
+    cfg.setdefault("primary_checkpoint_metric", _checkpoint_metric_from_name(str(cfg["stage4_primary_checkpoint"])))
     cfg.setdefault("force_generation_auc_for_early_stopping", False)
+    compute_semantic_auc_during_training = _as_bool(cfg.get("compute_semantic_auc_during_training", False))
+    cfg["compute_semantic_auc_during_training"] = compute_semantic_auc_during_training
     load_start = time.perf_counter()
     train_ds = UnifiedMapTextDataset(cfg["train_jsonl"])
     val_ds = UnifiedMapTextDataset(cfg["val_jsonl"])
@@ -728,7 +754,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     if dims != {768}:
         raise RuntimeError(f"Corrected Stage 4 requires all text cache vectors to be 768-d, got dimensions {sorted(dims)}")
     stage3_semantic_models = None
-    if cfg.get("stage3_contrastive_checkpoint"):
+    if compute_semantic_auc_during_training and cfg.get("stage3_contrastive_checkpoint"):
         stage3_semantic_models = load_stage3_contrastive_models(cfg["stage3_contrastive_checkpoint"], device)
     timing_profile["data_cache_load_sec"] = float(time.perf_counter() - load_start)
     print(f"[timing] data_cache_load seconds={timing_profile['data_cache_load_sec']:.2f}", flush=True)
@@ -737,8 +763,9 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     _ckpt_maximize: dict[str, bool] = {
         "val_spatial_corr": True,
         "val_top5_dice": True,
-        "val_generation_normalized_auc": True,
     }
+    if compute_semantic_auc_during_training:
+        _ckpt_maximize["val_generation_normalized_auc"] = True
     if SAVE_LEGACY_CHECKPOINT_ALIASES:
         _ckpt_maximize.update({
             "val_loss": False,
@@ -774,12 +801,18 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         or run_full_debug_metrics_during_training
     )
     early_stopping = bool(cfg.get("early_stopping", True))
-    early_metric = str(cfg.get("early_stopping_metric", "val_generation_normalized_auc"))
+    early_metric = str(cfg.get("early_stopping_metric", str(cfg.get("primary_checkpoint_metric", "val_top5_dice"))))
     early_mode = str(cfg.get("early_stopping_mode", "max" if "auc" in early_metric or "corr" in early_metric or "dice" in early_metric else "min"))
     early_patience = int(cfg.get("early_stopping_patience", 25))
     early_min_delta = float(cfg.get("early_stopping_min_delta", 0.0))
     early_metric_key = early_metric[4:] if early_metric.startswith("val_") else early_metric
     early_metric_requires_generation_auc = "generation" in early_metric_key and "auc" in early_metric_key
+    if early_metric_requires_generation_auc and not compute_semantic_auc_during_training:
+        raise ValueError(
+            "early_stopping_metric requires semantic generation AUC, but "
+            "compute_semantic_auc_during_training=False. Set "
+            "compute_semantic_auc_during_training=True or choose a spatial early-stopping metric."
+        )
     force_generation_auc_for_early_stopping = bool(cfg.get("force_generation_auc_for_early_stopping", False))
     best_early_value = -float("inf") if early_mode == "max" else float("inf")
     bad_val_checks = 0
@@ -841,13 +874,16 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 timing_profile["validation_eval_sec"].append({"epoch": int(epoch), "seconds": float(val_time)})
                 print(f"[timing] validation_eval epoch={epoch} seconds={val_time:.2f}", flush=True)
                 run_semantic_auc = (
-                    epoch == 1
-                    or epoch % generation_auc_val_interval == 0
-                    or epoch == max_epochs
-                    or (
-                        early_stopping
-                        and early_metric_requires_generation_auc
-                        and force_generation_auc_for_early_stopping
+                    compute_semantic_auc_during_training
+                    and (
+                        epoch == 1
+                        or epoch % generation_auc_val_interval == 0
+                        or epoch == max_epochs
+                        or (
+                            early_stopping
+                            and early_metric_requires_generation_auc
+                            and force_generation_auc_for_early_stopping
+                        )
                     )
                 )
                 if stage3_semantic_models is not None and run_semantic_auc:
@@ -920,6 +956,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 "patience": early_patience,
                 "min_delta": early_min_delta,
                 "generation_auc_forced_each_validation": bool(early_metric_requires_generation_auc and force_generation_auc_for_early_stopping),
+                "compute_semantic_auc_during_training": compute_semantic_auc_during_training,
                 "generation_auc_val_interval": generation_auc_val_interval,
                 "run_duplicate_aware_val_every_epoch": run_duplicate_aware_val_every_epoch,
                 "run_raw_and_group_auc_during_training": run_raw_and_group_auc_during_training,
@@ -938,7 +975,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 ckpt.maybe_save_best("val_reconstruction_mse", val_metrics.get("reconstruction_mse", float("inf")), payload)
             ckpt.maybe_save_best("val_spatial_corr", val_metrics.get("spatial_corr", -1.0), payload)
             ckpt.maybe_save_best("val_top5_dice", val_metrics.get("top5_dice", 0.0), payload)
-            if "generation_mean_normalized_auc" in val_metrics:
+            if compute_semantic_auc_during_training and "generation_mean_normalized_auc" in val_metrics:
                 ckpt.maybe_save_best(
                     "val_generation_normalized_auc",
                     val_metrics.get("generation_mean_normalized_auc", 0.0),
@@ -998,6 +1035,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 "early_stopping_patience": early_patience,
                 "early_stopping_min_delta": early_min_delta,
                 "generation_auc_forced_each_validation": bool(early_metric_requires_generation_auc and force_generation_auc_for_early_stopping),
+                "compute_semantic_auc_during_training": compute_semantic_auc_during_training,
                 "generation_auc_val_interval": generation_auc_val_interval,
                 "run_duplicate_aware_val_every_epoch": run_duplicate_aware_val_every_epoch,
                 "run_raw_and_group_auc_during_training": run_raw_and_group_auc_during_training,
@@ -1012,14 +1050,13 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     artifact_time = time.perf_counter() - artifact_start
     timing_profile["artifact_save_sec"].append({"artifact": "training_metadata", "seconds": float(artifact_time)})
     print(f"[timing] artifact_save artifact=training_metadata seconds={artifact_time:.2f}", flush=True)
-    primary_checkpoint_metric = str(cfg.get("primary_checkpoint_metric", "val_generation_normalized_auc"))
-    if primary_checkpoint_metric.startswith("best_"):
-        primary_checkpoint_metric = primary_checkpoint_metric.removeprefix("best_")
-    if primary_checkpoint_metric.endswith(".pt"):
-        primary_checkpoint_metric = primary_checkpoint_metric[:-3]
+    primary_checkpoint_metric = _checkpoint_metric_from_name(str(cfg.get("primary_checkpoint_metric", "val_top5_dice")))
     best_path = ckpt.out_dir / f"best_{primary_checkpoint_metric}.pt"
     if not best_path.exists():
-        for fallback_metric in ["val_generation_normalized_auc", "val_top5_dice", "val_spatial_corr", "val_loss"]:
+        fallback_metrics = ["val_top5_dice", "val_spatial_corr", "val_loss"]
+        if compute_semantic_auc_during_training:
+            fallback_metrics.insert(0, "val_generation_normalized_auc")
+        for fallback_metric in fallback_metrics:
             fallback_path = ckpt.out_dir / f"best_{fallback_metric}.pt"
             if fallback_path.exists():
                 best_path = fallback_path
@@ -1060,7 +1097,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         final_eval_time = time.perf_counter() - final_eval_start
         timing_profile["final_eval_sec"].append({"split": name, "metric_family": "spatial_generation", "seconds": float(final_eval_time)})
         print(f"[timing] final_eval split={name} metric_family=spatial_generation seconds={final_eval_time:.2f}", flush=True)
-        if stage3_semantic_models is not None:
+        if compute_semantic_auc_during_training and stage3_semantic_models is not None:
             stage3_brain_encoder, stage3_text_projection = stage3_semantic_models
             generation_auc_start = time.perf_counter()
             semantic = generation_semantic_auc(
@@ -1123,8 +1160,32 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="experiments/3dcnn/atlas_free_cnn/configs/text_to_brain_config.yaml")
+    p.add_argument(
+        "--compute-semantic-auc-during-training",
+        dest="compute_semantic_auc_during_training",
+        action="store_true",
+        default=None,
+        help="Compute Stage 4 semantic generation AUC during validation and save the semantic-selected checkpoint.",
+    )
+    p.add_argument(
+        "--no-compute-semantic-auc-during-training",
+        dest="compute_semantic_auc_during_training",
+        action="store_false",
+        default=None,
+        help="Skip Stage 4 semantic generation AUC during training/validation.",
+    )
+    p.add_argument("--generation-auc-val-interval", type=int, default=None)
+    p.add_argument("--stage4-primary-checkpoint", default=None)
     args = p.parse_args()
-    train_from_config(load_yaml(args.config))
+    cfg = load_yaml(args.config)
+    if args.compute_semantic_auc_during_training is not None:
+        cfg["compute_semantic_auc_during_training"] = args.compute_semantic_auc_during_training
+    if args.generation_auc_val_interval is not None:
+        cfg["generation_auc_val_interval"] = args.generation_auc_val_interval
+    if args.stage4_primary_checkpoint is not None:
+        cfg["stage4_primary_checkpoint"] = args.stage4_primary_checkpoint
+        cfg["primary_checkpoint_metric"] = _checkpoint_metric_from_name(args.stage4_primary_checkpoint)
+    train_from_config(cfg)
 
 
 if __name__ == "__main__":
