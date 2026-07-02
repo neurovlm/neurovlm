@@ -1043,7 +1043,7 @@ def _build_ale_autoencoder_from_payload(payload: dict) -> ALE3DCNNAutoEncoder:
 @lru_cache(maxsize=1)
 def _load_mixed_ae() -> ALE3DCNNAutoEncoder:
     """Load the mixed-source pretrained AE (Stage 1A) from HuggingFace."""
-    path = _download_from_hf("neurovlm/3d_cnn", "mixed_ae_best_top1_dice.pt", repo_type="model")
+    path = _download_from_hf("neurovlm/3d_cnn", "mixed_ae.pt", repo_type="model")
     payload = torch.load(path, map_location="cpu", weights_only=False)
     return _build_ale_autoencoder_from_payload(payload)
 
