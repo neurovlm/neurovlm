@@ -1051,7 +1051,7 @@ def _load_mixed_ae() -> ALE3DCNNAutoEncoder:
 @lru_cache(maxsize=1)
 def _load_pubmed_finetuned_ae() -> ALE3DCNNAutoEncoder:
     """Load the PubMed domain-finetuned AE (Stage 1B) from HuggingFace."""
-    path = _download_from_hf("neurovlm/3d_cnn", "pubmed_finetuned_ae_best_top1_dice.pt", repo_type="model")
+    path = _download_from_hf("neurovlm/3d_cnn", "pubmed_finetuned_ae_top5_dice.pt", repo_type="model")
     payload = torch.load(path, map_location="cpu", weights_only=False)
     return _build_ale_autoencoder_from_payload(payload)
 
@@ -1059,7 +1059,7 @@ def _load_pubmed_finetuned_ae() -> ALE3DCNNAutoEncoder:
 @lru_cache(maxsize=1)
 def _load_nilearn_finetuned_ae() -> ALE3DCNNAutoEncoder:
     """Load the Nilearn domain-finetuned AE (Stage 1B) from HuggingFace."""
-    path = _download_from_hf("neurovlm/3d_cnn", "nilearn_finetuned_ae_best_val_loss.pt", repo_type="model")
+    path = _download_from_hf("neurovlm/3d_cnn", "nilearn_finetuned_ae_spatial_corr.pt", repo_type="model")
     payload = torch.load(path, map_location="cpu", weights_only=False)
     return _build_ale_autoencoder_from_payload(payload)
 
@@ -1067,6 +1067,6 @@ def _load_nilearn_finetuned_ae() -> ALE3DCNNAutoEncoder:
 @lru_cache(maxsize=1)
 def _load_neurovault_finetuned_ae() -> ALE3DCNNAutoEncoder:
     """Load the NeuroVault domain-finetuned AE (Stage 1B) from HuggingFace."""
-    path = _download_from_hf("neurovlm/3d_cnn", "neurovault_finetuned_ae_best_top5_dice.pt", repo_type="model")
+    path = _download_from_hf("neurovlm/3d_cnn", "neurovault_finetuned_ae_spatial_corr.pt", repo_type="model")
     payload = torch.load(path, map_location="cpu", weights_only=False)
     return _build_ale_autoencoder_from_payload(payload)
