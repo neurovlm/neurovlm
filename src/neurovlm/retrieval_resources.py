@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Tuple
 import gzip, json, pickle
 
 import numpy as np
@@ -86,6 +86,8 @@ __all__ = [
     "_load_pubmed_finetuned_ae",
     "_load_nilearn_finetuned_ae",
     "_load_neurovault_finetuned_ae",
+    "_load_cnn_contrastive_checkpoint_path",
+    "_load_cnn_t2b_checkpoint_path",
 ]
 
 NEURO_QWEN_REPO_ID = "neurovlm/NeuroQwen3-0.6B"
@@ -94,9 +96,26 @@ PROJECTION_HEADS_REPO_ID = "neurovlm/ProjectionHeads"
 NEURO_QFORMER_REPO_ID = "neurovlm/NeuroQformer"
 NEURO_ADAPTER_REPO_ID = "neurovlm/NeuroAdapter"
 ATLAS_FREE_CNN_DATASET_REPO = "neurovlm/atlas_free_cnn_dataset"
+ATLAS_FREE_CNN_MODEL_REPO_ID = "neurovlm/3d_cnn"
 ALE_ONLY_CACHE_FILENAMES = {
     "atlas_free": "atlas_free_4mm_fwhm9_crop_float16.pt",
     "difumo_compatible": "difumo_compatible_4mm_fwhm9_crop_float16.pt",
+}
+CNN_CONTRASTIVE_FILENAMES = {
+    "mixed_to_pubmed": "cnn_contrastive_mixed_to_pubmed.pt",
+    "mixed_to_nilearn": "cnn_contrastive_mixed_to_nilearn.pt",
+    "mixed_to_neurovault": "cnn_contrastive_mixed_to_neurovault.pt",
+    "pubmed": "cnn_contrastive_pubmed.pt",
+    "nilearn": "cnn_contrastive_nilearn.pt",
+    "neurovault": "cnn_contrastive_neurovault.pt",
+}
+CNN_T2B_FILENAMES = {
+    "mixed_to_pubmed": "cnn_t2b_mixed_to_pubmed.pt",
+    "mixed_to_nilearn": "cnn_t2b_mixed_to_nilearn.pt",
+    "mixed_to_neurovault": "cnn_t2b_mixed_to_neurovault.pt",
+    "pubmed": "cnn_t2b_pubmed.pt",
+    "nilearn": "cnn_t2b_nilearn.pt",
+    "neurovault": "cnn_t2b_neurovault.pt",
 }
 
 
@@ -1185,3 +1204,38 @@ def _load_neurovault_finetuned_ae() -> ALE3DCNNAutoEncoder:
     path = _download_from_hf("neurovlm/3d_cnn", "neurovault_finetuned_ae_spatial_corr.pt", repo_type="model")
     payload = torch.load(path, map_location="cpu", weights_only=False)
     return _build_ale_autoencoder_from_payload(payload)
+
+
+@lru_cache(maxsize=8)
+def _load_cnn_contrastive_checkpoint_path(variant: str) -> str:
+    """Resolve a Stage 3 CNN contrastive checkpoint (brain encoder + text proj) from HuggingFace.
+
+    ``variant`` is one of the three ``mixed_to_{domain}`` baseline branches
+    (mixed AE encoder evaluated on that domain) or one of the three
+    domain-specialized branches (``pubmed``, ``nilearn``, ``neurovault``).
+    Not yet uploaded to HuggingFace; callers should expect this to raise until
+    the corresponding file lands in the ``neurovlm/3d_cnn`` model repo.
+    """
+    if variant not in CNN_CONTRASTIVE_FILENAMES:
+        raise ValueError(
+            f"Unknown CNN contrastive variant {variant!r}; expected one of {sorted(CNN_CONTRASTIVE_FILENAMES)}"
+        )
+    return _download_from_hf(ATLAS_FREE_CNN_MODEL_REPO_ID, CNN_CONTRASTIVE_FILENAMES[variant], repo_type="model")
+
+
+@lru_cache(maxsize=8)
+def _load_cnn_t2b_checkpoint_path(variant: str) -> str:
+    """Resolve a Stage 4 CNN text-to-brain projector checkpoint from HuggingFace.
+
+    ``variant`` is one of the three ``mixed_to_{domain}`` baseline branches
+    (mixed AE decoder paired with a projector trained for that domain) or one
+    of the three domain-specialized branches (``pubmed``, ``nilearn``,
+    ``neurovault``). Not yet uploaded to HuggingFace; callers should expect
+    this to raise until the corresponding file lands in the ``neurovlm/3d_cnn``
+    model repo.
+    """
+    if variant not in CNN_T2B_FILENAMES:
+        raise ValueError(
+            f"Unknown CNN text-to-brain variant {variant!r}; expected one of {sorted(CNN_T2B_FILENAMES)}"
+        )
+    return _download_from_hf(ATLAS_FREE_CNN_MODEL_REPO_ID, CNN_T2B_FILENAMES[variant], repo_type="model")
