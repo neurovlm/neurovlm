@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -20,10 +21,13 @@ TEXT_EMBED_DIM = 768
 LATENT_DIM = 384
 BRAIN_FLAT_DIM = 28542
 
-DEFAULT_TEXT_DATASETS = ("pubmed", "wiki", "cogatlas", "networks")
+DEFAULT_TEXT_DATASETS = ("wiki", "cogatlas", "ngrams", "pubmed_mesh", "llm_neuro_terms")
 DATASET_ALIASES = {
     "publications": "pubmed",
-    "neurowiki": "wiki",
+    "summaries": "pubmed_summaries",
+    "summary": "pubmed_summaries",
+    "neuro_summaries": "pubmed_summaries",
+    "pubmed_summary": "pubmed_summaries",
     "concepts": "cogatlas",
     "tasks": "cogatlas_task",
     "disorders": "cogatlas_disorder",
@@ -31,29 +35,50 @@ DATASET_ALIASES = {
     "networks": "networks",
     "networks_canonical": "networks",
     "canonical_networks": "networks",
+    "ngram": "ngrams",
+    "n_grams": "ngrams",
+    "n-grams": "ngrams",
 }
 DATASET_ID_COLUMNS = {
     "pubmed": "pmid",
+    "pubmed_summaries": "pmid",
     "wiki": "id",
     "cogatlas": "term",
     "cogatlas_task": "term",
     "cogatlas_disorder": "term",
     "networks": "title",
+    "ngrams": "term",
+    "pubmed_mesh": "term",
+    "pubmed_mesh_brain_rankable": "term",
+    "pubmed_mesh_brain_rankable_plus_molecular": "term",
+    "llm_neuro_terms": "term",
 }
 
 TEXT_DATASET_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
     "pubmed": ("pubmed_text", "publications", "pubmed"),
-    "wiki": ("wiki", "neurowiki"),
+    "pubmed_summaries": ("pubmed_summaries", "neuro_summaries"),
+    "wiki": ("wiki",),
     "cogatlas": ("cogatlas",),
     "cogatlas_task": ("cogatlas_task",),
     "cogatlas_disorder": ("cogatlas_disorder",),
+    "ngrams": ("ngrams",),
+    "pubmed_mesh": ("pubmed_mesh",),
+    "pubmed_mesh_brain_rankable": ("pubmed_mesh_brain_rankable",),
+    "pubmed_mesh_brain_rankable_plus_molecular": ("pubmed_mesh_brain_rankable_plus_molecular",),
+    "llm_neuro_terms": ("llm_neuro_terms",),
 }
 TEXT_LATENT_LOAD_KEYS: Dict[str, Tuple[str, ...]] = {
     "pubmed": ("pubmed_text", "publications", "pubmed"),
-    "wiki": ("wiki", "neurowiki"),
+    "pubmed_summaries": ("pubmed_summaries", "neuro_summaries"),
+    "wiki": ("wiki",),
     "cogatlas": ("cogatlas",),
     "cogatlas_task": ("cogatlas_task",),
     "cogatlas_disorder": ("cogatlas_disorder",),
+    "ngrams": ("ngrams",),
+    "pubmed_mesh": ("pubmed_mesh",),
+    "pubmed_mesh_brain_rankable": ("pubmed_mesh_brain_rankable",),
+    "pubmed_mesh_brain_rankable_plus_molecular": ("pubmed_mesh_brain_rankable_plus_molecular",),
+    "llm_neuro_terms": ("llm_neuro_terms",),
 }
 
 
@@ -152,7 +177,8 @@ class TextSearchResult:
             - ``description``
             - ``cosine_similarity``
             and ``query_index`` when multiple queries are present.
-            When ``dataset=None``, each dataset contributes up to ``k`` rows.
+            When ``dataset=None``, returns the global top ``k`` rows across
+            all active datasets.
         """
         if k <= 0:
             raise ValueError("k must be > 0")
@@ -171,7 +197,7 @@ class TextSearchResult:
             candidates: List[pd.DataFrame] = []
             for ds in datasets:
                 scores = self.scores_by_dataset[ds][:, q_idx]
-                n = min(int(k), int(scores.shape[0]))
+                n = min(int(k), int(scores.shape[0])) if dataset is not None else int(scores.shape[0])
                 if n == 0:
                     continue
                 top_idx = torch.topk(scores, k=n, largest=True, sorted=True).indices
@@ -191,6 +217,8 @@ class TextSearchResult:
                 continue
 
             merged = pd.concat(candidates, ignore_index=True)
+            if dataset is None and len(merged) > k:
+                merged = merged.nlargest(k, "cosine_similarity").reset_index(drop=True)
             if n_queries > 1:
                 merged.insert(0, "query_index", q_idx)
             out_blocks.append(merged)
@@ -203,9 +231,14 @@ class TextSearchResult:
 
         out = pd.concat(out_blocks, ignore_index=True)
         if n_queries > 1:
-            out = out.sort_values(["query_index", "dataset", "cosine_similarity"], ascending=[True, True, False]).reset_index(drop=True)
+            sort_cols = ["query_index", "cosine_similarity"] if dataset is None else ["query_index", "dataset", "cosine_similarity"]
+            ascending = [True, False] if dataset is None else [True, True, False]
+            out = out.sort_values(sort_cols, ascending=ascending).reset_index(drop=True)
         else:
-            out = out.sort_values(["dataset", "cosine_similarity"], ascending=[True, False]).reset_index(drop=True)
+            if dataset is None:
+                out = out.sort_values("cosine_similarity", ascending=False).reset_index(drop=True)
+            else:
+                out = out.sort_values(["dataset", "cosine_similarity"], ascending=[True, False]).reset_index(drop=True)
         return out
 
     def format(
@@ -620,9 +653,34 @@ class _QueryBuilder:
         head: Literal["mse", "infonce"] = "mse",
         project: bool = True,
         dataset: Optional[Union[str, Sequence[str]]] = None,
+        adapter: bool = False,
     ) -> BrainSearchResult:
         """Run text/brain query against the brain target space."""
-        return self.parent.to_brain(self.payload, head=head, project=project, dataset=dataset)
+        return self.parent.to_brain(
+            self.payload,
+            head=head,
+            project=project,
+            dataset=dataset,
+            adapter=adapter,
+        )
+
+    def generate_brain(
+        self,
+        project: bool = True,
+        adapter: bool = False,
+    ) -> BrainSearchResult:
+        """Generate brain maps from text with the MSE decoder path."""
+        if self.source != "text":
+            raise ValueError("generate_brain is only available for text(...) queries.")
+        return self.parent.generate_brain(self.payload, project=project, adapter=adapter)
+
+    def retrieve_brain(
+        self,
+        project: bool = True,
+        dataset: Optional[Union[str, Sequence[str]]] = None,
+    ) -> BrainSearchResult:
+        """Retrieve brain maps with the contrastive InfoNCE path."""
+        return self.parent.retrieve_brain(self.payload, project=project, dataset=dataset)
 
     def to_text(
         self,
@@ -633,6 +691,47 @@ class _QueryBuilder:
         if head != "infonce":
             raise ValueError("to_text only supports head='infonce'.")
         return self.parent.to_text(self.payload, datasets=datasets, project=True)
+
+    def retrieve_text(self, datasets: Optional[Sequence[str]] = None) -> TextSearchResult:
+        """Retrieve text with the contrastive InfoNCE path."""
+        return self.parent.retrieve_text(self.payload, datasets=datasets)
+
+    def generate_text(
+        self,
+        *,
+        basis: str | None = "network",
+        prefix_text: str | None = None,
+        canonical_basis: str | None = None,
+        max_new_tokens: int = 256,
+        num_beams: int = 3,
+        do_sample: bool = False,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        seed: int | None = 12345,
+        projection_temp: float | None = 0.05,
+        use_canonical_projection: bool | None = True,
+        repetition_penalty: float = 1.18,
+        no_repeat_ngram_size: int = 4,
+    ) -> str | list[str]:
+        """Generate text from a brain map with the QFormer/Qwen path."""
+        if self.source != "brain":
+            raise ValueError("generate_text is only available for brain(...) queries.")
+        return self.parent.generate_text(
+            self.payload,
+            basis=basis,
+            prefix_text=prefix_text,
+            canonical_basis=canonical_basis,
+            max_new_tokens=max_new_tokens,
+            num_beams=num_beams,
+            do_sample=do_sample,
+            temperature=temperature,
+            top_p=top_p,
+            seed=seed,
+            projection_temp=projection_temp,
+            use_canonical_projection=use_canonical_projection,
+            repetition_penalty=repetition_penalty,
+            no_repeat_ngram_size=no_repeat_ngram_size,
+        )
 
 
 class NeuroVLM:
@@ -655,12 +754,17 @@ class NeuroVLM:
 
         self.datasets = tuple(self._canonicalize_datasets(datasets or DEFAULT_TEXT_DATASETS))
 
-        self._proj_head_image = None
+        self._proj_head_image_infonce = None
         self._proj_head_text_infonce = None
         self._proj_head_text_mse = None
         self._specter = None
         self._autoencoder = None
         self._masker = None
+        self._neuro_qformer = None
+        self._neuro_qwen_model = None
+        self._neuro_qwen_tokenizer = None
+        self._neuro_qwen_token_norm: Optional[float] = None
+        self._neuro_adapter = None
 
         self._text_raw_embeddings: Dict[str, torch.Tensor] = {}
         self._text_shared_embeddings: Dict[str, torch.Tensor] = {}
@@ -759,12 +863,62 @@ class NeuroVLM:
         self._last_result = result
         return result
 
+    def retrieve_text(
+        self,
+        X: Any,
+        datasets: Optional[Sequence[str]] = None,
+        project: bool = True,
+    ) -> TextSearchResult:
+        """Alias for contrastive text retrieval. Keeps ``to_text`` semantics explicit."""
+        return self.to_text(X, datasets=datasets, project=project)
+
+    def generate_text(
+        self,
+        X: Any,
+        *,
+        basis: str | None = "network",
+        prefix_text: str | None = None,
+        canonical_basis: str | None = None,
+        max_new_tokens: int = 256,
+        num_beams: int = 3,
+        do_sample: bool = False,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        seed: int | None = 12345,
+        projection_temp: float | None = 0.05,
+        use_canonical_projection: bool | None = True,
+        repetition_penalty: float = 1.18,
+        no_repeat_ngram_size: int = 4,
+    ) -> str | list[str]:
+        """Generate text for one or more brain maps with NeuroQFormer + NeuroQwen3.
+
+        This is intentionally separate from ``to_text``, which remains the
+        contrastive retrieval API.
+        """
+        return self._generate_brain_text(
+            X,
+            basis=basis,
+            prefix_text=prefix_text,
+            canonical_basis=canonical_basis,
+            max_new_tokens=max_new_tokens,
+            num_beams=num_beams,
+            do_sample=do_sample,
+            temperature=temperature,
+            top_p=top_p,
+            seed=seed,
+            projection_temp=projection_temp,
+            use_canonical_projection=use_canonical_projection,
+            repetition_penalty=repetition_penalty,
+            no_repeat_ngram_size=no_repeat_ngram_size,
+        )
+
     def to_brain(
         self,
         X: Any,
         head: Literal["mse", "infonce"] = "mse",
         project: bool = True,
         dataset: Optional[Union[str, Sequence[str]]] = None,
+        adapter: bool = False,
     ) -> BrainSearchResult:
         """Retrieve brain results for one or many queries.
 
@@ -781,6 +935,11 @@ class NeuroVLM:
             Defaults to ``("pubmed", "networks", "neurovault")`` for InfoNCE.
             Ignored when ``head="mse"`` because MSE directly generates
             brain maps from projected text.
+        adapter : bool, optional
+            If ``True`` with ``head="mse"``, generate flat brain maps with the
+            packaged ``neuro_adapter`` instead of the legacy
+            text-projection-head plus autoencoder decoder path. Only text
+            payloads and 768-d SPECTER embeddings are supported.
 
         Returns
         -------
@@ -800,6 +959,37 @@ class NeuroVLM:
             self._last_text_query = None
 
         self._validate_head(head)
+        if adapter and head != "mse":
+            raise ValueError("adapter=True is only supported with head='mse'.")
+
+        if adapter:
+            text_embedding = self._prepare_adapter_text_embedding(X)
+            self._ensure_neuro_adapter()
+            self._ensure_autoencoder()
+            self._ensure_masker()
+
+            assert self._neuro_adapter is not None
+            with torch.no_grad():
+                flatmaps = torch.sigmoid(
+                    self._neuro_adapter(_l2_normalize(text_embedding.to(self.device)))
+                ).detach().cpu()
+
+            self.last_generated_brain_flat = flatmaps
+            result = BrainSearchResult(
+                scores=None,
+                metadata=None,
+                latents=None,
+                query_embeddings=text_embedding.detach().cpu(),
+                retrieval_space="mse",
+                generated_flatmaps=flatmaps,
+                masker=self._masker,
+                decoder=self._autoencoder.decoder,
+                dataset_image_getter=self._get_dataset_nifti,
+            )
+            self.last_brain_result = result
+            self._last_result = result
+            return result
+
         query, retrieval_space = self._prepare_brain_query(X, head=head, project=project)
 
         # MSE path: decode projected text latents directly to brain flatmaps.
@@ -895,6 +1085,24 @@ class NeuroVLM:
         self._last_result = result
         return result
 
+    def generate_brain(
+        self,
+        X: Any,
+        project: bool = True,
+        adapter: bool = False,
+    ) -> BrainSearchResult:
+        """Alias for text-to-brain generation via ``to_brain(head='mse')``."""
+        return self.to_brain(X, head="mse", project=project, adapter=adapter)
+
+    def retrieve_brain(
+        self,
+        X: Any,
+        project: bool = True,
+        dataset: Optional[Union[str, Sequence[str]]] = None,
+    ) -> BrainSearchResult:
+        """Alias for contrastive brain retrieval via ``to_brain(head='infonce')``."""
+        return self.to_brain(X, head="infonce", project=project, dataset=dataset)
+
     def top_k(
         self,
         k: int = 5,
@@ -983,8 +1191,9 @@ class NeuroVLM:
             text_emb = self._encode_text(X)
             if project:
                 self._ensure_projection_heads()
+                text_emb = _l2_normalize(text_emb.to(self.device))
                 with torch.no_grad():
-                    text_emb = self._proj_head_text_infonce(text_emb.to(self.device))
+                    text_emb = self._proj_head_text_infonce(text_emb)
                 return _l2_normalize(text_emb), "shared"
             return _l2_normalize(text_emb.to(self.device)), "raw_text"
 
@@ -994,7 +1203,7 @@ class NeuroVLM:
             latent = self._encode_brain_image(X)
             self._ensure_projection_heads()
             with torch.no_grad():
-                latent = self._proj_head_image(latent.to(self.device))
+                latent = self._proj_head_image_infonce(latent.to(self.device))
             return _l2_normalize(latent), "shared"
 
         tensor = self._coerce_numeric_query(X)
@@ -1007,8 +1216,9 @@ class NeuroVLM:
         if dim == TEXT_EMBED_DIM:
             if project:
                 self._ensure_projection_heads()
+                tensor = _l2_normalize(tensor.to(self.device))
                 with torch.no_grad():
-                    tensor = self._proj_head_text_infonce(tensor.to(self.device))
+                    tensor = self._proj_head_text_infonce(tensor)
                 return _l2_normalize(tensor), "shared"
             return _l2_normalize(tensor.to(self.device)), "raw_text"
 
@@ -1018,7 +1228,7 @@ class NeuroVLM:
             latent = self._encode_brain_flat(tensor)
             self._ensure_projection_heads()
             with torch.no_grad():
-                latent = self._proj_head_image(latent.to(self.device))
+                latent = self._proj_head_image_infonce(latent.to(self.device))
             return _l2_normalize(latent), "shared"
 
         if dim == LATENT_DIM:
@@ -1026,7 +1236,7 @@ class NeuroVLM:
                 raise ValueError("brain-to-text retrieval requires `project=True`.")
             self._ensure_projection_heads()
             with torch.no_grad():
-                latent = self._proj_head_image(tensor.to(self.device))
+                latent = self._proj_head_image_infonce(tensor.to(self.device))
             return _l2_normalize(latent), "shared"
 
         raise ValueError(
@@ -1073,6 +1283,22 @@ class NeuroVLM:
             f"Unsupported embedding dim {dim}. Expected {TEXT_EMBED_DIM}, {LATENT_DIM}, or {BRAIN_FLAT_DIM}."
         )
 
+    def _prepare_adapter_text_embedding(self, X: Any) -> torch.Tensor:
+        """Prepare a raw 768-d SPECTER embedding for the neuro-adapter."""
+        if self._is_text_payload(X):
+            return _l2_normalize(self._encode_text(X).to(self.device))
+
+        tensor = self._coerce_numeric_query(X)
+        if tensor is None:
+            raise TypeError("adapter=True expects text or a 768-d SPECTER text embedding.")
+
+        dim = int(tensor.shape[1])
+        if dim != TEXT_EMBED_DIM:
+            raise ValueError(
+                f"adapter=True expects a {TEXT_EMBED_DIM}-d text embedding, got dim {dim}."
+            )
+        return _l2_normalize(tensor.to(self.device))
+
     def _project_text_to_brain_space(
         self,
         text_embedding: torch.Tensor,
@@ -1098,7 +1324,7 @@ class NeuroVLM:
         if head == "infonce" and project:
             self._ensure_projection_heads()
             with torch.no_grad():
-                out = self._proj_head_image(latent.to(self.device))
+                out = self._proj_head_image_infonce(latent.to(self.device))
             return _l2_normalize(out), "infonce"
         return latent.to(self.device), "mse"
 
@@ -1112,6 +1338,18 @@ class NeuroVLM:
                     latent = self._as_2d_tensor(latent).to(self.device)
                     table = self._load_dataset_compat("networks_canonical").copy()
                     metadata = self._build_networks_canonical_metadata(table, n_rows=int(latent.shape[0]))
+                elif dataset == "ngrams":
+                    # ngram_embeddings.pt contains already-projected 384-dim embeddings
+                    # (not raw 768-dim SPECTER output), so we must bypass proj_head_text_infonce
+                    from neurovlm.retrieval_resources import _load_latent_ngram, _load_ngram
+                    latent = self._as_2d_tensor(_load_latent_ngram()).to(self.device)
+                    labels = _load_ngram()
+                    metadata = pd.DataFrame({"title": labels, "description": [""] * len(labels)})
+                    normalized = _l2_normalize(latent)
+                    self._text_raw_embeddings[dataset] = normalized
+                    self._text_shared_embeddings[dataset] = normalized
+                    self._text_metadata[dataset] = metadata
+                    continue
                 else:
                     latent, ids = self._load_text_latent_with_ids(dataset)
                     latent = self._as_2d_tensor(latent).to(self.device)
@@ -1148,7 +1386,7 @@ class NeuroVLM:
         if require_infonce and self._brain_embeddings_infonce is None:
             self._ensure_projection_heads()
             with torch.no_grad():
-                shared = self._proj_head_image(self._brain_latent.to(self.device))
+                shared = self._proj_head_image_infonce(self._brain_latent.to(self.device))
             self._brain_embeddings_infonce = _l2_normalize(shared)
 
     def _ensure_network_brain_index(self) -> None:
@@ -1162,7 +1400,7 @@ class NeuroVLM:
 
         self._ensure_projection_heads()
         with torch.no_grad():
-            shared = self._proj_head_image(latent_tensor.to(self.device))
+            shared = self._proj_head_image_infonce(latent_tensor.to(self.device))
 
         self._network_brain_latent = latent_tensor
         self._network_brain_latent_cpu = latent_tensor.detach().cpu()
@@ -1180,7 +1418,7 @@ class NeuroVLM:
 
         self._ensure_projection_heads()
         with torch.no_grad():
-            shared = self._proj_head_image(latent_tensor.to(self.device))
+            shared = self._proj_head_image_infonce(latent_tensor.to(self.device))
 
         self._neurovault_brain_latent = latent_tensor
         self._neurovault_brain_latent_cpu = latent_tensor.detach().cpu()
@@ -1605,8 +1843,8 @@ class NeuroVLM:
 
     def _ensure_projection_heads(self) -> None:
         """Lazy-load projection heads."""
-        if self._proj_head_image is None:
-            self._proj_head_image = load_model("proj_head_image_infonce").to(self.device).eval()
+        if self._proj_head_image_infonce is None:
+            self._proj_head_image_infonce = load_model("proj_head_image_infonce").to(self.device).eval()
         if self._proj_head_text_infonce is None:
             self._proj_head_text_infonce = load_model("proj_head_text_infonce").to(self.device).eval()
         if self._proj_head_text_mse is None:
@@ -1623,10 +1861,210 @@ class NeuroVLM:
         if self._autoencoder is None:
             self._autoencoder = load_model("autoencoder").to(self.device).eval()
 
+    def _ensure_neuro_adapter(self) -> None:
+        """Lazy-load the packaged text-to-brain adapter."""
+        if self._neuro_adapter is None:
+            self._neuro_adapter = load_model("neuro_adapter").to(self.device).eval()
+
     def _ensure_masker(self) -> None:
         """Lazy-load NIfTI masker."""
         if self._masker is None:
             self._masker = load_masker()
+
+    def _ensure_generative_text_model(
+        self,
+        *,
+        projection_temp: float | None = 0.05,
+        canonical_basis: str | None = "network",
+        use_canonical_projection: bool | None = True,
+    ) -> None:
+        """Lazy-load NeuroQFormer and NeuroQwen for brain-to-text generation."""
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from neurovlm.retrieval_resources import NEURO_QWEN_REPO_ID, _load_neuro_qformer
+
+        if self._neuro_qformer is None:
+            self._neuro_qformer = _load_neuro_qformer(
+                device=self.device,
+                projection_temp=projection_temp,
+                canonical_basis=canonical_basis,
+                use_canonical_projection=use_canonical_projection,
+            ).eval()
+        else:
+            self._neuro_qformer.projection_temp = projection_temp
+            self._neuro_qformer.canonical_basis = canonical_basis
+            if use_canonical_projection is not None:
+                self._neuro_qformer.use_canonical_projection = use_canonical_projection
+            self._neuro_qformer.to(self.device).eval()
+
+        if self._neuro_qwen_tokenizer is None:
+            self._neuro_qwen_tokenizer = AutoTokenizer.from_pretrained(NEURO_QWEN_REPO_ID, use_fast=True)
+            if self._neuro_qwen_tokenizer.pad_token_id is None:
+                self._neuro_qwen_tokenizer.pad_token = self._neuro_qwen_tokenizer.eos_token
+
+        if self._neuro_qwen_model is None:
+            dtype = torch.float32 if self.device.type == "cpu" else torch.bfloat16
+            self._neuro_qwen_model = AutoModelForCausalLM.from_pretrained(
+                NEURO_QWEN_REPO_ID,
+                torch_dtype=dtype,
+                device_map=None,
+            ).to(self.device).eval()
+            if getattr(self._neuro_qwen_model.config, "pad_token_id", None) is None:
+                self._neuro_qwen_model.config.pad_token_id = self._neuro_qwen_tokenizer.pad_token_id
+            with torch.no_grad():
+                self._neuro_qwen_token_norm = (
+                    self._neuro_qwen_model.get_input_embeddings()
+                    .weight.detach()
+                    .float()
+                    .norm(dim=1)
+                    .mean()
+                    .item()
+                )
+        elif self._neuro_qwen_token_norm is None:
+            with torch.no_grad():
+                self._neuro_qwen_token_norm = (
+                    self._neuro_qwen_model.get_input_embeddings()
+                    .weight.detach()
+                    .float()
+                    .norm(dim=1)
+                    .mean()
+                    .item()
+                )
+
+    @staticmethod
+    def _generation_prefix_for_basis(basis: str | None) -> str | None:
+        key = "all" if basis is None else str(basis).lower()
+        key = {
+            "networks": "network",
+            "regions": "region",
+            "functions": "function",
+            "cognition": "function",
+            "cognitive": "function",
+        }.get(key, key)
+        return {
+            "network": "[NETWORK]",
+            "region": "[REGION]",
+            "function": "[FUNCTION]",
+        }.get(key)
+
+    def _prepare_brain_latent_for_generation(self, X: Any) -> torch.Tensor:
+        """Prepare NIfTI, mask-space vectors, or latent vectors for QFormer generation."""
+        if self._is_text_payload(X):
+            raise TypeError("generate_text expects a brain image, flattened brain vector, or 384-d latent.")
+
+        if isinstance(X, nib.Nifti1Image):
+            return self._encode_brain_image(X).to(self.device)
+
+        tensor = self._coerce_numeric_query(X)
+        if tensor is None:
+            raise TypeError("generate_text expects a NIfTI image, tensor, numpy array, or numeric sequence.")
+
+        dim = int(tensor.shape[1])
+        if dim == LATENT_DIM:
+            return tensor.to(self.device)
+        if dim == BRAIN_FLAT_DIM:
+            return self._encode_brain_flat(tensor).to(self.device)
+        raise ValueError(f"Unsupported brain input dim {dim}. Expected {LATENT_DIM} or {BRAIN_FLAT_DIM}.")
+
+    def _match_generative_lm_token_norm(self, vis: torch.Tensor) -> torch.Tensor:
+        target_norm = torch.tensor(self._neuro_qwen_token_norm, device=vis.device, dtype=vis.dtype)
+        vis_norm = vis.float().norm(dim=-1, keepdim=True).clamp_min(1e-6).to(vis.dtype)
+        return vis * (target_norm / vis_norm)
+
+    @torch.no_grad()
+    def _generate_brain_text(
+        self,
+        X: Any,
+        *,
+        basis: str | None = "network",
+        prefix_text: str | None = None,
+        canonical_basis: str | None = None,
+        max_new_tokens: int = 256,
+        num_beams: int = 3,
+        do_sample: bool = False,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        seed: int | None = 12345,
+        projection_temp: float | None = 0.05,
+        use_canonical_projection: bool | None = True,
+        repetition_penalty: float = 1.18,
+        no_repeat_ngram_size: int = 4,
+    ) -> str | list[str]:
+        """Internal QFormer/Qwen generation path for brain inputs."""
+        canonical_basis = basis if canonical_basis is None else canonical_basis
+        self._ensure_generative_text_model(
+            projection_temp=projection_temp,
+            canonical_basis=canonical_basis,
+            use_canonical_projection=use_canonical_projection,
+        )
+        raw_latent = self._prepare_brain_latent_for_generation(X)
+        prefix_text = self._generation_prefix_for_basis(basis) if prefix_text is None else prefix_text
+
+        assert self._neuro_qformer is not None
+        assert self._neuro_qwen_model is not None
+        assert self._neuro_qwen_tokenizer is not None
+        model_dtype = next(self._neuro_qwen_model.parameters()).dtype
+
+        with torch.autocast(
+            device_type=self.device.type,
+            dtype=torch.bfloat16,
+            enabled=self.device.type == "cuda",
+        ):
+            vis = self._neuro_qformer(
+                raw_latent,
+                basis=canonical_basis,
+                projection_temp=projection_temp,
+                use_canonical_projection=use_canonical_projection,
+            )
+            vis = self._match_generative_lm_token_norm(vis).to(model_dtype)
+
+            inputs_embeds = vis
+            if prefix_text:
+                prefix_ids = self._neuro_qwen_tokenizer(
+                    prefix_text,
+                    add_special_tokens=False,
+                    return_tensors="pt",
+                )["input_ids"].to(self.device)
+                prefix_embeds = self._neuro_qwen_model.get_input_embeddings()(prefix_ids).to(model_dtype)
+                prefix_embeds = prefix_embeds.expand(vis.shape[0], -1, -1)
+                inputs_embeds = torch.cat([vis, prefix_embeds], dim=1)
+
+            attn = torch.ones(inputs_embeds.shape[:2], dtype=torch.long, device=self.device)
+            gen_kwargs = {
+                "inputs_embeds": inputs_embeds,
+                "attention_mask": attn,
+                "max_new_tokens": max_new_tokens,
+                "num_beams": num_beams,
+                "do_sample": do_sample,
+                "repetition_penalty": repetition_penalty,
+                "no_repeat_ngram_size": no_repeat_ngram_size,
+                "eos_token_id": self._neuro_qwen_tokenizer.eos_token_id,
+                "pad_token_id": self._neuro_qwen_tokenizer.pad_token_id
+                or self._neuro_qwen_tokenizer.eos_token_id,
+            }
+            if temperature is not None:
+                gen_kwargs["temperature"] = temperature
+            if top_p is not None:
+                gen_kwargs["top_p"] = top_p
+            if not do_sample:
+                gen_kwargs.setdefault("temperature", 1.0)
+                gen_kwargs.setdefault("top_p", 1.0)
+                gen_kwargs.setdefault("top_k", 50)
+
+            cuda_devices = [self.device.index or torch.cuda.current_device()] if self.device.type == "cuda" else []
+            with torch.random.fork_rng(devices=cuda_devices, enabled=seed is not None):
+                if seed is not None:
+                    torch.manual_seed(seed)
+                    if torch.cuda.is_available():
+                        torch.cuda.manual_seed_all(seed)
+                out_ids = self._neuro_qwen_model.generate(**gen_kwargs)
+
+        decoded = [
+            self._neuro_qwen_tokenizer.decode(row, skip_special_tokens=True).strip()
+            for row in out_ids
+        ]
+        if prefix_text:
+            decoded = [prefix_text + text for text in decoded]
+        return decoded[0] if len(decoded) == 1 else decoded
 
     def _encode_text(self, X: Any) -> torch.Tensor:
         """Encode raw text payload(s) into 768-d embeddings."""
@@ -1929,6 +2367,27 @@ class NeuroVLM:
         assert self.last_text_result is not None
         if table is None:
             table = self.last_text_result.top_k(k=k)
+        ranking_context = self._format_ranked_evidence(table)
+        if ranking_context:
+            if self._wants_short_llm_output(user_prompt):
+                rank_instruction = (
+                    "Ranked retrieval evidence from the brain activation map:\n"
+                    f"{ranking_context}\n\n"
+                    "Writing rule: use this evidence only to choose the best wording. "
+                    "Follow the additional user instruction exactly. Do not define or explain the rows."
+                )
+            else:
+                rank_instruction = (
+                    "Ranked retrieval evidence from the brain activation map:\n"
+                    f"{ranking_context}\n\n"
+                    "Writing rule: define and explain row 1 as the main topic. If rows 1-2 are closely related, "
+                    "define them together. Use lower-ranked rows to explain related functions, regions, or "
+                    "component concepts. Do not call the result a hypothesis."
+                )
+            user_prompt = (
+                f"{rank_instruction}\n\nAdditional user instruction: {user_prompt}"
+                if user_prompt else rank_instruction
+            )
         papers_ctx, wiki_ctx, cogatlas_ctx = self._format_table_as_context(table)
 
         # Passing the query_embeddings tensor (not a str) triggers
@@ -1988,10 +2447,11 @@ class NeuroVLM:
                 )
 
             # Run text-to-text retrieval without overwriting the user's stored results.
+            # Default to cogatlas + wiki so the LLM receives clean term lists.
             saved_last_result = self._last_result
             saved_last_text_result = self.last_text_result
             try:
-                text_result = self.to_text(self._last_text_query)
+                text_result = self.to_text(self._last_text_query, datasets=["wiki", "cogatlas", "ngrams"])
                 _table = text_result.top_k(k=k)
                 papers_ctx, wiki_ctx, cogatlas_ctx = self._format_table_as_context(_table)
             finally:
@@ -2035,15 +2495,22 @@ class NeuroVLM:
         wiki_lines: List[str] = []
         cogatlas_lines: List[str] = []
 
-        for _, row in table.iterrows():
+        for _, row in self._ranked_table(table).iterrows():
             dataset = str(row.get("dataset", "")).lower()
             title = str(row.get("title", "")).strip()
             description = str(row.get("description", "")).strip()
+            rank = int(row.get("_llm_rank", 0))
+            score = row.get("cosine_similarity", None)
 
             if not title and not description:
                 continue
 
-            entry = f"- {title}: {description}" if description else f"- {title}"
+            prefix = f"[rank={rank}"
+            if score is not None and pd.notna(score):
+                prefix += f", score={float(score):.3f}"
+            prefix += f", dataset={dataset}]"
+            entry_title = f"{prefix} {title}".strip()
+            entry = f"- {entry_title}: {description}" if description else f"- {entry_title}"
 
             if dataset == "pubmed":
                 papers_lines.append(entry)
@@ -2051,7 +2518,16 @@ class NeuroVLM:
                 # NeuroWiki concepts and brain-atlas networks are both
                 # neuroscience reference material.
                 wiki_lines.append(entry)
-            elif dataset in ("cogatlas", "cogatlas_task", "cogatlas_disorder"):
+            elif dataset in (
+                "cogatlas",
+                "cogatlas_task",
+                "cogatlas_disorder",
+                "ngrams",
+                "pubmed_mesh",
+                "pubmed_mesh_brain_rankable",
+                "pubmed_mesh_brain_rankable_plus_molecular",
+                "llm_neuro_terms",
+            ):
                 cogatlas_lines.append(entry)
             else:
                 papers_lines.append(entry)
@@ -2061,6 +2537,53 @@ class NeuroVLM:
         cogatlas_context = "\n".join(cogatlas_lines) if cogatlas_lines else None
 
         return papers_context, wiki_context, cogatlas_context
+
+    @staticmethod
+    def _ranked_table(table: pd.DataFrame) -> pd.DataFrame:
+        """Return table sorted by retrieval score with explicit LLM rank."""
+        if table is None or table.empty:
+            return pd.DataFrame()
+        ranked = table.copy()
+        if "cosine_similarity" in ranked.columns:
+            ranked = ranked.sort_values("cosine_similarity", ascending=False, kind="mergesort")
+        ranked = ranked.reset_index(drop=True)
+        ranked["_llm_rank"] = np.arange(1, len(ranked) + 1)
+        return ranked
+
+    @staticmethod
+    def _wants_short_llm_output(user_prompt: str = "") -> bool:
+        """Detect title/one-sentence generation requests."""
+        text = str(user_prompt or "").lower()
+        markers = (
+            "title only",
+            "output only",
+            "single concise sentence",
+            "one concise sentence",
+            "reply with a single",
+            "generate only a paper title",
+        )
+        return any(marker in text for marker in markers)
+
+    @classmethod
+    def _format_ranked_evidence(cls, table: pd.DataFrame, max_description_chars: int = 180) -> str:
+        """Format top-k rows so the LLM sees global order and similarity scores."""
+        ranked = cls._ranked_table(table)
+        lines: List[str] = []
+        for _, row in ranked.iterrows():
+            rank = int(row["_llm_rank"])
+            dataset = str(row.get("dataset", "")).strip() or "unknown"
+            title = str(row.get("title", "")).strip()
+            description = str(row.get("description", "")).strip()
+            score = row.get("cosine_similarity", None)
+            score_text = f" score={float(score):.3f}" if score is not None and pd.notna(score) else ""
+            desc_text = ""
+            if description:
+                clean_desc = re.sub(r"\s+", " ", description)
+                desc_text = f" - {clean_desc[:max_description_chars]}"
+                if len(clean_desc) > max_description_chars:
+                    desc_text += "..."
+            lines.append(f"{rank}. [{dataset}{score_text}] {title}{desc_text}")
+        return "\n".join(lines)
 
     @staticmethod
     def _validate_head(head: str) -> None:

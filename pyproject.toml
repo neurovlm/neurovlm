@@ -15,7 +15,9 @@ dependencies = [
   "safetensors",
   "adapters",
   "transformers",
-  "pyarrow"
+  "pyarrow",
+  "accelerate>=1.12.0",
+  "datasets>=4.8.4",
 ]
 authors = [
   { name="Ryan Hammonds", email="ryanphammonds@gmail.com" },
@@ -33,6 +35,8 @@ license-files = ["LICENSE"]
 
 [project.optional-dependencies]
 metrics = [
+  "nltk",
+  "rouge-score",
   "scikit-learn",
   "scikit-image",
   "nltk",
@@ -80,6 +84,8 @@ docs = [
   "sphinx-copybutton>=0.5,<1",
 ]
 full = [
+  "nltk",
+  "rouge-score",
   "scikit-learn",
   "scikit-image",
   "nltk",

@@ -295,7 +295,8 @@ def search_text_corpus_given_neuroimage(
     # --- project corpus embeddings ---
     proj_txt = _proj_head_text_infonce()
     proj_txt.eval()
-    corpus_proj = proj_txt(corpus_embeddings.float())  # (N, proj_dim)
+    corpus_raw = _l2_normalize(corpus_embeddings.float())
+    corpus_proj = proj_txt(corpus_raw)  # (N, proj_dim)
     corpus_proj = _l2_normalize(corpus_proj)
 
     # --- cosine similarity and ranking ---
@@ -354,6 +355,7 @@ def search_text_corpus_given_text(
     specter = _load_specter()
     query_raw = specter(query)[0].detach()  # (768,)
     query_raw = query_raw.unsqueeze(0)      # (1, 768)
+    query_raw = _l2_normalize(query_raw)
 
     proj_txt = _proj_head_text_infonce()
     proj_txt.eval()
@@ -361,7 +363,8 @@ def search_text_corpus_given_text(
     query_emb = _l2_normalize(query_emb)
 
     # --- project corpus embeddings ---
-    corpus_proj = proj_txt(corpus_embeddings.float())  # (N, proj_dim)
+    corpus_raw = _l2_normalize(corpus_embeddings.float())
+    corpus_proj = proj_txt(corpus_raw)  # (N, proj_dim)
     corpus_proj = _l2_normalize(corpus_proj)
 
     # --- cosine similarity and ranking ---
