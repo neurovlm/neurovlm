@@ -1,71 +1,47 @@
 """NeuroVLM GNN module.
 
-Two tracks:
-
-Track 1 — DiFuMo Soft Atlas GAT
-    Encodes brain activation maps as node features on a functional-connectivity
-    graph over 512 DiFuMo components and trains a GAT with an InfoNCE objective
-    against SPECTER text embeddings.
-
-Track 2 — Unified KG R-GCN
+Unified KG R-GCN
     Trains a relational GCN on the unified neuroscience knowledge graph
     (33,784 entities, 6 relation types, 329,566 edges) using a link prediction
     objective with DistMult scoring.  Produces entity/relation embeddings that
     can be used for KG completion and downstream retrieval.
 
-Typical usage — Track 1
------------------------
->>> from neurovlm.gnn.atlas import load_difumo_components, compute_difumo_coefficients
->>> from neurovlm.gnn.graph import build_brain_graph
->>> from neurovlm.gnn.dataset import BrainGraphDataset
->>> from neurovlm.gnn.model import BrainGAT
->>> from neurovlm.gnn.train import GATTrainer
+ALE dense CNN
+    Atlas-free 3D CNN encoder/decoder over dense ALE volumes, used by the
+    contrastive and text-to-brain generation pipelines in
+    `experiments/3dcnn/`.
 
-Typical usage — Track 2
------------------------
+Typical usage — KG
+------------------
 >>> from neurovlm.gnn.kg_data import load_kg, KGSplits
 >>> from neurovlm.gnn.rgcn import RGCNLinkPredictor
 >>> from neurovlm.gnn.kg_train import RGCNTrainer
+
+Typical usage — ALE CNN
+------------------------
+>>> from neurovlm.gnn.ale_cnn import ALE3DCNNEncoder
+>>> from neurovlm.gnn.ale_dataset import ALEVolumeDataset
+>>> from neurovlm.gnn.model import TextProjHead
 """
 
-# Track 1 — GAT
+# atlas utilities (DiFuMo components, used by semantic evaluation)
 from .atlas import load_difumo_components, compute_difumo_coefficients
-from .graph import build_brain_graph, load_fc_matrix
-from .dataset import BrainGraphDataset
-from .model import BrainGAT, TextProjHead
-from .train import GATTrainer
 
-# Track 2 — R-GCN (KG)
+# Unified KG — R-GCN
 from .kg_data import load_kg, KGData, KGSplits, KGTripleDataset, kg_collate_fn
 from .rgcn import RGCNLinkPredictor
 from .kg_train import RGCNTrainer, evaluate_link_prediction
 
-# Track 2 — Atlas-Free Coordinate GNN
-try:
-    from .coord_graph import coords_to_graph, normalize_coords, denormalize_coords, MNI_HALF
-    from .coord_dataset import CoordGraphDataset
-    from .coord_model import CoordGNN
-    from .coord_baselines import CoordDeepSet
-    from .coord_train import CoordTrainer
-except ImportError:  # pragma: no cover - optional torch_geometric dependency
-    coords_to_graph = normalize_coords = denormalize_coords = MNI_HALF = None
-    CoordGraphDataset = CoordGNN = CoordDeepSet = CoordTrainer = None
-
-# Track 3 — ALE dense CNN
+# ALE dense CNN
+from .model import TextProjHead
 from .ale_cnn import ALE3DCNNEncoder, ALEFlatMLPEncoder
 from .ale_dataset import ALEPreprocessConfig, ALEVolumeDataset, build_or_load_ale_cache
 
 __all__ = [
-    # Track 1 — DiFuMo GAT
+    # atlas utilities
     "load_difumo_components",
     "compute_difumo_coefficients",
-    "build_brain_graph",
-    "load_fc_matrix",
-    "BrainGraphDataset",
-    "BrainGAT",
-    "TextProjHead",
-    "GATTrainer",
-    # Track 2 — R-GCN (KG)
+    # Unified KG — R-GCN
     "load_kg",
     "KGData",
     "KGSplits",
@@ -74,16 +50,8 @@ __all__ = [
     "RGCNLinkPredictor",
     "RGCNTrainer",
     "evaluate_link_prediction",
-    # Track 2 — Atlas-Free Coordinate GNN
-    "coords_to_graph",
-    "normalize_coords",
-    "denormalize_coords",
-    "MNI_HALF",
-    "CoordGraphDataset",
-    "CoordGNN",
-    "CoordDeepSet",
-    "CoordTrainer",
-    # Track 3 — ALE dense CNN
+    # ALE dense CNN
+    "TextProjHead",
     "ALE3DCNNEncoder",
     "ALEFlatMLPEncoder",
     "ALEPreprocessConfig",

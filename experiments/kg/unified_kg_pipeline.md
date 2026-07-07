@@ -21,19 +21,10 @@ unified KG from scratch.
 | 7 | `kg_edge_merge.ipynb` | Merges the original 329K edges + 14.79M qualifier edges + 52 LLM edges. Deduplicates by keeping the highest-weight edge per (subject, relation, object) triple. Overwrites `unified_kg_edges.parquet` with the final 15.1M-edge file. | `data/unified_kg/unified_kg_edges.parquet` (15,113,176 edges — final) |
 | 8 | `rgcn_kg_colab.ipynb` | Trains the R-GCN link prediction model on the unified KG on Google Colab (A100). See `rgcn_pipeline.md` for full training details. | `MyDrive/neurovlm/embeddings/entity_embeddings_v2.pt` |
 
-**Track 2 notebooks (coordinate GNN — independent of the KG pipeline):**
-
-| notebook | what it does |
-|---|---|
-| `coord_gnn_colab.ipynb` | Trains the atlas-free coordinate GNN (Track 2) on Colab. Uses fMRI coordinate data, not the unified KG. |
-
 **Also in `experiments/`:**
 
 | file | description |
 |---|---|
-| `train_coord_gnn.py` | Local training script for the coordinate GNN (Track 2 equivalent of the Colab notebook) |
-| `train_difumo_gat.py` | Training script for the DiFuMo soft atlas GAT (early Track 1 experiment, predates the KG approach) |
-| `difumo_gat.ipynb` | Interactive walkthrough of the DiFuMo/GAT approach — early Track 1 experiment, kept for reference |
 | `rgcn_pipeline.md` | Architecture, training config, and embedding details for the R-GCN (Phase 3) |
 | `unified_kg_pipeline.md` | This file — documents the KG build pipeline (Phases 1–2) |
 | `data.zip` | Old data snapshot (predates the qualifier-typed edges and v2 embeddings — **do not use as the authoritative data source**) |

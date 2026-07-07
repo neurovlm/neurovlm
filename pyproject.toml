@@ -39,8 +39,6 @@ metrics = [
   "rouge-score",
   "scikit-learn",
   "scikit-image",
-  "nltk",
-  "rouge-score",
 ]
 nct = [
   "neuromaps",
@@ -88,8 +86,6 @@ full = [
   "rouge-score",
   "scikit-learn",
   "scikit-image",
-  "nltk",
-  "rouge-score",
   "nimare",
   "requests",
   "beautifulsoup4",

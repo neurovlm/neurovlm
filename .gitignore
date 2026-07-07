@@ -2,23 +2,12 @@
 *.pt
 *.parquet
 *.pkl.gz
-<<<<<<< Updated upstream
-*.pt
-*.parquet
-*.pkl.gz
-experiments/data/mesh_kg/desc2026.xml
-*.json
-*.jsonl
-*.csv
-*.nii.gz
-*.pyc
-__pycache__/
-=======
 *.csv
 *.nii.gz
 *.json
 *.jsonl
 *.xml
 *.pyc
-*.gitignore
->>>>>>> Stashed changes
+__pycache__/
+experiments/data/mesh_kg/desc2026.xml
+experiments/3dcnn/atlas_free_cnn/cache/

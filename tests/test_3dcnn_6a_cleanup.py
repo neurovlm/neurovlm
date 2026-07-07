@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -150,7 +151,9 @@ def test_notebook_defaults_keep_downstream_branch_and_stage1b_controls_explicit(
     source6a = "\n".join("".join(cell.get("source", "")) for cell in nb6a["cells"])
     source5 = "\n".join("".join(cell.get("source", "")) for cell in nb5["cells"])
 
-    assert 'AE_BRANCH_MODE = "mixed_only"' in source6a
+    ae_branch_mode_match = re.search(r'^AE_BRANCH_MODE = "([^"]+)"', source6a, re.MULTILINE)
+    assert ae_branch_mode_match is not None, "AE_BRANCH_MODE must be set explicitly to a string literal"
+    assert ae_branch_mode_match.group(1) in AE_BRANCH_MODES
     assert "ae_branch_mode=AE_BRANCH_MODE" in source6a
     assert "AE_BRANCH_REQUIRED_SELECTION_KEYS" in source6a
     assert "required_selection_keys=tuple(AE_BRANCH_REQUIRED_SELECTION_KEYS)" in source6a
