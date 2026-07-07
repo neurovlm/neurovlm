@@ -9,8 +9,11 @@ def select_tqdm() -> Callable:
     tqdm : tqdm.tqdm or tqdm.notebook.tqdm
 
     """
-    from IPython import get_ipython
-    ipython = get_ipython()
+    try:
+        from IPython import get_ipython
+        ipython = get_ipython()
+    except ImportError:
+        ipython = None
 
     if ipython is None:
         # Script
