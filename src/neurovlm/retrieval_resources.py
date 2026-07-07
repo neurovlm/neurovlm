@@ -1213,8 +1213,9 @@ def _load_cnn_contrastive_checkpoint_path(variant: str) -> str:
     ``variant`` is one of the three ``mixed_to_{domain}`` baseline branches
     (mixed AE encoder evaluated on that domain) or one of the three
     domain-specialized branches (``pubmed``, ``nilearn``, ``neurovault``).
-    Not yet uploaded to HuggingFace; callers should expect this to raise until
-    the corresponding file lands in the ``neurovlm/3d_cnn`` model repo.
+    All six variants are uploaded to the ``neurovlm/3d_cnn`` model repo;
+    callers should still handle a missing/renamed file gracefully in case a
+    variant is later pulled or renamed upstream.
     """
     if variant not in CNN_CONTRASTIVE_FILENAMES:
         raise ValueError(
@@ -1230,9 +1231,9 @@ def _load_cnn_t2b_checkpoint_path(variant: str) -> str:
     ``variant`` is one of the three ``mixed_to_{domain}`` baseline branches
     (mixed AE decoder paired with a projector trained for that domain) or one
     of the three domain-specialized branches (``pubmed``, ``nilearn``,
-    ``neurovault``). Not yet uploaded to HuggingFace; callers should expect
-    this to raise until the corresponding file lands in the ``neurovlm/3d_cnn``
-    model repo.
+    ``neurovault``). All six variants are uploaded to the ``neurovlm/3d_cnn``
+    model repo; callers should still handle a missing/renamed file gracefully
+    in case a variant is later pulled or renamed upstream.
     """
     if variant not in CNN_T2B_FILENAMES:
         raise ValueError(

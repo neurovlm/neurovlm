@@ -533,6 +533,25 @@ def download_text_embedding_cache(spec: dict[str, Any], *, include_sidecars: boo
     return target
 
 
+def load_or_download_text_embedding_cache(spec: dict[str, Any]) -> dict[str, Any]:
+    """Load the resolved text embedding cache, downloading it from Hugging Face first if missing locally.
+
+    ``load_text_embedding_cache`` (train_ale_cnn.py) only reads a local path
+    -- it never touches the network -- so callers that pass its resolved
+    path straight through silently report a missing cache on any machine
+    that hasn't already populated the local repo cache dir (fresh clone,
+    fresh Colab, CI). This mirrors the local-first/HF-fallback pattern
+    already used for the unified split JSONLs (`discover_split_dir`) so text
+    embeddings behave the same way.
+    """
+    from atlas_free_cnn.training.train_ale_cnn import load_text_embedding_cache
+
+    local_path = Path(spec["local_cache_path"]).expanduser()
+    if not local_path.exists():
+        download_text_embedding_cache(spec)
+    return load_text_embedding_cache(str(local_path))
+
+
 def build_normalized_specter2_cache(
     spec: dict[str, Any],
     *,

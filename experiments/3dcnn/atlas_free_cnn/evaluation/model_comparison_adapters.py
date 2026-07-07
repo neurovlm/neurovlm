@@ -9,12 +9,12 @@ NeuroVLM baseline or an atlas-free CNN variant:
 - text-to-brain adapters: ``generate(...)``
 
 CNN contrastive (Stage 3) and CNN text-to-brain (Stage 4) checkpoints come in
-six variants, not four: three ``mixed_to_{domain}`` baseline branches (the
-Stage 1A mixed AE evaluated on that domain) and three domain-specialized
-branches (``pubmed``, ``nilearn``, ``neurovault``, each paired with its own
-Stage 1B domain-finetuned AE). They are not uploaded yet for any variant, so
-constructing ``CNNContrastiveAdapter`` or ``CNNTextToBrainAdapter`` will raise
-until the checkpoints land in the ``neurovlm/3d_cnn`` model repo.
+six variants: three ``mixed_to_{domain}`` baseline branches (the Stage 1A
+mixed AE evaluated on that domain) and three domain-specialized branches
+(``pubmed``, ``nilearn``, ``neurovault``, each paired with its own Stage 1B
+domain-finetuned AE). All six variants are uploaded to the
+``neurovlm/3d_cnn`` model repo; ``CNNContrastiveAdapter``/``CNNTextToBrainAdapter``
+still raise if a variant is later renamed or pulled upstream.
 """
 
 from __future__ import annotations

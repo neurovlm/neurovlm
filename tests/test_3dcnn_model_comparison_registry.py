@@ -93,6 +93,7 @@ def test_registry_marks_baseline_vs_specialized_branch() -> None:
     assert registry.MODEL_SPECS["cnn_contrastive_pubmed"].branch == "specialized"
     assert registry.MODEL_SPECS["cnn_contrastive_pubmed"].domain == "pubmed"
     assert registry.MODEL_SPECS["cnn_t2b_mixed_to_neurovault"].branch == "baseline"
+    assert registry.MODEL_SPECS["cnn_t2b_mixed_to_neurovault"].domain == "neurovault"
     assert registry.MODEL_SPECS["cnn_t2b_neurovault"].branch == "specialized"
 
 

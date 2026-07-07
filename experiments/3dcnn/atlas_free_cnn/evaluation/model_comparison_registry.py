@@ -2,12 +2,12 @@
 
 Resolution is done through the HuggingFace loaders in
 ``neurovlm.retrieval_resources`` so this module never hardcodes a repo
-filename. CNN contrastive (Stage 3) and CNN text-to-brain (Stage 4)
-checkpoints are not uploaded yet for any variant, so resolving them is
-expected to fail until they land in the ``neurovlm/3d_cnn`` model repo;
-callers get a ``missing_checkpoint`` status instead of a crash.
+filename. All CNN contrastive (Stage 3) and CNN text-to-brain (Stage 4)
+checkpoint variants are uploaded to the ``neurovlm/3d_cnn`` model repo, but
+resolution still falls back to a ``missing_checkpoint`` status instead of
+crashing if a variant is later renamed or pulled upstream.
 
-Stage 3/4 come in six variants per family, not four: three ``mixed_to_{domain}``
+Stage 3/4 come in six variants per family: three ``mixed_to_{domain}``
 baseline branches (the Stage 1A mixed AE evaluated on that domain) and three
 domain-specialized branches (``pubmed``, ``nilearn``, ``neurovault``, each
 paired with its own Stage 1B domain-finetuned AE). This mirrors the
