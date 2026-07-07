@@ -104,7 +104,6 @@ def grouped_bar(
     bar_width = group_width / n_series
     x = np.arange(len(categories))
 
-    seen_families: dict[str, Any] = {}
     for i, series_id in enumerate(series_ids):
         offsets = x - group_width / 2 + bar_width * (i + 0.5)
         values = []
@@ -114,7 +113,6 @@ def grouped_bar(
         family = model_family(series_id)
         color = FAMILY_COLOR[family]
         bars = ax.bar(offsets, values, width=bar_width * 0.92, color=color, zorder=3, label=series_id)
-        seen_families[family] = bars
         for rect, value in zip(bars, values):
             if np.isnan(value):
                 continue
@@ -135,9 +133,21 @@ def grouped_bar(
     ax.set_title(title, fontsize=11, loc="left")
     _style_axes(ax)
     if show_legend and len(series_ids) >= 2:
+        # Group legend entries by model family, not literal series id. A
+        # family like "cnn mixed baseline" can resolve to a different literal
+        # id per category (cnn_contrastive_mixed_to_pubmed / _to_nilearn /
+        # _to_neurovault -- only one ever appears in a given category), so
+        # showing each literal id as its own same-colored legend entry reads
+        # as three different models when it is one. Families with a single
+        # literal id keep that id as the label since it is more specific.
+        family_ids: dict[str, list[str]] = {}
+        for s in series_ids:
+            family_ids.setdefault(model_family(s), []).append(s)
+        legend_families = sorted(family_ids, key=FAMILY_ORDER.index)
+        legend_labels = [FAMILY_LABEL[fam] if len(family_ids[fam]) > 1 else family_ids[fam][0] for fam in legend_families]
         ax.legend(
-            handles=[plt.Rectangle((0, 0), 1, 1, color=FAMILY_COLOR[model_family(s)]) for s in series_ids],
-            labels=list(series_ids),
+            handles=[plt.Rectangle((0, 0), 1, 1, color=FAMILY_COLOR[fam]) for fam in legend_families],
+            labels=legend_labels,
             frameon=False,
             fontsize=8,
             loc="upper left",
@@ -220,10 +230,23 @@ def small_multiples_lines(
         ax.set_xlabel(xlabel)
         _style_axes(ax)
     axes[0].set_ylabel(ylabel)
-    handles, labels = axes[-1].get_legend_handles_labels()
-    if handles:
-        by_label = dict(zip(labels, handles))
-        fig.legend(by_label.values(), by_label.keys(), frameon=False, fontsize=8, loc="center left", bbox_to_anchor=(1.0, 0.5))
+    # Legend by family across *all* panels, not just the last axis's handles:
+    # a family like "cnn mixed baseline" can resolve to a different literal
+    # series id per panel (cnn_contrastive_mixed_to_pubmed / _to_nilearn /
+    # _to_neurovault), so reading the legend off one panel would show only
+    # that panel's variant name as if it were the only one plotted anywhere.
+    all_series_ids = sorted(df[series_col].dropna().unique(), key=lambda s: (FAMILY_ORDER.index(model_family(s)), s))
+    if all_series_ids:
+        family_ids: dict[str, list[str]] = {}
+        for s in all_series_ids:
+            family_ids.setdefault(model_family(s), []).append(s)
+        legend_families = sorted(family_ids, key=FAMILY_ORDER.index)
+        handles = [plt.Line2D([0], [0], color=FAMILY_COLOR[fam], linewidth=2, marker="o", markersize=4) for fam in legend_families]
+        labels = [FAMILY_LABEL[fam] if len(family_ids[fam]) > 1 else family_ids[fam][0] for fam in legend_families]
+        if reference_line:
+            handles.append(plt.Line2D([0], [0], color="#b7b6b0", linestyle="--", linewidth=1))
+            labels.append("Chance")
+        fig.legend(handles, labels, frameon=False, fontsize=8, loc="center left", bbox_to_anchor=(1.0, 0.5))
     fig.suptitle(suptitle, fontsize=12, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 0.98, 0.95))
     return fig
