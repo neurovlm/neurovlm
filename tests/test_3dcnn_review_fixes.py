@@ -75,8 +75,8 @@ def test_stage3_non_strict_controlled_recipe_warns_invalid_recipe(tmp_path: Path
     assert any("controlled-recipe verification failed" in str(item.message) for item in caught)
 
 
-def test_notebook_6a_stage3_launches_with_strict_controlled_recipe() -> None:
-    nb = json.loads((THREEDCNN / "6 multi source stage3 stage4.ipynb").read_text())
+def test_current_stage3_launches_with_strict_controlled_recipe() -> None:
+    nb = json.loads((THREEDCNN / "5 multi source stage3 stage4.ipynb").read_text())
     source = "\n".join("".join(cell.get("source", "")) for cell in nb["cells"])
     assert '"--strict-controlled-recipe"' in source
 
@@ -87,6 +87,22 @@ def test_notebook_guide_references_existing_notebooks() -> None:
     assert notebooks
     missing = [name for name in notebooks if not (THREEDCNN / name).exists()]
     assert missing == []
+
+
+def test_core_3dcnn_modules_do_not_import_notebook_helpers() -> None:
+    core_paths = [
+        THREEDCNN / "atlas_free_cnn" / "pipeline_outputs.py",
+        THREEDCNN / "atlas_free_cnn" / "stage1_selection_integration.py",
+        *sorted((THREEDCNN / "atlas_free_cnn" / "training").glob("*.py")),
+    ]
+
+    offenders = []
+    for path in core_paths:
+        source = path.read_text()
+        if "atlas_free_cnn.notebook_utils" in source or "from atlas_free_cnn import notebook_utils" in source:
+            offenders.append(str(path.relative_to(REPO_ROOT)))
+
+    assert offenders == []
 
 
 def test_autoencoder_metric_direction_policy() -> None:

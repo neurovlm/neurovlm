@@ -8,7 +8,7 @@ This note documents how the atlas-free CNN image tensors, JSONL rows, text targe
 | --- | --- | --- | --- |
 | Global data paths and source choices | `experiments/3dcnn/atlas_free_cnn/configs/paths.yaml`, `experiments/3dcnn/atlas_free_cnn/configs/dataset_config.yaml` | Runtime path values and atlas/source lists | `paths.yaml` points to the old PubMed ALE cache. `dataset_config.yaml` defines Nilearn atlas choices and text-row policy. |
 | Shared NIfTI helpers | `experiments/3dcnn/atlas_free_cnn/data_building/preprocessing.py` | Reusable MNI target loading, resampling, array cleaning, NIfTI metadata | Used by Nilearn/custom atlas ingestion and helper conversions. |
-| PubMed ALE cache creation/loading | `neurovlm.gnn.ale_dataset.ALEPreprocessConfig`, `neurovlm.gnn.ale_dataset.build_or_load_ale_cache`; called by `experiments/3dcnn/atlas_free_cnn/training/train_ale_cnn.py` and `experiments/3dcnn/atlas_free_cnn/data_building/build_ale_fwhm_caches.py` | `data/ale_caches/atlas_free_4mm_fwhm9_crop_float16.pt` and optional FWHM sweep caches | Applies coordinate-to-ALE smoothing, 4 mm mask/crop, max normalization, clamp, and dtype conversion. |
+| PubMed ALE cache creation/loading | `atlas_free_cnn.training.ale_dataset.ALEPreprocessConfig`, `atlas_free_cnn.training.ale_dataset.build_or_load_ale_cache`; called by `experiments/3dcnn/atlas_free_cnn/training/train_ale_cnn.py` and `experiments/3dcnn/atlas_free_cnn/data_building/build_ale_fwhm_caches.py` | `data/ale_caches/atlas_free_4mm_fwhm9_crop_float16.pt` and optional FWHM sweep caches | Applies coordinate-to-ALE smoothing, 4 mm mask/crop, max normalization, clamp, and dtype conversion. |
 | PubMed unified rows and text positives | `experiments/3dcnn/atlas_free_cnn/data_building/ingest_pubmed_ale.py`, `definitions.py`, `text_registry.py` | PubMed JSONL rows with `tensor_path` and `tensor_index` into the old ALE cache | Does not rebuild PubMed images in the final pack. It indexes the old good cache and attaches title/summary/MeSH positives. |
 | Nilearn atlas/network map ingestion | `experiments/3dcnn/atlas_free_cnn/data_building/ingest_nilearn_atlases.py`, `preprocessing.py` | Nilearn-derived NIfTI component maps plus JSONL rows | Fetches atlases, extracts 3D labels/components, resamples to MNI152 2 mm, and writes atlas/network text positives. |
 | NeuroVault collection and image preprocessing | `experiments/3dcnn/atlas_free_cnn/data_building/ingest_neurovault.py` | `neurovault_manifest.csv`, `neurovault_text_positives.jsonl`, `neurovault_cnn_volumes.pt`, `neurovault_preprocess_report.json` | Downloads accepted NeuroVault NIfTIs, quality-filters metadata, resamples to 4 mm crop, positive-clips, robust-percentile scales, and records quality flags. |
@@ -40,7 +40,7 @@ Its saved preprocessing config is:
 
 Related scripts:
 
-- `neurovlm.gnn.ale_dataset`: defines `ALEPreprocessConfig`, coordinate smoothing, mask/crop, normalization, and packed cache loading.
+- `atlas_free_cnn.training.ale_dataset`: defines `ALEPreprocessConfig`, coordinate smoothing, mask/crop, normalization, and packed cache loading.
 - `experiments/3dcnn/atlas_free_cnn/training/train_ale_cnn.py`: older PubMed-only path can call `build_or_load_ale_cache`.
 - `experiments/3dcnn/atlas_free_cnn/data_building/build_ale_fwhm_caches.py`: builds atlas-free ALE caches for FWHM sweeps.
 - `experiments/3dcnn/atlas_free_cnn/data_building/ingest_pubmed_ale.py`: creates unified PubMed rows that point into this old cache by `tensor_index`.

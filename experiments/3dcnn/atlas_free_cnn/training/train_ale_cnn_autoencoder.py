@@ -25,7 +25,7 @@ for path in [THREEDCNN_DIR, REPO_DIR / "src"]:
 from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
 from atlas_free_cnn.training.generation_losses import GenerationLossConfig
 from atlas_free_cnn.training.train_ale_cnn import build_dataset, which_device
-from neurovlm.gnn.ale_cnn import ALE3DCNNAutoEncoder, count_parameters
+from atlas_free_cnn.training.ale_cnn import ALE3DCNNAutoEncoder, count_parameters
 
 
 def parse_args() -> argparse.Namespace:

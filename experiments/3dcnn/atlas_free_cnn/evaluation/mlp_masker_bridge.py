@@ -3,7 +3,7 @@
 The atlas-free CNN's packed ``(36, 45, 38)`` volumes are built by cropping
 the exact same MNI152 4mm grid the MLP ``NeuroAutoEncoder`` masker uses to
 its brain bounding box (see
-``neurovlm.gnn.ale_dataset._build_difumo_compatible_volumes``, which performs
+``atlas_free_cnn.training.ale_dataset._build_difumo_compatible_volumes``, which performs
 the forward direction: MLP flatmap -> scatter into the masker's ``(46, 55,
 46)`` grid -> crop to the brain bounding box). Both the crop box and the
 affine are derived directly from the packaged MLP mask
@@ -38,7 +38,7 @@ MLP_MASKER_VOXEL_COUNT = 28542
 
 @lru_cache(maxsize=1)
 def _crop_mask() -> torch.Tensor:
-    from neurovlm.gnn.ale_dataset import _brain_crop, _mask_data_and_affine
+    from atlas_free_cnn.training.ale_dataset import _brain_crop, _mask_data_and_affine
 
     mask, _ = _mask_data_and_affine(None)
     crop = _brain_crop(mask)

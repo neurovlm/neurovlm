@@ -41,9 +41,9 @@ for path in [THREEDCNN_DIR, REPO_DIR / "src"]:
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from neurovlm.gnn.ale_cnn import ALE3DCNNEncoder, ALEFlatMLPEncoder, ALEResNet3DEncoder, count_parameters
-from neurovlm.gnn.ale_dataset import ALEPreprocessConfig, ALEVolumeDataset, build_or_load_ale_cache
-from neurovlm.gnn.model import TextProjHead
+from atlas_free_cnn.training.ale_cnn import ALE3DCNNEncoder, ALEFlatMLPEncoder, ALEResNet3DEncoder, count_parameters
+from atlas_free_cnn.training.ale_dataset import ALEPreprocessConfig, ALEVolumeDataset, build_or_load_ale_cache
+from atlas_free_cnn.training.text_projection import TextProjHead
 from neurovlm.loss import InfoNCELoss
 from neurovlm.metrics import (
     bidirectional_retrieval_metrics,
@@ -1526,7 +1526,7 @@ def save_plots(run_dir: Path, history: dict, curve_df: pd.DataFrame, diag_df: Op
 
 
 def save_embedding_correlations(run_dir: Path, brain_emb: torch.Tensor, cov: pd.DataFrame) -> None:
-    from neurovlm.gnn.ale_cnn import embedding_covariate_correlations
+    from atlas_free_cnn.training.ale_cnn import embedding_covariate_correlations
 
     try:
         corr = embedding_covariate_correlations(brain_emb, cov)

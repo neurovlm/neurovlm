@@ -27,8 +27,8 @@ from atlas_free_cnn.training.generation_losses import (
     GenerationLossConfig,
 )
 from atlas_free_cnn.training.train_ale_cnn import build_dataset, which_device
-from neurovlm.gnn.ale_cnn import ALE3DCNNAutoEncoder, count_parameters
-from neurovlm.gnn.model import TextProjHead
+from atlas_free_cnn.training.ale_cnn import ALE3DCNNAutoEncoder, count_parameters
+from atlas_free_cnn.training.text_projection import TextProjHead
 
 
 def parse_args() -> argparse.Namespace:

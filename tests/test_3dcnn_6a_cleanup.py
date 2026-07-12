@@ -146,8 +146,8 @@ def test_6a_status_uses_selected_ae_branch_mode_counts(tmp_path: Path) -> None:
 
 
 def test_notebook_defaults_keep_downstream_branch_and_stage1b_controls_explicit() -> None:
-    nb6a = json.loads((REPO_ROOT / "experiments/3dcnn/6 multi source stage3 stage4.ipynb").read_text())
-    nb5 = json.loads((REPO_ROOT / "experiments/3dcnn/5 multi source autoencoder ablation.ipynb").read_text())
+    nb6a = json.loads((REPO_ROOT / "experiments/3dcnn/5 multi source stage3 stage4.ipynb").read_text())
+    nb5 = json.loads((REPO_ROOT / "experiments/3dcnn/4 multi source autoencoder ablation.ipynb").read_text())
     source6a = "\n".join("".join(cell.get("source", "")) for cell in nb6a["cells"])
     source5 = "\n".join("".join(cell.get("source", "")) for cell in nb5["cells"])
 

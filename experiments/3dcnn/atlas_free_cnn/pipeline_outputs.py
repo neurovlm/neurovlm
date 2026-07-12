@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from atlas_free_cnn.notebook_utils import (
+from atlas_free_cnn.conventions import (
     CORRECTED_STAGE4_CHECKPOINT,
     CORRECTED_STAGE4_DIRNAME,
     CORRECTED_LEGACY_STAGE4_DIRNAME,
@@ -510,7 +510,7 @@ def write_status_report(
         stage5_status = {
             "stage": "stage5",
             "status": "covered by stage4 trainer outputs",
-            "warnings": ["Stage 4 trainer runs write spatial generation evaluation by default; semantic AUC diagnostics are available in Notebook 7."],
+            "warnings": ["Stage 4 trainer runs write spatial generation evaluation by default; semantic AUC diagnostics are available in Notebook 5b."],
         }
     statuses = [
         detect_stage_status("stage1", requested=requested.get("stage1", False), stage_dir=run / stage_dirs["stage1"]),
@@ -570,7 +570,7 @@ Stage 4 checkpoint policy:
 - Stage 4 training semantic AUC: disabled by default
 - Stage 4 primary checkpoint: `best_val_top5_dice.pt`
 - Stage 4 semantic checkpoint: not produced during training unless explicitly enabled
-- Stage 4 semantic diagnostics: available in Notebook 7 final evaluation
+- Stage 4 semantic diagnostics: available in Notebook 5b final evaluation
 
 Warnings or failed stages:
 {warning_lines}

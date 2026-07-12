@@ -57,7 +57,7 @@ from atlas_free_cnn.training.train_autoencoder import (
     filter_data_mode,
     model_config,
 )
-from neurovlm.gnn.ale_cnn import count_parameters
+from atlas_free_cnn.training.ale_cnn import count_parameters
 
 
 TARGET_SHAPE = (36, 45, 38)

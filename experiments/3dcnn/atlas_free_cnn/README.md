@@ -9,10 +9,30 @@ Important paths:
 - `cache/`: moved mixed PubMed/NeuroVault/Nilearn cached artifacts.
 - `data/ale_caches/`: old good PubMed ALE caches.
 - `data_building/`: ingestion, preprocessing, packing, and audit scripts.
-- `training/`: stable raw-MSE autoencoder and text-to-brain projection trainers.
-- `evaluation/`: generation/reconstruction metrics and generation evaluation.
+- `training/`: core model construction, datasets, losses, checkpointing, and
+  Stage 1/3/4 trainers.
+- `evaluation/`: checkpoint selection, generation/reconstruction metrics, and
+  model-comparison scripts used by the notebooks.
+- `conventions.py`: shared pure naming, path, checkpoint, and text-embedding
+  conventions used by core code and notebooks.
+- `notebook_utils.py`: notebook-only orchestration helpers for Colab, Drive,
+  Hugging Face downloads, and display-time validation. Core training code
+  should not import this module.
 
-Notebook 5b Stage 1A checkpoint comparison writes two recipe-level tables under
+For mentor review, start with the model/training surface:
+`training/ale_cnn.py`, `training/model_wrappers.py`,
+`training/train_autoencoder.py`, `training/train_ale_cnn.py`,
+`training/train_text_to_brain.py`, the loss modules, and
+`training/checkpointing.py`. Then review the current pipeline support in
+`pipeline_outputs.py`, `stage1_selection_integration.py`, and
+`evaluation/stage1_checkpoint_evaluation.py`.
+
+Notebook/report support code is intentionally separate: `notebook_utils.py`,
+`evaluation/compare_*.py`, and `model_comparison/plotting_utils.py` exist to
+keep notebooks readable and to reproduce figures/tables, not to define the core
+model architecture or training objective.
+
+Notebook 4b Stage 1A checkpoint comparison writes two recipe-level tables under
 `01_stage1a/`: `stage1a_all_checkpoint_eval.csv` contains one row per evaluated
 checkpoint per Stage 1A recipe, and
 `stage1a_recipe_best_checkpoint_comparison.csv` compares only the best checkpoint
@@ -50,7 +70,7 @@ Stage 4 training is spatial-fidelity focused by default:
 - Stage 4 primary checkpoint: `best_val_top5_dice.pt`
 - Stage 4 secondary spatial checkpoint: `best_val_spatial_corr.pt`
 - Stage 4 semantic checkpoint: not produced during training unless semantic AUC is explicitly enabled
-- Stage 4 semantic diagnostics: available in Notebook 7 final evaluation
+- Stage 4 semantic diagnostics: available in Notebook 5b final evaluation
 
 To add the separate network-map test set used by brain-to-text semantic
 evaluation:

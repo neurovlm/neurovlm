@@ -1,8 +1,16 @@
 """Tests for ALE 3D CNN models."""
 
+import sys
+from pathlib import Path
+
 import torch
 
-from neurovlm.gnn.ale_cnn import (
+REPO_ROOT = Path(__file__).resolve().parents[1]
+THREEDCNN = REPO_ROOT / "experiments" / "3dcnn"
+if str(THREEDCNN) not in sys.path:
+    sys.path.insert(0, str(THREEDCNN))
+
+from atlas_free_cnn.training.ale_cnn import (
     ALE3DCNNAutoEncoder,
     ALE3DCNNDecoder,
     ALE3DCNNEncoder,

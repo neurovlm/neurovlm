@@ -44,7 +44,7 @@ from atlas_free_cnn.training.source_sampling import (
     source_counts as count_sources,
     source_detail,
 )
-from neurovlm.gnn.ale_cnn import count_parameters
+from atlas_free_cnn.training.ale_cnn import count_parameters
 
 
 AUTOENCODER_BATCH_CANDIDATES = [1024, 768, 512, 384, 256, 192, 128, 96, 64]

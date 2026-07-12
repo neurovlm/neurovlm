@@ -32,7 +32,7 @@ except ImportError:  # pragma: no cover
 
 from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
 from atlas_free_cnn.evaluation.stage4_semantic import evaluate_generation_semantic_loader
-from atlas_free_cnn.notebook_utils import (
+from atlas_free_cnn.conventions import (
     STAGE4_PRIMARY_SPATIAL_CHECKPOINT,
     STAGE4_SEMANTIC_CHECKPOINT,
     STAGE4_SPATIAL_CORR_CHECKPOINT,
@@ -55,7 +55,7 @@ from atlas_free_cnn.training.model_wrappers import (
     load_autoencoder_checkpoint,
 )
 from atlas_free_cnn.training.source_sampling import canonical_source
-from neurovlm.gnn.ale_cnn import count_parameters
+from atlas_free_cnn.training.ale_cnn import count_parameters
 
 
 TEXT_TO_BRAIN_BATCH_CANDIDATES = [4096, 3072, 2048, 1536, 1024, 768, 512, 384, 256, 192, 128, 96, 64]

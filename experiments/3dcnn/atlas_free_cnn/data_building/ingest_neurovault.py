@@ -509,7 +509,7 @@ def preprocess_neurovault_nifti(
     meta: dict[str, Any] = {"input_path": str(nifti_path)}
     try:
         from nilearn.image import resample_to_img
-        from neurovlm.gnn.ale_dataset import _brain_crop, _get_mask_img_for_resolution
+        from atlas_free_cnn.training.ale_dataset import _brain_crop, _get_mask_img_for_resolution
         import torch
 
         img = _load_downloaded_nifti(Path(nifti_path))

@@ -13,6 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Tuple
 import gzip, json, pickle
+import sys
 
 import numpy as np
 import pandas as pd
@@ -1151,7 +1152,14 @@ def _load_latent_llm_neuro_terms() -> Tuple[torch.Tensor, np.ndarray]:
 
 
 def _build_ale_autoencoder_from_payload(payload: dict) -> ALE3DCNNAutoEncoder:
-    from neurovlm.gnn.ale_cnn import ALE3DCNNAutoEncoder
+    try:
+        from atlas_free_cnn.training.ale_cnn import ALE3DCNNAutoEncoder
+    except ModuleNotFoundError:
+        repo_root = Path(__file__).resolve().parents[2]
+        threedcnn_dir = repo_root / "experiments" / "3dcnn"
+        if threedcnn_dir.exists() and str(threedcnn_dir) not in sys.path:
+            sys.path.insert(0, str(threedcnn_dir))
+        from atlas_free_cnn.training.ale_cnn import ALE3DCNNAutoEncoder
 
     cfg = payload["config"]["model"]
     target_shape = tuple(payload["target_shape"])

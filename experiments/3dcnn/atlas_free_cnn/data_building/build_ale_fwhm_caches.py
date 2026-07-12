@@ -13,7 +13,7 @@ for path in [THREEDCNN_DIR, REPO_DIR / "src"]:
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from neurovlm.gnn.ale_dataset import ALEPreprocessConfig, build_or_load_ale_cache
+from atlas_free_cnn.training.ale_dataset import ALEPreprocessConfig, build_or_load_ale_cache
 
 
 def _fwhm_label(value: float) -> str:

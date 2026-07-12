@@ -154,7 +154,7 @@ def build_brain_encoder(
     multi_scale: bool = False,
     global_context: str = "none",
 ):
-    from neurovlm.gnn.ale_cnn import ALE3DCNNEncoder, ALEResNet3DEncoder
+    from atlas_free_cnn.training.ale_cnn import ALE3DCNNEncoder, ALEResNet3DEncoder
 
     if encoder_arch == "plain":
         return ALE3DCNNEncoder(
@@ -192,7 +192,7 @@ def build_cnn_autoencoder(
     multi_scale: bool = False,
     global_context: str = "none",
 ):
-    from neurovlm.gnn.ale_cnn import ALE3DCNNAutoEncoder
+    from atlas_free_cnn.training.ale_cnn import ALE3DCNNAutoEncoder
 
     return ALE3DCNNAutoEncoder(
         output_shape=output_shape,
