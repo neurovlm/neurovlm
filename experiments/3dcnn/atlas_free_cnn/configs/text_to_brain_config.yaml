@@ -1,8 +1,7 @@
 train_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/train.jsonl
 val_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/val.jsonl
 test_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/test.jsonl
-eval_jsonls:
-  networks_test: experiments/3dcnn/atlas_free_cnn/cache/network_eval/network_test.jsonl
+eval_jsonls: {}
 text_embedding_cache: experiments/3dcnn/atlas_free_cnn/cache/text_embeddings/specter2_stage3_stage4_emptycentered_unitnorm.pt
 autoencoder_checkpoint: experiments/3dcnn/atlas_free_cnn/outputs/runs/autoencoder_stable_mixed_base/checkpoints/best_val_loss.pt
 output_dir: experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain_pretrained_infonce
@@ -73,12 +72,6 @@ weighted_recon:
   alpha: 0.0
   gamma: 1.0
   normalize_target: true
-
-latent_alignment:
-  enabled: true
-  type: cosine
-  weight: 1.0
-  detach_brain_z: true
 
 loss:
   lambda_recon: 1.0

@@ -119,7 +119,7 @@ def test_status_requires_all_six_branches(tmp_path: Path) -> None:
 
 def test_notebook_defaults_use_fixed_six_runs_and_required_stage1b() -> None:
     nb6a = json.loads((REPO_ROOT / "experiments/3dcnn/5 multi source stage3 stage4.ipynb").read_text())
-    nb5 = json.loads((REPO_ROOT / "experiments/3dcnn/4 multi source autoencoder ablation.ipynb").read_text())
+    nb5 = json.loads((REPO_ROOT / "experiments/3dcnn/4 multi source autoencoder.ipynb").read_text())
     source6a = "\n".join("".join(cell.get("source", "")) for cell in nb6a["cells"])
     source5 = "\n".join("".join(cell.get("source", "")) for cell in nb5["cells"])
 
@@ -132,9 +132,16 @@ def test_notebook_defaults_use_fixed_six_runs_and_required_stage1b() -> None:
     assert "run_subprocess_streaming(cmd, cwd=REPO_DIR" in source6a
     assert "run_subprocess_streaming(cmd, env=env, cwd=REPO_DIR" in source6a
     assert "--strict-controlled-recipe" in source6a
-    assert "RUN_STAGE1A_MIXED_PRETRAINING = True" in source5
+    assert "RUN_STAGE1A_MIXED_PRETRAINING" not in source5
+    assert "LOAD_STAGE1A" not in source5
+    assert "AE_ABLATION_MODE" not in source5
     assert "RUN_STAGE1B_FINETUNING" not in source5
-    assert "if results:" in source5
+    assert 'BASELINE_CHECKPOINT_SELECTION = "best_val_loss"' in source5
+    assert 'DOMAIN_CHECKPOINT_SELECTION = "best_top5_dice"' in source5
+    assert '"mixed_pretrain_to_pubmed"' in source5
+    assert '"mixed_pretrain_to_nilearn"' in source5
+    assert '"mixed_pretrain_to_neurovault"' in source5
+    assert 'assert len(results) == 4' in source5
 
 
 def test_6a_status_detects_normalized_stage3_and_corrected_stage4_without_legacy_dirs(tmp_path: Path) -> None:
@@ -323,7 +330,7 @@ def test_stage4_semantic_evaluator_returns_raw_clamped_and_duplicate_aware_auc()
     assert "generation_mean_normalized_auc" in metrics
 
 
-def test_5b_locked_checkpoint_selection_names_are_authoritative(tmp_path: Path) -> None:
+def test_locked_checkpoint_selection_names_are_authoritative(tmp_path: Path) -> None:
     registry = {}
     for variant in ["mixed_baseline_raw_mse", "mixed_to_pubmed", "mixed_to_nilearn", "mixed_to_neurovault"]:
         run_dir = tmp_path / variant

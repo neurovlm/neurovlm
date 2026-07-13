@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import math
 import sys
@@ -20,8 +19,8 @@ from torch.utils.data import DataLoader
 from atlas_free_cnn import notebook_utils
 from atlas_free_cnn.evaluation import model_comparison_adapters as adapters
 from atlas_free_cnn.evaluation import model_comparison_registry as registry
+from atlas_free_cnn.evaluation.artifacts import resolve_test_jsonl, write_csv, write_json
 from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
-from atlas_free_cnn.evaluation.stage1_checkpoint_evaluation import discover_split_dir
 from atlas_free_cnn.evaluation.stage4_semantic import stack_text_cache
 from atlas_free_cnn.training.datasets import UnifiedMapTextDataset
 from atlas_free_cnn.training.source_sampling import canonical_source, source_detail
@@ -124,51 +123,11 @@ DICE_SENSITIVITY_COLUMNS = (
 )
 
 
-def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: Iterable[str] | None = None) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    keys: list[str] = list(fieldnames or [])
-    for row in rows:
-        for key in row:
-            if key not in keys:
-                keys.append(key)
-    with path.open("w", newline="") as f:
-        if not keys:
-            f.write("")
-            return
-        writer = csv.DictWriter(f, fieldnames=keys)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def _json_ready(value: Any) -> Any:
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, dict):
-        return {str(k): _json_ready(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_ready(v) for v in value]
-    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-        return None
-    return value
-
-
-def write_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as f:
-        json.dump(_json_ready(value), f, indent=2, sort_keys=True)
-
-
 def public_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out = []
     for row in rows:
         out.append({key: value for key, value in row.items() if key not in INTERNAL_ARRAY_COLUMNS})
     return out
-
-
-def resolve_test_jsonl(test_jsonl: str | Path | None) -> Path:
-    if test_jsonl is not None:
-        return Path(test_jsonl).expanduser()
-    return discover_split_dir() / "test.jsonl"
 
 
 def resolve_text_cache_path(text_embedding_cache: str | Path | None) -> tuple[Path, dict[str, Any]]:

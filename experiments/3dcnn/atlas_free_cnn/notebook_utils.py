@@ -461,6 +461,31 @@ def discover_unified_split_dir(
     )
 
 
+def discover_default_unified_split_dir(
+    *,
+    repo_dir: str | Path | None = None,
+    drive_root: str | Path | None = None,
+    dataset_repo: str = DEFAULT_ATLAS_FREE_HF_REPO,
+) -> Path:
+    """Resolve the finalized unified splits using the standard repo layout."""
+
+    repo = Path(repo_dir) if repo_dir is not None else Path(__file__).resolve().parents[3]
+    drive = Path(
+        drive_root
+        if drive_root is not None
+        else os.environ.get("NEUROVLM_DRIVE_ROOT", "/content/drive/MyDrive/neurovlm")
+    ).expanduser()
+    cache_root = repo / "experiments/3dcnn/atlas_free_cnn/cache"
+    return discover_unified_split_dir(
+        repo_dir=repo,
+        drive_root=drive,
+        dataset_repo=dataset_repo,
+        local_unified_cache_dir=cache_root / "unified_jsonl_rebuild",
+        local_split_dir=cache_root / "unified_jsonl_rebuild/splits",
+        local_pack_dir=cache_root / "hf_atlas_free_cnn_rebuild",
+    )
+
+
 def required_text_records_from_jsonls(paths: list[str | Path]) -> dict[str, Any]:
     """Collect primary positive text IDs/text strings from unified split JSONLs."""
 

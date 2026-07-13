@@ -30,15 +30,15 @@ loss:
 batch_size: 64
 preflight_batch_size: true
 preflight_vram_reserve_gb: 12.0
-batch_candidates: [1024, 768, 512, 384, 256, 192, 128, 96, 64]
-num_workers: 8
+batch_candidates: [512, 384, 256, 192, 128, 96, 64, 48, 32, 16]
+num_workers: 4
 pin_memory: true
 persistent_workers: true
 prefetch_factor: 4
 epochs: 300
 early_stopping: true
 early_stopping_metric: val_loss
-early_stopping_patience: 25
+early_stopping_patience: 15
 early_stopping_min_delta: 0.0
 lr: 0.0003
 weight_decay: 0.0001
@@ -51,9 +51,11 @@ max_train_batches:
 max_val_batches:
 
 # Evaluation/diagnostics clamp predictions to [0, 1]. Training loss uses raw decoder output.
-compute_train_metrics: true
-train_metric_batches: 8
+compute_train_metrics: false
+train_metric_batches: 0
 val_metric_batches: 16
+eval_all_checkpoints: false
+eval_checkpoint_names: [best_val_loss]
 eval_batch_size:
 include_voxel_auroc: true
 final_eval: true

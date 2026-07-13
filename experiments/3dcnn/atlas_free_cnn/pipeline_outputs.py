@@ -68,30 +68,6 @@ def git_info(repo_root: str | Path = ".") -> dict[str, Any]:
     return out
 
 
-def create_full_pipeline_run_dir(
-    base_dir: str | Path = "runs_atlas_free_cnn_full_pipeline",
-    *,
-    prefix: str = "full_atlas_free_cnn",
-    overwrite: bool = False,
-) -> dict[str, str]:
-    base = Path(base_dir)
-    stamp = time.strftime("%Y%m%d_%H%M%S")
-    run_dir = base / f"{prefix}_{stamp}"
-    if run_dir.exists() and not overwrite:
-        suffix = 1
-        while (base / f"{prefix}_{stamp}_{suffix:02d}").exists():
-            suffix += 1
-        run_dir = base / f"{prefix}_{stamp}_{suffix:02d}"
-    for rel in STAGE_DIRS.values():
-        (run_dir / rel).mkdir(parents=True, exist_ok=True)
-    for rel in ["config", "checkpoints", "metrics", "plots"]:
-        (run_dir / STAGE_DIRS["stage1"] / rel).mkdir(parents=True, exist_ok=True)
-        (run_dir / STAGE_DIRS["stage3"] / rel).mkdir(parents=True, exist_ok=True)
-    for domain in ["pubmed", "statmaps", "comparison"]:
-        (run_dir / STAGE_DIRS["stage1b"] / domain).mkdir(parents=True, exist_ok=True)
-    return {"run_dir": str(run_dir), **{key: str(run_dir / value) for key, value in STAGE_DIRS.items()}}
-
-
 def create_stage2_stage3_stage4_run_dir(
     base_dir: str | Path = "runs_stage2_stage3_stage4",
     *,
@@ -208,7 +184,7 @@ def detect_stage_status(
     }
     if stage_name == "stage1":
         ok = any((path / "checkpoints" / name).exists() for name in AE_SELECTION_TO_FILE.values())
-        metrics = (path / "metrics" / "reconstruction_summary_by_source.csv").exists() or (path / "autoencoder_reconstruction_metrics.csv").exists()
+        metrics = (path / "metrics" / "reconstruction_summary_by_source.csv").exists()
     elif stage_name == "stage1b":
         ok = any(path.glob("*/checkpoints/best_*.pt"))
         metrics = any(path.glob("*/metrics/reconstruction_summary_by_source.csv"))
@@ -423,7 +399,7 @@ def write_status_report(
         stage5_status = {
             "stage": "stage5",
             "status": "covered by stage4 trainer outputs",
-            "warnings": ["Stage 4 trainer runs write spatial generation evaluation by default; semantic AUC diagnostics are available in Notebook 5b."],
+            "warnings": ["Stage 4 trainer runs write the held-out generation evaluation."],
         }
     statuses = [
         detect_stage_status("stage1", requested=requested.get("stage1", False), stage_dir=run / stage_dirs["stage1"]),
@@ -447,47 +423,6 @@ def write_status_report(
                 "completed_runs": row.get("completed_runs", ""),
             })
     return statuses
-
-
-def write_readme_what_to_look_at(
-    path: str | Path,
-    *,
-    ae_variant: str,
-    ae_selection: str,
-    ae_checkpoint_path: str,
-    stage_status: list[dict[str, Any]],
-    warnings: list[str] | None = None,
-) -> None:
-    warnings = warnings or []
-    stage_lines = "\n".join(f"- {row['stage']}: {row['status']}" for row in stage_status)
-    warning_lines = "\n".join(f"- {item}" for item in warnings) if warnings else "- None recorded."
-    text = f"""# What To Look At
-
-AE variant: `{ae_variant}`
-Selected AE checkpoint: `{ae_checkpoint_path}`
-Selection metric: `{ae_selection}`
-
-Stage status:
-{stage_lines}
-
-Main files to inspect:
-- `07_final_comparison/final_summary_table.csv`
-- `07_final_comparison/ae_to_downstream_comparison.csv`
-- `07_final_comparison/best_checkpoints_to_inspect.csv`
-- `01_stage1_ae_pretraining/metrics/reconstruction_summary_by_source.csv`
-- `04_stage3_contrastive/metrics/test_metrics.json`
-- `06_stage5_generation_eval/metrics/generation_eval_metrics.json`
-
-Stage 4 checkpoint policy:
-- Stage 4 training semantic AUC: disabled by default
-- Stage 4 primary checkpoint: `best_val_top5_dice.pt`
-- Stage 4 semantic checkpoint: not produced during training unless explicitly enabled
-- Stage 4 semantic diagnostics: available in Notebook 5b final evaluation
-
-Warnings or failed stages:
-{warning_lines}
-"""
-    Path(path).write_text(text)
 
 
 def write_table(path: str | Path, rows: list[dict[str, Any]]) -> None:

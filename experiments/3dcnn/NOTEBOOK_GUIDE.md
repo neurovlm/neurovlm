@@ -1,54 +1,87 @@
 # Atlas-Free CNN Notebook Guide
 
-This directory contains the mentor-facing notebook history for the atlas-free
-3D CNN experiments. The numbered notebooks on disk are the source of truth for
-the current branch.
+The four notebooks in this directory are the retained atlas-free 3D CNN
+workflow. Notebooks 4 and 5 form the finalized multi-source pipeline;
+Notebooks 1 and 3 preserve the two still-relevant standalone model paths.
 
-## Recommended Reading Order
+## Final Multi-Source Workflow
 
-| Notebook                                                 | Status  | Purpose                                                                                                                                                                  |
-| -------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `4 multi source autoencoder ablation.ipynb`              | Current | Multi-source Stage 1 baseline autoencoder training followed by required PubMed, Nilearn, and NeuroVault Stage 1B fine-tuning.                                           |
-| `4b stage1 checkpoint selection heldout eval.ipynb`      | Current | Evaluation-only held-out checkpoint selection for Stage 1A/1B AE checkpoints. Writes the downstream selected-checkpoint manifest.                                        |
-| `5 multi source stage3 stage4.ipynb`                     | Current | Normalized-SPECTER2 downstream notebook for the fixed six Stage 3 and six Stage 4 runs. |
-| `5b stage3 stage4 semantic evaluation diagnostics.ipynb` | Current | Evaluation-only diagnostics for completed Stage 3/4 runs, including semantic AUC, checkpoint provenance, architecture audits, and Stage 4 retrieval diagnostics.         |
+Run these notebooks in order:
 
-## Retained Optional Notebooks
+| Order | Notebook | Purpose |
+| --- | --- | --- |
+| 1 | `4 multi source autoencoder.ipynb` | Train the mixed raw-MSE baseline autoencoder, fine-tune it separately on PubMed, Nilearn, and NeuroVault, and evaluate the four selected checkpoints. |
+| 2 | `5 multi source stage3 stage4.ipynb` | Validate the four AE checkpoints, use normalized SPECTER2 embeddings, train the fixed six Stage 3 contrastive branches, and train/evaluate the matching six Stage 4 text-to-brain projection heads. |
 
-| Notebook                                    | Status          | Purpose                                                                                       |
-| ------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------- |
-| `1 best contrastive recipe on pubmed.ipynb` | Optional | Compact PubMed-only Stage 1-3 best-recipe rerun using the retained plain CNN.                  |
-| `3 resnet48 multi scale attention.ipynb`    | Optional | Retained ResNet48 multi-scale attention model with matching autoencoder pretraining.          |
+Notebook 4 contains no recipe or architecture alternatives. Its fixed choices
+are:
+
+- mixed Stage 1A: natural source sampling, raw MSE, plain 3D CNN, selected by
+  validation loss;
+- Stage 1B: the same mixed checkpoint fine-tuned independently on PubMed,
+  Nilearn, and NeuroVault, selected by validation top-5 Dice;
+- full validation/test reconstruction evaluation for the four selected
+  checkpoints.
+
+Notebook 4 writes its finalized outputs below
+`runs_atlas_free_cnn_stage1/finalized_stage1/` by default. Its main summary
+files are:
+
+- `07_final_comparison/selected_ae_checkpoints.json`
+- `07_final_comparison/final_summary_table.csv`
+- each run's `metrics/reconstruction_summary_by_source.csv`
+
+Notebook 5 validates the four locked AE resource checkpoints corresponding to
+the Notebook 4 branches before downstream training. It uses normalized,
+empty-centered, unit-normalized SPECTER2 embeddings only. Its six branches are:
+
+| Domain | Baseline branch | Specialized branch |
+| --- | --- | --- |
+| PubMed | mixed Stage 1A AE | PubMed Stage 1B AE |
+| Nilearn | mixed Stage 1A AE | Nilearn Stage 1B AE |
+| NeuroVault | mixed Stage 1A AE | NeuroVault Stage 1B AE |
+
+Each branch receives its own Stage 3 contrastive run and its own Stage 4
+text-to-AE-latent projection head. The Stage 4 trainer writes held-out spatial
+and semantic generation metrics, so separate 4b/5b evaluation notebooks are
+not required.
+
+## Retained Standalone Notebooks
+
+| Notebook | Purpose |
+| --- | --- |
+| `1 best contrastive recipe on pubmed.ipynb` | PubMed-only rerun of the retained compact plain-CNN contrastive recipe. |
+| `3 resnet48 multi scale attention.ipynb` | The retained ResNet48 multi-scale attention variant and its matching autoencoder pretraining. |
+
+These notebooks are useful independently; they are not prerequisites for the
+multi-source Notebook 4 → Notebook 5 workflow.
+
+## Model-Comparison Notebooks
+
+The notebooks under `model_comparison/` compare the retained CNN with the MLP
+at the autoencoder, contrastive-retrieval, and text-to-brain stages. They are
+kept because these are cross-model comparisons, not duplicate training-time
+evaluation passes.
 
 ## Code Review Map
 
-Core model and training code lives under `atlas_free_cnn/training/`:
-`model_wrappers.py`, `datasets.py`, `checkpointing.py`, loss modules, and the
-Stage 1/3/4 trainers are the main implementation targets.
+- `atlas_free_cnn/training/`: retained models, losses, datasets,
+  checkpointing, and Stage 1/3/4 trainers.
+- `atlas_free_cnn/conventions.py`: fixed branch names, text-embedding
+  convention, checkpoint names, and output paths.
+- `atlas_free_cnn/stage1_selection_integration.py`: validates the four AE
+  checkpoints and creates Notebook 5's six-run manifest.
+- `atlas_free_cnn/notebook_utils.py`: Colab, Drive, Hugging Face, split, and
+  normalized-text-cache helpers used by notebooks.
+- `atlas_free_cnn/evaluation/`: canonical metric implementations and the
+  distinct MLP-versus-CNN comparison utilities.
+- `atlas_free_cnn/data_building/build_normalized_specter2_cache.py`: the only
+  retained offline data builder.
 
-Pipeline and evaluation code that supports the current notebooks lives in
-`pipeline_outputs.py`, `stage1_selection_integration.py`, and
-`atlas_free_cnn/evaluation/`.
+## Removed Experiment Surface
 
-Notebook-only orchestration, Colab/Hugging Face download helpers, and display
-support live in `notebook_utils.py` and `model_comparison/plotting_utils.py`.
-Shared pure naming/path conventions live in `conventions.py` so core training
-code does not need to import notebook helpers.
-
-## Short Narrative
-
-Notebooks 1 and 3 retain the two ALE-only model paths: the compact plain-CNN
-best recipe and the ResNet48 multi-scale attention model. Notebook 2 and the
-discarded architecture/recipe variants have been removed.
-
-Notebooks 4, 4b, 5, and 5b are the current multi-source pipeline. Notebook 4
-builds the baseline raw-MSE autoencoder and fine-tunes it once per domain,
-notebook 4b selects AE checkpoints on
-held-out splits, notebook 5 runs the fixed normalized Stage 3/4 branch matrix, and
-notebook 5b evaluates completed Stage 3/4 outputs.
-
-Stage 4 training is spatial-first by default: semantic AUC is disabled during
-training, the primary checkpoint is `best_val_top5_dice.pt`, and the
-semantic-selected checkpoint is not produced unless semantic AUC is explicitly
-enabled. Notebook 5b computes semantic AUC later as a final diagnostic for the
-spatial-primary checkpoint.
+Notebook 2, Notebooks 4b/5b, discarded architecture and loss variants,
+unnormalized SPECTER2 paths, standalone duplicate evaluation commands, and the
+obsolete raw-data builders have been removed. The current notebooks consume
+the finalized train/validation/test JSONLs and shared volume tensor locally or
+download them from Hugging Face.

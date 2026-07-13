@@ -1,2 +1,1 @@
-"""Evaluation utilities for the isolated atlas-free multi-positive pipeline."""
-
+"""Evaluation utilities for the finalized atlas-free CNN pipeline."""

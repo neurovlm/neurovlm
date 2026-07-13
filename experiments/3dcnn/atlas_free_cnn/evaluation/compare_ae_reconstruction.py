@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import math
 import sys
@@ -15,8 +14,8 @@ import torch
 from torch.utils.data import DataLoader
 
 from atlas_free_cnn.evaluation import model_comparison_adapters as adapters
+from atlas_free_cnn.evaluation.artifacts import resolve_test_jsonl, write_csv, write_json
 from atlas_free_cnn.evaluation.generation_metrics import generation_metrics
-from atlas_free_cnn.evaluation.stage1_checkpoint_evaluation import discover_split_dir
 from atlas_free_cnn.training.datasets import UnifiedMapTextDataset
 from atlas_free_cnn.training.source_sampling import canonical_source, source_detail
 from atlas_free_cnn.training.train_autoencoder import VolumeCollator, filter_data_mode
@@ -58,46 +57,6 @@ METRIC_KEYS = (
     "mlp_bpp_pct_improvement",
     "mlp_batch_roc_auc",
 )
-
-
-def json_ready(value: Any) -> Any:
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, dict):
-        return {str(k): json_ready(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [json_ready(v) for v in value]
-    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-        return None
-    return value
-
-
-def write_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as f:
-        json.dump(json_ready(value), f, indent=2, sort_keys=True)
-
-
-def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    keys: list[str] = []
-    for row in rows:
-        for key in row:
-            if key not in keys:
-                keys.append(key)
-    with path.open("w", newline="") as f:
-        if not keys:
-            f.write("")
-            return
-        writer = csv.DictWriter(f, fieldnames=keys)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def resolve_test_jsonl(test_jsonl: str | Path | None) -> Path:
-    if test_jsonl is not None:
-        return Path(test_jsonl).expanduser()
-    return discover_split_dir() / "test.jsonl"
 
 
 def build_atlas_free_test_datasets(

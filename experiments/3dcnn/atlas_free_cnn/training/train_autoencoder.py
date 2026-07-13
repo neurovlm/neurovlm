@@ -94,14 +94,12 @@ def _target_shape(cfg: dict[str, Any]) -> tuple[int, int, int]:
 
 
 def filter_data_mode(dataset: UnifiedMapTextDataset, data_mode: str) -> UnifiedMapTextDataset:
-    if data_mode not in {"pubmed_only", "mixed", "statmaps_only", "neurovault_only", "nilearn_only"}:
+    if data_mode not in {"pubmed_only", "mixed", "neurovault_only", "nilearn_only"}:
         raise ValueError(
-            "DATA_MODE/data_mode must be 'pubmed_only', 'mixed', 'statmaps_only', 'neurovault_only', or 'nilearn_only'"
+            "DATA_MODE/data_mode must be 'pubmed_only', 'mixed', 'neurovault_only', or 'nilearn_only'"
         )
     if data_mode == "pubmed_only":
         dataset.rows = [row for row in dataset.rows if canonical_source(row) == "pubmed"]
-    elif data_mode == "statmaps_only":
-        dataset.rows = [row for row in dataset.rows if canonical_source(row) in {"neurovault", "nilearn"}]
     elif data_mode == "neurovault_only":
         dataset.rows = [row for row in dataset.rows if canonical_source(row) == "neurovault"]
     elif data_mode == "nilearn_only":
@@ -555,7 +553,6 @@ def evaluate_saved_checkpoints_from_config(cfg: dict[str, Any] | str | Path) -> 
                 )
     if rows:
         _write_csv(metrics_dir / "reconstruction_summary_by_checkpoint_source.csv", rows)
-        _write_csv(metrics_dir / "checkpoint_reconstruction_metrics.csv", rows)
     return rows
 
 
@@ -820,13 +817,6 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         if ds is not None and bool(cfg.get("final_eval", True)):
             eval_rows.extend(evaluate_by_source(model, ds, cfg, device, split_name))
     if eval_rows:
-        with (out_dir / "autoencoder_reconstruction_metrics.json").open("w") as f:
-            json.dump(eval_rows, f, indent=2)
-        with (out_dir / "autoencoder_reconstruction_metrics.csv").open("w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=list(eval_rows[0].keys()))
-            writer.writeheader()
-            writer.writerows(eval_rows)
-        _write_csv(metrics_dir / "reconstruction_metrics_all_rows.csv", eval_rows)
         _write_csv(metrics_dir / "reconstruction_summary_by_source.csv", eval_rows)
     checkpoint_rows = []
     if bool(cfg.get("final_eval", True)) and bool(cfg.get("eval_all_checkpoints", True)):
@@ -850,7 +840,6 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                     )
         if checkpoint_rows:
             _write_csv(metrics_dir / "reconstruction_summary_by_checkpoint_source.csv", checkpoint_rows)
-            _write_csv(metrics_dir / "checkpoint_reconstruction_metrics.csv", checkpoint_rows)
     _t_final_eval = time.time()
     leaderboard_rows = []
     for name, value in sorted(ckpt.best.items()):
@@ -904,20 +893,18 @@ def train_stage1b_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     mode = str(cfg.get("stage1b_mode", cfg.get("STAGE1B_MODE", ""))).lower()
     mode_to_data = {
         "mixed_pretrain_to_pubmed": "pubmed_only",
-        "mixed_pretrain_to_statmaps": "statmaps_only",
         "mixed_pretrain_to_neurovault": "neurovault_only",
         "mixed_pretrain_to_nilearn": "nilearn_only",
     }
     mode_to_variant = {
         "mixed_pretrain_to_pubmed": "mixed_to_pubmed",
-        "mixed_pretrain_to_statmaps": "mixed_to_statmaps",
         "mixed_pretrain_to_neurovault": "mixed_to_neurovault",
         "mixed_pretrain_to_nilearn": "mixed_to_nilearn",
     }
     if mode not in mode_to_data:
         raise ValueError(
-            "stage1b_mode must be mixed_pretrain_to_pubmed, mixed_pretrain_to_statmaps, "
-            "mixed_pretrain_to_neurovault, or mixed_pretrain_to_nilearn"
+            "stage1b_mode must be mixed_pretrain_to_pubmed, mixed_pretrain_to_neurovault, "
+            "or mixed_pretrain_to_nilearn"
         )
     ft_cfg = dict(cfg)
     ft_cfg["ae_training_recipe"] = cfg.get("ae_training_recipe", BASELINE_RAW_MSE_RECIPE)

@@ -1,12 +1,4 @@
-"""Integrate selected Stage 1 AE checkpoints for downstream runs.
-
-This module is intentionally load/validation-only. The empirically selected
-checkpoint names are fixed by the completed held-out evaluation decision. The
-required inputs are the explicit checkpoint paths to load. Completed evaluation
-folders are optional provenance sources for metrics, checksums, and copied
-tables. This module never trains, fine-tunes, resumes, or runs checkpoint
-inference by default.
-"""
+"""Validate the four finalized AE checkpoints and build Notebook 5's six-run manifest."""
 
 from __future__ import annotations
 
@@ -14,651 +6,200 @@ import argparse
 import csv
 import hashlib
 import json
-import os
-import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 
-TARGET_SHAPE = (36, 45, 38)
-LATENT_DIM = 384
-DOMAIN_LABELS = {"pubmed": "PubMed", "nilearn": "Nilearn", "neurovault": "NeuroVault"}
-
-REQUIRED_SELECTIONS: dict[str, dict[str, str]] = {
-    "mixed_stage1a": {
-        "stage": "stage1a",
-        "training_domain": "mixed",
-        "checkpoint_name": "best_top1_dice.pt",
-        "selection_reason": "held_out_multi_source_rank_1",
-        "source_kind": "stage1a",
-        "selection_csv": "01_stage1a/mixed_stage1a_checkpoint_selection.csv",
-    },
-    "mixed_to_pubmed_stage1b": {
-        "stage": "stage1b",
-        "training_domain": "pubmed",
-        "checkpoint_name": "best_top1_dice.pt",
-        "selection_reason": "held_out_domain_rank_1",
-        "source_kind": "stage1b",
-        "selection_csv": "02_stage1b/pubmed/pubmed_stage1b_checkpoint_selection.csv",
-    },
-    "mixed_to_nilearn_stage1b": {
-        "stage": "stage1b",
-        "training_domain": "nilearn",
-        "checkpoint_name": "best_val_loss.pt",
-        "selection_reason": "held_out_top5_dice_rank_1",
-        "source_kind": "stage1b",
-        "selection_csv": "02_stage1b/nilearn/nilearn_stage1b_checkpoint_selection.csv",
-    },
-    "mixed_to_neurovault_stage1b": {
-        "stage": "stage1b",
-        "training_domain": "neurovault",
-        "checkpoint_name": "best_top5_dice.pt",
-        "selection_reason": "held_out_top5_dice_rank_1",
-        "source_kind": "stage1b",
-        "selection_csv": "02_stage1b/neurovault/neurovault_stage1b_checkpoint_selection.csv",
-    },
-}
-
-SIX_RUNS = [
-    ("mixed_stage1a_on_pubmed", "PubMed", "baseline", "mixed_stage1a"),
-    ("mixed_to_pubmed_stage1b_on_pubmed", "PubMed", "specialized", "mixed_to_pubmed_stage1b"),
-    ("mixed_stage1a_on_nilearn", "Nilearn", "baseline", "mixed_stage1a"),
-    ("mixed_to_nilearn_stage1b_on_nilearn", "Nilearn", "specialized", "mixed_to_nilearn_stage1b"),
-    ("mixed_stage1a_on_neurovault", "NeuroVault", "baseline", "mixed_stage1a"),
-    ("mixed_to_neurovault_stage1b_on_neurovault", "NeuroVault", "specialized", "mixed_to_neurovault_stage1b"),
-]
+DEFAULT_DOWNSTREAM_RUNS = (
+    {"run": "mixed_stage1a_on_pubmed", "domain": "pubmed", "type": "baseline", "branch": "baseline_mixed_stage1a", "ae_registry_key": "mixed_stage1a"},
+    {"run": "mixed_to_pubmed_stage1b_on_pubmed", "domain": "pubmed", "type": "specialized", "branch": "specialized_mixed_to_pubmed", "ae_registry_key": "mixed_to_pubmed_stage1b"},
+    {"run": "mixed_stage1a_on_nilearn", "domain": "nilearn", "type": "baseline", "branch": "baseline_mixed_stage1a", "ae_registry_key": "mixed_stage1a"},
+    {"run": "mixed_to_nilearn_stage1b_on_nilearn", "domain": "nilearn", "type": "specialized", "branch": "specialized_mixed_to_nilearn", "ae_registry_key": "mixed_to_nilearn_stage1b"},
+    {"run": "mixed_stage1a_on_neurovault", "domain": "neurovault", "type": "baseline", "branch": "baseline_mixed_stage1a", "ae_registry_key": "mixed_stage1a"},
+    {"run": "mixed_to_neurovault_stage1b_on_neurovault", "domain": "neurovault", "type": "specialized", "branch": "specialized_mixed_to_neurovault", "ae_registry_key": "mixed_to_neurovault_stage1b"},
+)
 
 
 @dataclass(frozen=True)
 class IntegrationConfig:
     output_root: Path
     selected_checkpoints: dict[str, Any]
-    stage1a_evaluation_dir: Path | None = None
-    stage1b_evaluation_dir: Path | None = None
-    rerun_stage1_checkpoint_evaluation: bool = False
     required_selection_keys: tuple[str, ...] | None = None
     downstream_runs: tuple[dict[str, str], ...] | list[dict[str, str]] | None = None
 
 
-def read_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    with path.open() as f:
-        return json.load(f)
-
-
-def write_json(path: Path, value: Any) -> None:
+def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as f:
-        json.dump(value, f, indent=2, sort_keys=True)
-        f.write("\n")
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n")
 
 
-def read_csv_rows(path: Path) -> list[dict[str, str]]:
-    if not path.exists() or path.stat().st_size == 0:
-        return []
-    with path.open(newline="") as f:
-        return list(csv.DictReader(f))
-
-
-def write_csv_rows(path: Path, rows: list[dict[str, Any]]) -> None:
+def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames: list[str] = []
+    fields: list[str] = []
     for row in rows:
         for key in row:
-            if key not in fieldnames:
-                fieldnames.append(key)
-    with path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if key not in fields:
+                fields.append(key)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
-        for row in rows:
-            writer.writerow({k: row.get(k, "") for k in fieldnames})
+        writer.writerows(rows)
 
 
-def json_ready(value: Any) -> Any:
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, dict):
-        return {str(k): json_ready(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [json_ready(v) for v in value]
-    return value
+def _state_dict(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("checkpoint payload must be a dictionary")
+    state = payload.get("model") or payload.get("autoencoder") or payload.get("state_dict")
+    if not isinstance(state, dict):
+        raise KeyError("checkpoint does not contain model, autoencoder, or state_dict")
+    return state
 
 
-def valid_optional_dir(path: Path | None) -> Path | None:
-    if path is None:
-        return None
-    path = path.expanduser()
-    if "EDIT_ME" in str(path) or not path.exists():
-        return None
-    return path
-
-
-def default_downstream_runs() -> list[dict[str, str]]:
-    return [
-        {"run": run_name, "domain": domain.lower(), "type": run_type, "ae_registry_key": ae_key}
-        for run_name, domain, run_type, ae_key in SIX_RUNS
-    ]
-
-
-def source_dir_for(config: IntegrationConfig, spec: dict[str, str]) -> Path | None:
-    if spec["source_kind"] == "stage1a":
-        return valid_optional_dir(config.stage1a_evaluation_dir)
-    return valid_optional_dir(config.stage1b_evaluation_dir)
-
-
-def selection_manifest_path(source_dir: Path) -> Path:
-    return source_dir / "04_final_selection/selected_stage2_checkpoints.json"
-
-
-def checkpoint_manifest_path(source_dir: Path) -> Path:
-    return source_dir / "00_metadata/checkpoint_manifest.csv"
-
-
-def split_fingerprint_path(source_dir: Path) -> Path:
-    return source_dir / "00_metadata/test_split_fingerprints.json"
-
-
-def find_manifest_row(manifest_rows: list[dict[str, str]], checkpoint_path: Path, checkpoint_name: str) -> dict[str, str]:
-    resolved = str(checkpoint_path.expanduser().resolve()) if checkpoint_path.exists() else str(checkpoint_path.expanduser())
-    for row in manifest_rows:
-        if row.get("checkpoint_path") == resolved:
-            return row
-    matches = [row for row in manifest_rows if row.get("checkpoint_name") == checkpoint_name]
-    return matches[0] if len(matches) == 1 else {}
-
-
-def completed_row_for(selection_csv: Path, checkpoint_name: str) -> dict[str, str]:
-    rows = read_csv_rows(selection_csv)
-    for row in rows:
-        if row.get("checkpoint_name") == checkpoint_name:
-            return row
-    return {}
-
-
-def selected_checkpoint_path(source_dir: Path | None, key: str, spec: dict[str, str]) -> tuple[Path | None, dict[str, Any], list[str]]:
-    warnings: list[str] = []
-    if source_dir is None:
-        return None, {}, warnings
-    selected = read_json(selection_manifest_path(source_dir)).get(key, {})
-    selection_csv = source_dir / spec["selection_csv"]
-    csv_row = completed_row_for(selection_csv, spec["checkpoint_name"])
-
-    selected_name = selected.get("checkpoint_name")
-    selected_path = selected.get("checkpoint_path")
-    if selected_name and selected_name != spec["checkpoint_name"]:
-        warnings.append(
-            f"completed manifest selected {selected_name}, but downstream registry requires {spec['checkpoint_name']}"
-        )
-    if selected_path and Path(str(selected_path)).name != spec["checkpoint_name"]:
-        warnings.append(
-            f"completed manifest path points to {Path(str(selected_path)).name}, expected {spec['checkpoint_name']}"
-        )
-
-    path_value = csv_row.get("checkpoint_path") or selected_path
-    if not path_value:
-        return None, csv_row or selected, warnings
-    path = Path(str(path_value)).expanduser()
-    if path.name != spec["checkpoint_name"]:
-        warnings.append(f"selection table path points to {path.name}, expected {spec['checkpoint_name']}")
-    return path, csv_row or selected, warnings
-
-
-def configured_checkpoint_path(config: IntegrationConfig, key: str, spec: dict[str, str]) -> tuple[Path | None, list[str]]:
-    warnings: list[str] = []
-    entry = (config.selected_checkpoints or {}).get(key, {})
-    path_value = entry.get("path") or entry.get("checkpoint_path")
-    if not path_value:
-        return None, [f"missing explicit checkpoint path for {key}"]
-    path = Path(str(path_value)).expanduser()
-    if path.name != spec["checkpoint_name"]:
-        warnings.append(f"configured path points to {path.name}, expected {spec['checkpoint_name']}")
-    return path, warnings
-
-
-def state_checksum(state: dict[str, Any], prefix: str | None = None) -> str:
+def _state_checksum(state: dict[str, Any]) -> str:
     import torch
 
-    h = hashlib.sha256()
-    keys = sorted(k for k in state if prefix is None or str(k).startswith(prefix))
-    for key in keys:
+    digest = hashlib.sha256()
+    for key in sorted(state):
         value = state[key]
         if not torch.is_tensor(value):
             continue
         tensor = value.detach().cpu().contiguous()
-        h.update(str(key).encode("utf-8"))
-        h.update(str(tensor.dtype).encode("utf-8"))
-        h.update(json.dumps(list(tensor.shape)).encode("utf-8"))
-        h.update(tensor.numpy().tobytes())
-    return h.hexdigest()
+        digest.update(key.encode())
+        digest.update(str(tensor.dtype).encode())
+        digest.update(str(tuple(tensor.shape)).encode())
+        digest.update(tensor.numpy().tobytes())
+    return digest.hexdigest()
 
 
-def extract_model_state(payload: Any) -> dict[str, Any]:
-    if isinstance(payload, dict):
-        state = payload.get("model") or payload.get("autoencoder") or payload.get("state_dict")
-    else:
-        state = payload
-    if not isinstance(state, dict):
-        raise KeyError("checkpoint does not contain model, autoencoder, or state_dict")
-    keys = [str(k) for k in state]
-    if not any(k.startswith("encoder.") for k in keys):
-        raise KeyError("checkpoint does not contain encoder state")
-    if not any(k.startswith("decoder.") for k in keys):
-        raise KeyError("checkpoint does not contain decoder state")
-    return state
+def _validate_checkpoint(key: str, entry: dict[str, Any]) -> dict[str, Any]:
+    import torch
 
-
-def nested_get(mapping: dict[str, Any], *keys: str) -> Any:
-    cur: Any = mapping
-    for key in keys:
-        if not isinstance(cur, dict) or key not in cur:
-            return None
-        cur = cur[key]
-    return cur
-
-
-def checkpoint_architecture(payload: dict[str, Any]) -> tuple[Any, Any]:
-    latent_dim = (
-        nested_get(payload, "config", "model", "latent_dim")
-        or nested_get(payload, "model_architecture", "latent_dim")
-        or payload.get("latent_dim")
-    )
-    target_shape = (
-        payload.get("target_shape")
-        or nested_get(payload, "config", "target_shape")
-        or nested_get(payload, "model_architecture", "target_shape")
-    )
-    if isinstance(target_shape, list):
-        target_shape = tuple(target_shape)
-    return latent_dim, target_shape
-
-
-def validate_checkpoint(
-    checkpoint_path: Path | None,
-    checkpoint_name: str,
-    manifest_row: dict[str, str],
-) -> dict[str, Any]:
+    path = Path(str(entry.get("path") or entry.get("checkpoint_path") or "")).expanduser()
     row: dict[str, Any] = {
-        "checkpoint_path": str(checkpoint_path) if checkpoint_path else "",
-        "checkpoint_name": checkpoint_name,
-        "exists": bool(checkpoint_path and checkpoint_path.exists()),
-        "readable": False,
-        "model_state_exists": False,
-        "encoder_state_exists": False,
-        "decoder_state_exists": False,
-        "latent_dim": "",
-        "target_shape": "",
-        "checkpoint_epoch": "",
-        "model_state_checksum": "",
-        "encoder_checksum": "",
-        "decoder_checksum": "",
-        "manifest_checksum": manifest_row.get("model_state_checksum", ""),
-        "checksum_matches_manifest": "",
+        "key": key,
+        "checkpoint_path": str(path),
+        "checkpoint_name": path.name,
         "status": "missing_checkpoint",
+        "model_state_checksum": "",
         "warnings": "",
     }
-    warnings: list[str] = []
-    if not checkpoint_path or not checkpoint_path.exists():
+    if not path.is_file():
+        row["warnings"] = "checkpoint file does not exist"
         return row
     try:
-        import torch
-
-        payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-        row["readable"] = True
-        state = extract_model_state(payload)
-        row["model_state_exists"] = True
-        row["encoder_state_exists"] = any(str(k).startswith("encoder.") for k in state)
-        row["decoder_state_exists"] = any(str(k).startswith("decoder.") for k in state)
-        row["model_state_checksum"] = state_checksum(state)
-        row["encoder_checksum"] = state_checksum(state, "encoder.")
-        row["decoder_checksum"] = state_checksum(state, "decoder.")
-        if isinstance(payload, dict):
-            row["checkpoint_epoch"] = payload.get("epoch", "")
-            latent_dim, target_shape = checkpoint_architecture(payload)
-            row["latent_dim"] = latent_dim if latent_dim is not None else ""
-            row["target_shape"] = list(target_shape) if isinstance(target_shape, tuple) else (target_shape or "")
-        observed_target_shape = tuple(row["target_shape"]) if isinstance(row["target_shape"], list) else row["target_shape"]
-        if str(row["latent_dim"]) != str(LATENT_DIM):
-            warnings.append(f"latent_dim is {row['latent_dim']!r}, expected {LATENT_DIM}")
-        if observed_target_shape != TARGET_SHAPE:
-            if row["target_shape"]:
-                warnings.append(f"target_shape is {row['target_shape']!r}, expected {TARGET_SHAPE}")
-            else:
-                warnings.append("target_shape missing from checkpoint payload")
-        manifest_checksum = row["manifest_checksum"]
-        if manifest_checksum:
-            row["checksum_matches_manifest"] = manifest_checksum == row["model_state_checksum"]
-            if not row["checksum_matches_manifest"]:
-                row["status"] = "checksum_mismatch"
-                row["warnings"] = "; ".join(warnings)
-                return row
-        else:
-            row["checksum_matches_manifest"] = "not_available"
-        if str(row["latent_dim"]) == str(LATENT_DIM) and observed_target_shape == TARGET_SHAPE:
-            row["status"] = "completed" if not warnings else "completed_with_warnings"
-        else:
-            row["status"] = "incompatible_checkpoint"
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+        state = _state_dict(payload)
+        keys = tuple(str(name) for name in state)
+        if not any(name.startswith("encoder.") for name in keys):
+            raise KeyError("checkpoint has no encoder parameters")
+        if not any(name.startswith("decoder.") for name in keys):
+            raise KeyError("checkpoint has no decoder parameters")
+        row["model_state_checksum"] = _state_checksum(state)
+        row["status"] = "completed"
     except Exception as exc:
         row["status"] = "incompatible_checkpoint"
-        warnings.append(repr(exc))
-    row["warnings"] = "; ".join(warnings)
+        row["warnings"] = repr(exc)
     return row
 
 
-def held_out_metrics(source: dict[str, Any]) -> dict[str, Any]:
-    if isinstance(source.get("held_out_metrics"), dict):
-        return source["held_out_metrics"]
-    skip = {"checkpoint_path", "checkpoint_name", "canonical_checkpoint_name", "rank", "domain", "variant"}
-    return {k: v for k, v in source.items() if k not in skip}
-
-
-def split_fingerprint(source_dir: Path | None, training_domain: str) -> Any:
-    if source_dir is None:
-        return {}
-    data = read_json(split_fingerprint_path(source_dir))
-    if training_domain == "mixed":
-        return data
-    domain_data = data.get(training_domain) if isinstance(data, dict) else None
-    if isinstance(domain_data, dict):
-        return domain_data.get("fingerprint") or domain_data
-    return domain_data or data
-
-
-def copy_if_exists(src: Path, dst: Path) -> bool:
-    if not src.exists():
-        return False
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dst)
-    return True
-
-
-def write_readme(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        """# Stage 1 Selection Integration
-
-Stage 1 training is complete. Stage 1 checkpoint evaluation is complete.
-
-This downstream notebook does not train, fine-tune, resume, optimize, or rerun checkpoint inference for the autoencoders. It validates the explicit selected checkpoint paths and writes the downstream manifests used by Stage 2/3/4.
-
-Completed Stage 1A and Stage 1B evaluation folders are optional provenance inputs. When provided, the integration output records the source directories and preserves the original selection tables. They are not used to decide the checkpoint names; the empirical choices are fixed in the downstream registry.
-
-The selected-checkpoint registry contains whichever locked selections are required by the requested downstream runs:
-
-* Stage 1A mixed: `best_top1_dice.pt`, selected by `held_out_multi_source_rank_1`.
-* Stage 1B PubMed: `best_top1_dice.pt`, selected by `held_out_domain_rank_1`.
-* Stage 1B Nilearn: `best_val_loss.pt`, selected by `held_out_top5_dice_rank_1`.
-* Stage 1B NeuroVault: `best_top5_dice.pt`, selected by `held_out_top5_dice_rank_1`.
-
-The Nilearn checkpoint is named `best_val_loss.pt` because the completed held-out checkpoint evaluation showed that exact checkpoint was the strongest relevant held-out top-5 Dice choice for the Nilearn branch. Do not replace it with `best_top5_dice.pt` based only on filename.
-
-Downstream notebooks should load:
-
-* `02_selected_checkpoint_registry/selected_ae_checkpoints_for_stage2_stage3_stage4.json`
-* `03_downstream_usage/stage2_stage3_stage4_input_manifest.json`
-* `03_downstream_usage/selected_ae_branch_assignment.csv`
-
-Rerun Stage 1 checkpoint evaluation only if checkpoint files changed, test splits changed, metric definitions changed, evaluation outputs are missing/corrupted, or explicit reproduction is requested.
-""",
-        encoding="utf-8",
-    )
-
-
 def integrate_completed_stage1_selection(config: IntegrationConfig) -> dict[str, Any]:
-    if config.rerun_stage1_checkpoint_evaluation:
-        raise RuntimeError(
-            "RERUN_STAGE1_CHECKPOINT_EVALUATION=True is a reproduction workflow. "
-            "Run notebook 7 into a new timestamped evaluation folder, then compare results; "
-            "this integration path does not silently replace established selections."
-        )
-
     output_dir = config.output_root / f"stage1_selection_integration_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    metadata_dir = output_dir / "00_metadata"
-    existing_tables_dir = output_dir / "01_existing_evaluation_tables"
     registry_dir = output_dir / "02_selected_checkpoint_registry"
     downstream_dir = output_dir / "03_downstream_usage"
-    for directory in [metadata_dir, existing_tables_dir, registry_dir, downstream_dir]:
-        directory.mkdir(parents=True, exist_ok=True)
+    required_keys = tuple(config.required_selection_keys or config.selected_checkpoints.keys())
+    missing_config = [key for key in required_keys if key not in config.selected_checkpoints]
+    if missing_config:
+        raise KeyError(f"Missing configured Stage 1 checkpoints: {missing_config}")
 
-    write_json(metadata_dir / "integration_config.json", json_ready(config.__dict__))
-    write_json(
-        metadata_dir / "source_evaluation_directories.json",
-        {
-            "stage1a_evaluation_dir": str(config.stage1a_evaluation_dir or ""),
-            "stage1b_evaluation_dir": str(config.stage1b_evaluation_dir or ""),
-            "required_for_selection": False,
-        },
-    )
+    validation_rows = [
+        _validate_checkpoint(key, dict(config.selected_checkpoints[key]))
+        for key in required_keys
+    ]
+    validation_by_key = {row["key"]: row for row in validation_rows}
+    blocking = [row for row in validation_rows if row["status"] != "completed"]
 
-    unified_manifest: dict[str, Any] = {"evaluation_state": "completed", "rerun_required": False}
-    validation_rows: list[dict[str, Any]] = []
-    checksum_rows: list[dict[str, Any]] = []
-    table_copy_rows: list[dict[str, Any]] = []
-    selected_registry: dict[str, Any] = {}
-
-    required_selection_keys = tuple(config.required_selection_keys or REQUIRED_SELECTIONS.keys())
-    unknown_required_keys = [key for key in required_selection_keys if key not in REQUIRED_SELECTIONS]
-    if unknown_required_keys:
-        raise KeyError(f"Unknown required Stage 1 selection keys: {unknown_required_keys}")
-    required_specs = {key: REQUIRED_SELECTIONS[key] for key in required_selection_keys}
-
-    for key, spec in required_specs.items():
-        source_dir = source_dir_for(config, spec)
-        selection_csv = source_dir / spec["selection_csv"] if source_dir else None
-        selected_path, path_warnings = configured_checkpoint_path(config, key, spec)
-        eval_selected_path, source_row, selection_warnings = selected_checkpoint_path(source_dir, key, spec)
-        if eval_selected_path and selected_path and eval_selected_path.resolve() != selected_path.resolve():
-            selection_warnings.append(
-                f"optional evaluation manifest path {eval_selected_path} differs from configured path {selected_path}; configured path is authoritative"
-            )
-        manifest_rows = read_csv_rows(checkpoint_manifest_path(source_dir)) if source_dir else []
-        manifest_row = find_manifest_row(manifest_rows, selected_path, spec["checkpoint_name"]) if selected_path else {}
-        validation = validate_checkpoint(selected_path, spec["checkpoint_name"], manifest_row)
-        all_warnings = [validation.get("warnings"), *path_warnings, *selection_warnings]
-        validation["warnings"] = "; ".join([w for w in all_warnings if w])
-        validation.update(
-            {
-                "key": key,
-                "stage": spec["stage"],
-                "training_domain": spec["training_domain"],
-                "selection_reason": spec["selection_reason"],
-                "source_evaluation_dir": str(source_dir or ""),
-                "source_selection_csv": str(selection_csv or ""),
-            }
-        )
-        validation_rows.append(validation)
-        checksum_rows.append(
-            {
-                "key": key,
-                "checkpoint_path": validation["checkpoint_path"],
-                "model_state_checksum": validation["model_state_checksum"],
-                "encoder_checksum": validation["encoder_checksum"],
-                "decoder_checksum": validation["decoder_checksum"],
-                "manifest_checksum": validation["manifest_checksum"],
-                "checksum_matches_manifest": validation["checksum_matches_manifest"],
-            }
-        )
-
-        entry = {
-            "checkpoint_path": validation["checkpoint_path"],
-            "checkpoint_name": spec["checkpoint_name"],
-            "stage": spec["stage"],
-            "training_domain": spec["training_domain"],
-            "selection_reason": spec["selection_reason"],
-            "source_evaluation_dir": str(source_dir or ""),
-            "source_selection_csv": str(selection_csv or ""),
-            "checkpoint_epoch": validation["checkpoint_epoch"],
-            "model_state_checksum": validation["model_state_checksum"],
-            "encoder_checksum": validation["encoder_checksum"],
-            "decoder_checksum": validation["decoder_checksum"],
-            "held_out_metrics": held_out_metrics(source_row),
-            "test_split_fingerprint": split_fingerprint(source_dir, spec["training_domain"]),
-            "evaluation_status": "completed",
-            "validation_status": validation["status"],
-            "warnings": validation["warnings"],
-        }
-        unified_manifest[key] = entry
+    selected_registry: dict[str, dict[str, Any]] = {}
+    for key in required_keys:
+        configured = dict(config.selected_checkpoints[key])
+        validation = validation_by_key[key]
         selected_registry[key] = {
             "path": validation["checkpoint_path"],
-            "stage": spec["stage"],
-            "training_domain": spec["training_domain"],
-            "checkpoint_name": spec["checkpoint_name"],
-            "selection_reason": spec["selection_reason"],
-            "evaluation_status": "completed",
+            "checkpoint_name": validation["checkpoint_name"],
+            "stage": configured.get("stage", ""),
+            "training_domain": configured.get("training_domain", ""),
+            "selection_reason": configured.get("selection_reason", "finalized_pipeline"),
+            "model_state_checksum": validation["model_state_checksum"],
+            "validation_status": validation["status"],
         }
 
-        copied = copy_if_exists(selection_csv, existing_tables_dir / Path(spec["selection_csv"]).name) if selection_csv else False
-        table_copy_rows.append({"source": str(selection_csv or ""), "copied": copied})
-
-    for source_kind, source_dir in [
-        ("stage1a", config.stage1a_evaluation_dir),
-        ("stage1b", config.stage1b_evaluation_dir),
-    ]:
-        source_dir = valid_optional_dir(source_dir)
-        if source_dir is None:
-            table_copy_rows.append({"source": source_kind, "copied": False, "reason": "optional evaluation directory not provided"})
-            continue
-        copied = copy_if_exists(
-            source_dir / "04_final_selection/all_checkpoint_leaderboard.csv",
-            existing_tables_dir / f"{source_kind}_all_checkpoint_leaderboard.csv",
-        )
-        table_copy_rows.append(
-            {
-                "source": str(source_dir / "04_final_selection/all_checkpoint_leaderboard.csv"),
-                "copied": copied,
-            }
-        )
-
-    downstream_run_specs = list(config.downstream_runs or default_downstream_runs())
-    six_run_rows = []
-    six_run_manifest = []
-    for run_spec in downstream_run_specs:
-        run_name = run_spec["run"]
-        domain_key = str(run_spec["domain"]).lower()
-        domain = DOMAIN_LABELS.get(domain_key, str(run_spec["domain"]))
-        run_type = run_spec["type"]
-        ae_key = run_spec["ae_registry_key"]
-        if ae_key not in unified_manifest:
-            raise KeyError(
-                f"Downstream run {run_name!r} requires AE registry key {ae_key!r}, "
-                "but that key was not included in required_selection_keys."
-            )
-        entry = unified_manifest[ae_key]
-        six_run_rows.append(
-            {
-                "Run": run_name,
-                "Domain": domain,
-                "Type": run_type,
-                "AE checkpoint": f"{entry['training_domain']} {entry['stage']} `{entry['checkpoint_name']}`",
-                "absolute_checkpoint_path": entry["checkpoint_path"],
-                "checkpoint_epoch": entry["checkpoint_epoch"],
-                "checksum": entry["model_state_checksum"],
-                "selection_reason": entry["selection_reason"],
-                "source_evaluation_folder": entry["source_evaluation_dir"],
-                "intended_stage3_data_split": domain_key,
-                "intended_stage4_data_split": domain_key,
-                "ae_registry_key": ae_key,
-            }
-        )
-        six_run_manifest.append(
-            {
-                "run": run_name,
-                "domain": domain_key,
-                "type": run_type,
-                "ae_registry_key": ae_key,
-                "ae_checkpoint_path": entry["checkpoint_path"],
-                "selection_reason": entry["selection_reason"],
-                "stage3_data_split": domain_key,
-                "stage4_data_split": domain_key,
-            }
-        )
-
-    blocking = [
-        row for row in validation_rows
-        if row["status"] not in {"completed", "completed_with_warnings"}
-        or not row.get("checkpoint_path")
-    ]
-    blocking_summary = [
-        {
-            "key": row.get("key", ""),
-            "status": row.get("status", ""),
-            "checkpoint_path": row.get("checkpoint_path", ""),
-            "checkpoint_name": row.get("checkpoint_name", ""),
-            "warnings": row.get("warnings", ""),
+    downstream_specs = [dict(row) for row in (config.downstream_runs or DEFAULT_DOWNSTREAM_RUNS)]
+    downstream_manifest: list[dict[str, Any]] = []
+    assignment_rows: list[dict[str, Any]] = []
+    for spec in downstream_specs:
+        ae_key = spec["ae_registry_key"]
+        if ae_key not in selected_registry:
+            raise KeyError(f"Downstream run {spec['run']!r} requires missing checkpoint {ae_key!r}")
+        selected = selected_registry[ae_key]
+        row = {
+            **spec,
+            "ae_checkpoint_path": selected["path"],
+            "selection_reason": selected["selection_reason"],
+            "stage3_data_split": spec["domain"],
+            "stage4_data_split": spec["domain"],
         }
-        for row in blocking
-    ]
-    if blocking:
-        run_status = "missing_checkpoint" if any(row["status"] == "missing_checkpoint" for row in blocking) else "incompatible_checkpoint"
-        unified_manifest["evaluation_state"] = run_status
-    elif any(row["status"] == "completed_with_warnings" or row.get("warnings") for row in validation_rows):
-        run_status = "completed_with_warnings"
-        unified_manifest["evaluation_state"] = "completed"
-    else:
-        run_status = "completed"
-        unified_manifest["evaluation_state"] = "completed"
-    unified_manifest["integration_status"] = run_status
+        downstream_manifest.append(row)
+        assignment_rows.append({
+            "Run": spec["run"],
+            "Domain": spec["domain"],
+            "Type": spec["type"],
+            "AE checkpoint": selected["checkpoint_name"],
+            "absolute_checkpoint_path": selected["path"],
+            "checksum": selected["model_state_checksum"],
+            "ae_registry_key": ae_key,
+        })
 
-    write_json(registry_dir / "selected_ae_checkpoints_for_stage2_stage3_stage4.json", unified_manifest)
-    write_json(registry_dir / "selected_checkpoint_validation.json", validation_rows)
-    write_csv_rows(registry_dir / "checkpoint_checksums.csv", checksum_rows)
-    write_csv_rows(downstream_dir / "six_run_ae_assignment.csv", six_run_rows)
-    write_csv_rows(downstream_dir / "selected_ae_branch_assignment.csv", six_run_rows)
-    write_json(
-        downstream_dir / "stage2_stage3_stage4_input_manifest.json",
-        {
-            "selected_ae_checkpoints": selected_registry,
-            "six_stage2_stage3_stage4_runs": six_run_manifest,
-            "selected_stage2_stage3_stage4_runs": six_run_manifest,
-            "selected_manifest": str(registry_dir / "selected_ae_checkpoints_for_stage2_stage3_stage4.json"),
-            "validation_report": str(registry_dir / "selected_checkpoint_validation.json"),
-        },
+    status = "completed" if not blocking else (
+        "missing_checkpoint" if any(row["status"] == "missing_checkpoint" for row in blocking)
+        else "incompatible_checkpoint"
     )
-    write_readme(downstream_dir / "README_WHAT_TO_LOOK_AT.md")
-    write_json(
-        metadata_dir / "run_status.json",
-        {
-            "status": run_status,
-            "output_dir": str(output_dir),
-            "all_selected_checkpoint_entries_valid": not blocking,
-            "blocking_checkpoints": blocking_summary,
-            "table_copies": table_copy_rows,
-            "required_selection_keys": list(required_selection_keys),
-            "downstream_run_count": len(six_run_manifest),
-            "rerun_stage1_checkpoint_evaluation": False,
-        },
-    )
+    manifest_path = downstream_dir / "stage2_stage3_stage4_input_manifest.json"
+    validation_path = registry_dir / "selected_checkpoint_validation.json"
+    _write_json(validation_path, validation_rows)
+    _write_json(registry_dir / "selected_ae_checkpoints_for_stage2_stage3_stage4.json", selected_registry)
+    _write_csv(downstream_dir / "selected_ae_branch_assignment.csv", assignment_rows)
+    _write_csv(downstream_dir / "six_run_ae_assignment.csv", assignment_rows)
+    _write_json(manifest_path, {
+        "selected_ae_checkpoints": selected_registry,
+        "six_stage2_stage3_stage4_runs": downstream_manifest,
+        "selected_stage2_stage3_stage4_runs": downstream_manifest,
+        "validation_report": str(validation_path),
+    })
+    _write_json(output_dir / "00_metadata/run_status.json", {
+        "status": status,
+        "required_selection_keys": list(required_keys),
+        "downstream_run_count": len(downstream_manifest),
+        "blocking_checkpoints": blocking,
+    })
     return {
-        "status": run_status,
+        "status": status,
         "output_dir": str(output_dir),
-        "manifest": unified_manifest,
-        "blocking_checkpoints": blocking_summary,
+        "blocking_checkpoints": blocking,
     }
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--selected-checkpoints-json", required=True, type=Path)
-    parser.add_argument("--stage1a-evaluation-dir", default=None, type=Path)
-    parser.add_argument("--stage1b-evaluation-dir", default=None, type=Path)
     parser.add_argument("--output-root", required=True, type=Path)
-    parser.add_argument("--rerun-stage1-checkpoint-evaluation", action="store_true")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    result = integrate_completed_stage1_selection(
-        IntegrationConfig(
-            output_root=args.output_root,
-            selected_checkpoints=read_json(args.selected_checkpoints_json),
-            stage1a_evaluation_dir=args.stage1a_evaluation_dir,
-            stage1b_evaluation_dir=args.stage1b_evaluation_dir,
-            rerun_stage1_checkpoint_evaluation=args.rerun_stage1_checkpoint_evaluation,
-        )
-    )
+    selected = json.loads(args.selected_checkpoints_json.read_text())
+    result = integrate_completed_stage1_selection(IntegrationConfig(args.output_root, selected))
     print(json.dumps(result, indent=2, sort_keys=True))
 
 

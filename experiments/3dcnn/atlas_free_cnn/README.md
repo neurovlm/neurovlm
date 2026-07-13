@@ -1,70 +1,133 @@
-# Clean Atlas-Free CNN Area
+# Atlas-Free 3D CNN
 
-This folder keeps only the cache and support code for the atlas-free 3D CNN
-setup. The old multipositive notebooks/trainers were removed to avoid mixing
-that architecture with the working 3D CNN recipe.
+This directory contains the retained implementation for the atlas-free 3D CNN
+experiments. The active multi-source workflow is intentionally narrow:
 
-Important paths:
+1. Train one mixed-source baseline autoencoder with natural sampling and raw
+   MSE.
+2. Fine-tune that autoencoder separately on PubMed, Nilearn, and NeuroVault.
+3. Train the mixed baseline on all three Stage 3 contrastive tasks and each
+   specialized autoencoder on its matching task, producing six runs.
+4. Train one text-to-brain projection head for each of those six branches and
+   evaluate it on the matching held-out test split.
 
-- `cache/`: moved mixed PubMed/NeuroVault/Nilearn cached artifacts.
-- `data/ale_caches/`: old good PubMed ALE caches.
-- `data_building/`: the normalized SPECTER2 cache builder used by Notebook 5.
-- `training/`: core model construction, datasets, losses, checkpointing, and
-  Stage 1/3/4 trainers.
-- `evaluation/`: checkpoint selection, generation/reconstruction metrics, and
-  model-comparison scripts used by the notebooks.
-- `conventions.py`: shared pure naming, path, checkpoint, and text-embedding
-  conventions used by core code and notebooks.
-- `notebook_utils.py`: notebook-only orchestration helpers for Colab, Drive,
-  Hugging Face downloads, and display-time validation. Core training code
-  should not import this module.
+All Stage 3 and Stage 4 runs use the normalized SPECTER2 convention:
+empty-centered embeddings followed by unit normalization. There is no retained
+unnormalized SPECTER2 path.
 
-For mentor review, start with the model/training surface:
-`training/ale_cnn.py`, `training/model_wrappers.py`,
-`training/train_autoencoder.py`, `training/train_ale_cnn.py`,
-`training/train_text_to_brain.py`, the loss modules, and
-`training/checkpointing.py`. Then review the current pipeline support in
-`pipeline_outputs.py`, `stage1_selection_integration.py`, and
-`evaluation/stage1_checkpoint_evaluation.py`.
+## Notebooks
 
-The retained encoder surface is intentionally small:
+The primary workflow is:
 
-- the plain 3D CNN used by Notebooks 1, 4, and 5;
+- `../4 multi source autoencoder.ipynb`
+- `../5 multi source stage3 stage4.ipynb`
+
+Notebook 4 writes the four selected AE checkpoints, their reconstruction
+metrics, and a checkpoint registry. Notebook 5 validates the corresponding
+four locked AE resource checkpoints before starting the fixed six Stage 3 and
+six Stage 4 runs. Stage 4 training itself writes the held-out spatial and
+semantic metrics.
+
+The retained optional notebooks are:
+
+- `../1 best contrastive recipe on pubmed.ipynb`: PubMed-only compact
+  plain-CNN recipe.
+- `../3 resnet48 multi scale attention.ipynb`: ResNet48 multi-scale attention
+  variant.
+
+See `../NOTEBOOK_GUIDE.md` for the execution order and output details.
+
+## Directory Layout
+
+- `training/`: plain CNN and ResNet48 model construction, datasets, losses,
+  checkpointing, and the Stage 1/3/4 trainers.
+- `evaluation/`: canonical reconstruction, retrieval, generation, and Stage 4
+  semantic metrics plus the distinct MLP-versus-CNN comparison utilities.
+- `data_building/`: only the normalized SPECTER2 cache builder and package
+  initializer.
+- `configs/`: retained standalone configuration templates. Notebook-generated
+  per-run configurations remain authoritative for the six-branch workflow.
+- `cache/`: finalized local split JSONLs, shared volume tensor, source caches,
+  and normalized text embeddings. The notebooks use local artifacts first and
+  fall back to Hugging Face.
+- `conventions.py`: fixed domains, branches, checkpoint names, normalized-text
+  convention, and stage output paths.
+- `notebook_utils.py`: notebook-only environment, download, path-discovery,
+  and validation helpers.
+- `pipeline_outputs.py`: run-status and output-table helpers.
+- `stage1_selection_integration.py`: validates the four finalized AE files and
+  creates the exact six-run downstream manifest.
+
+## Retained Models and Recipes
+
+The retained encoder surface is:
+
+- the compact plain 3D CNN used by Notebooks 1, 4, and 5;
 - the ResNet48 multi-scale attention encoder used by Notebook 3.
 
-Stage 1A uses only the natural-sampling, raw-MSE baseline recipe. The former
-balanced raw-MSE, balanced hybrid-loss, flat-MLP, dilated ResNet, SE-context,
-and wider/deeper architecture experiments have been removed. The three Stage 1B
-domain fine-tuning runs remain because they are required by Notebooks 4, 4b, and 5.
+The multi-source Stage 1 recipe is fixed:
 
-Notebook/report support code is intentionally separate: `notebook_utils.py`,
-`evaluation/compare_*.py`, and `model_comparison/plotting_utils.py` exist to
-keep notebooks readable and to reproduce figures/tables, not to define the core
-model architecture or training objective.
+- model: plain 3D CNN, 384-dimensional latent space;
+- sampling: natural mixed-source sampling;
+- loss: raw MSE with an unconstrained decoder output;
+- mixed checkpoint selection: best validation loss;
+- domain-fine-tuned checkpoint selection: best validation top-5 Dice.
 
-Notebook 4b Stage 1A checkpoint comparison writes two recipe-level tables under
-`01_stage1a/`: `stage1a_all_checkpoint_eval.csv` contains one row per evaluated
-checkpoint per Stage 1A recipe, and
-`stage1a_recipe_best_checkpoint_comparison.csv` compares only the best checkpoint
-selected within each recipe. Each Stage 1A recipe was first checkpoint-selected
-on the same held-out split. The table compares the best checkpoint from each
-recipe.
+Notebook 4 evaluates only the selected checkpoint for each finalized branch.
+Its canonical combined outputs are:
 
-For the current checked-in/moved cache, you do not need to rerun full
-preprocessing before training. The shared tensor pack and train/val/test JSONL
-already exist under `cache/hf_atlas_free_cnn/` and `cache/unified_jsonl/`.
-The notebooks can also download these finalized artifacts from Hugging Face.
+- `07_final_comparison/selected_ae_checkpoints.json`
+- `07_final_comparison/final_summary_table.csv`
+- per-run `metrics/reconstruction_summary_by_source.csv`
 
-The text-to-brain order is:
+## Downstream Six-Run Matrix
 
-1. Train the text-to-brain projection head.
-2. Use that projection plus the frozen AE decoder to generate maps.
-3. Evaluate generated maps on the held-out mixed test set by source.
+For each domain, Notebook 5 compares the mixed baseline against the matching
+specialized AE:
 
-Stage 4 training is spatial-fidelity focused by default:
+| Domain | Mixed baseline | Specialized AE |
+| --- | --- | --- |
+| PubMed | `mixed_stage1a` | `mixed_to_pubmed_stage1b` |
+| Nilearn | `mixed_stage1a` | `mixed_to_nilearn_stage1b` |
+| NeuroVault | `mixed_stage1a` | `mixed_to_neurovault_stage1b` |
 
-- Stage 4 training semantic AUC: disabled
-- Stage 4 primary checkpoint: `best_val_top5_dice.pt`
-- Stage 4 secondary spatial checkpoint: `best_val_spatial_corr.pt`
-- Stage 4 semantic checkpoint: not produced during training unless semantic AUC is explicitly enabled
-- Stage 4 semantic diagnostics: available in Notebook 5b final evaluation
+Every branch uses the same normalized SPECTER2 cache and controlled Stage 3
+recipe. Stage 4 freezes the AE decoder and trains a fresh 768 → 512 → 384
+text-to-latent projection head for that branch. Comparisons are made within
+domain on identical splits.
+
+Stage 4 uses a spatial-first checkpoint policy:
+
+- primary checkpoint: `best_val_top5_dice.pt`;
+- secondary spatial checkpoint: `best_val_spatial_corr.pt`;
+- semantic AUC during training: disabled by default;
+- held-out spatial and semantic metrics: written by the Stage 4 trainer.
+
+## Data Surface
+
+Training consumes the finalized unified `train.jsonl`, `val.jsonl`, and
+`test.jsonl` files plus `atlas_free_cnn_volumes.pt`. These are discovered under
+`cache/unified_jsonl*/splits` and `cache/hf_atlas_free_cnn*`, or downloaded from
+the configured Hugging Face dataset repository.
+
+The only retained builder is
+`data_building/build_normalized_specter2_cache.py`. It creates the canonical
+`specter2_stage3_stage4_emptycentered_unitnorm.pt` cache and its validation
+sidecars. The old ingestion, JSONL rewriting, QC, export, network-evaluation,
+and alternate SPECTER2 cache builders are not part of the final pipeline.
+
+## Evaluation Surface
+
+Training modules produce their own canonical held-out metrics. The remaining
+`evaluation/compare_*.py` modules are not alternate evaluators for the same
+runs; they support the separate CNN-versus-MLP comparison notebooks under
+`../model_comparison/`.
+
+For a focused review, start with:
+
+- `training/ale_cnn.py`
+- `training/train_autoencoder.py`
+- `training/train_ale_cnn.py`
+- `training/train_text_to_brain.py`
+- `conventions.py`
+- `stage1_selection_integration.py`

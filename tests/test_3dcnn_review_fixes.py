@@ -20,7 +20,6 @@ SRC = REPO_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from atlas_free_cnn.evaluation.stage1_checkpoint_evaluation import create_stage1b_selection
 from atlas_free_cnn.training.checkpointing import CheckpointManager, metric_higher_is_better
 from atlas_free_cnn.training.train_ale_cnn import trainability_report
 
@@ -133,36 +132,6 @@ def test_checkpoint_manager_uses_metric_direction_for_best_selection(tmp_path: P
     assert ckpt.maybe_save_best("foreground_mse", 0.2, payload, epoch=2)
     assert not ckpt.maybe_save_best("foreground_mse", 0.9, payload, epoch=3)
     assert ckpt.best["foreground_mse"] == pytest.approx(0.2)
-
-
-def _stage1b_row(checkpoint: str, *, top5: float, spatial: float, fg: float) -> dict[str, object]:
-    return {
-        "variant": "mixed_to_pubmed",
-        "stage": "stage1b",
-        "test_domain": "pubmed",
-        "eval_scope": "primary",
-        "alias_status": "canonical",
-        "load_status": "loaded",
-        "checkpoint_name": checkpoint,
-        "checkpoint_path": f"/tmp/{checkpoint}",
-        "checkpoint_epoch": 1,
-        "top5_dice": top5,
-        "spatial_corr": spatial,
-        "foreground_mse": fg,
-        "reconstruction_mse": fg * 2,
-    }
-
-
-def test_stage1b_checkpoint_selection_uses_correct_metric_directions(tmp_path: Path) -> None:
-    rows = [
-        _stage1b_row("best_val_loss.pt", top5=0.20, spatial=0.90, fg=0.01),
-        _stage1b_row("best_top5_dice.pt", top5=0.80, spatial=0.40, fg=0.20),
-        _stage1b_row("last.pt", top5=0.50, spatial=0.50, fg=0.001),
-    ]
-
-    selected = create_stage1b_selection(rows, tmp_path)["pubmed"]
-
-    assert selected[0]["checkpoint_name"] == "best_top5_dice.pt"
 
 
 def test_stage4_checkpoint_manifest_last_epoch_and_optional_semantic(tmp_path: Path) -> None:
