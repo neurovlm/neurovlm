@@ -1,133 +1,115 @@
 # Atlas-Free 3D CNN
 
-This directory contains the retained implementation for the atlas-free 3D CNN
-experiments. The active multi-source workflow is intentionally narrow:
+This package implements the retained dense-volume 3D CNN experiments for
+brain-map reconstruction, brain/text contrastive retrieval, and text-to-brain
+generation.
 
-1. Train one mixed-source baseline autoencoder with natural sampling and raw
-   MSE.
-2. Fine-tune that autoencoder separately on PubMed, Nilearn, and NeuroVault.
-3. Train the mixed baseline on all three Stage 3 contrastive tasks and each
-   specialized autoencoder on its matching task, producing six runs.
-4. Train one text-to-brain projection head for each of those six branches and
-   evaluate it on the matching held-out test split.
+The documented workflow uses:
 
-All Stage 3 and Stage 4 runs use the normalized SPECTER2 convention:
-empty-centered embeddings followed by unit normalization. There is no retained
-unnormalized SPECTER2 path.
+1. `../1 best contrastive recipe on pubmed.ipynb` for the standalone PubMed
+   reference experiment;
+2. `../3 multi source autoencoder.ipynb` for mixed-source Stage 1A and three
+   domain-specific Stage 1B autoencoders;
+3. `../4 multi source stage3 stage4.ipynb` for the fixed six Stage 3
+   contrastive branches and six matching Stage 4 text-to-brain branches.
 
-## Notebooks
+Start with [`../NOTEBOOK_GUIDE.md`](../NOTEBOOK_GUIDE.md). The full technical
+design, data provenance, parameter tables, training recipes, evaluation rules,
+and code-review paths are in
+[`../3DCNN_TECHNICAL_GUIDE.md`](../3DCNN_TECHNICAL_GUIDE.md) and the standalone
+[`../3DCNN_TECHNICAL_GUIDE.html`](../3DCNN_TECHNICAL_GUIDE.html).
 
-The primary workflow is:
+## Finalized Data
 
-- `../4 multi source autoencoder.ipynb`
-- `../5 multi source stage3 stage4.ipynb`
+The multi-source workflow consumes `neurovlm/atlas_free_cnn_dataset`:
 
-Notebook 4 writes the four selected AE checkpoints, their reconstruction
-metrics, and a checkpoint registry. Notebook 5 validates the corresponding
-four locked AE resource checkpoints before starting the fixed six Stage 3 and
-six Stage 4 runs. Stage 4 training itself writes the held-out spatial and
-semantic metrics.
+- 33,657 maps: 30,658 PubMed, 797 Nilearn, and 2,202 NeuroVault;
+- one-channel `36 x 45 x 38` volumes in the `MNI152_4mm_crop` geometry;
+- 26,944 train, 3,366 validation, and 3,347 test examples;
+- 103,800 map-text pairs;
+- one 768-dimensional normalized SPECTER2 vector for each of 33,657 primary
+  texts.
 
-The retained optional notebooks are:
+The volume package and JSONL splits are discovered locally/through Drive first
+and downloaded from Hugging Face when absent. The only retained offline builder
+is `data_building/build_normalized_specter2_cache.py`; the finalized image-data
+builders were removed after their outputs and audits were published.
 
-- `../1 best contrastive recipe on pubmed.ipynb`: PubMed-only compact
-  plain-CNN recipe.
-- `../3 resnet48 multi scale attention.ipynb`: ResNet48 multi-scale attention
-  variant.
+## Retained Architecture
 
-See `../NOTEBOOK_GUIDE.md` for the execution order and output details.
+The finalized multi-source model is a plain four-block 3D CNN:
 
-## Directory Layout
+```text
+input [B,1,36,45,38]
+ -> channels 64 -> 128 -> 256 -> 512
+ -> adaptive average pooling
+ -> 384-dimensional latent
+ -> learned 3x3x3 decoder seed
+ -> four transposed-convolution upsampling blocks
+ -> output [B,1,36,45,38]
+```
 
-- `training/`: plain CNN and ResNet48 model construction, datasets, losses,
-  checkpointing, and the Stage 1/3/4 trainers.
-- `evaluation/`: canonical reconstruction, retrieval, generation, and Stage 4
-  semantic metrics plus the distinct MLP-versus-CNN comparison utilities.
-- `data_building/`: only the normalized SPECTER2 cache builder and package
-  initializer.
-- `configs/`: retained standalone configuration templates. Notebook-generated
-  per-run configurations remain authoritative for the six-branch workflow.
-- `cache/`: finalized local split JSONLs, shared volume tensor, source caches,
-  and normalized text embeddings. The notebooks use local artifacts first and
-  fall back to Hugging Face.
-- `conventions.py`: fixed domains, branches, checkpoint names, normalized-text
-  convention, and stage output paths.
-- `notebook_utils.py`: notebook-only environment, download, path-discovery,
-  and validation helpers.
-- `pipeline_outputs.py`: run-status and output-table helpers.
-- `stage1_selection_integration.py`: validates the four finalized AE files and
-  creates the exact six-run downstream manifest.
+Every encoder block is Conv3D → GroupNorm → GELU → 2x max pooling. The encoder
+uses dropout 0.1 before its final linear projection. The decoder ends with an
+unconstrained one-channel Conv3D output; training loss sees the raw output,
+while reconstruction metrics clamp predictions to `[0, 1]`.
 
-## Retained Models and Recipes
+Parameter counts:
 
-The retained encoder surface is:
+| Component | Parameters |
+| --- | ---: |
+| Encoder | 4,846,464 |
+| Decoder | 6,734,529 |
+| Autoencoder | 11,580,993 |
+| Fresh Stage 4 768→512→384 projector | 590,720 |
 
-- the compact plain 3D CNN used by Notebooks 1, 4, and 5;
-- the ResNet48 multi-scale attention encoder used by Notebook 3.
+The separately retained ResNet48 multi-scale-attention variant lives in
+`ale_cnn.py` and Notebook 2, but it is not part of the requested Notebook
+1→3→4 workflow.
 
-The multi-source Stage 1 recipe is fixed:
+## Stage Summary
 
-- model: plain 3D CNN, 384-dimensional latent space;
-- sampling: natural mixed-source sampling;
-- loss: raw MSE with an unconstrained decoder output;
-- mixed checkpoint selection: best validation loss;
-- domain-fine-tuned checkpoint selection: best validation top-5 Dice.
+| Stage | Trainable modules | Objective | Primary selection |
+| --- | --- | --- | --- |
+| 1A mixed AE | Encoder + decoder | Raw voxel MSE | Minimum validation loss |
+| 1B domain AE | Encoder + decoder, initialized from 1A | Raw voxel MSE | Maximum validation top-5 Dice |
+| 3 contrastive | AE-initialized encoder + pretrained text projection | Symmetric InfoNCE, temperature 0.07 | Maximum mean bidirectional normalized recall-curve AUC |
+| 4 generation | Fresh 768→512→384 projector only; AE frozen | Latent alignment + reconstruction MSE | Maximum validation top-5 Dice |
 
-Notebook 4 evaluates only the selected checkpoint for each finalized branch.
-Its canonical combined outputs are:
+Stage 1A samples the natural mixed distribution. Stage 1B creates independent
+PubMed, Nilearn, and NeuroVault fine-tunes. Stage 3 and Stage 4 each compare the
+mixed baseline with its matching specialization inside each domain, producing
+six controlled branches.
 
-- `07_final_comparison/selected_ae_checkpoints.json`
-- `07_final_comparison/final_summary_table.csv`
-- per-run `metrics/reconstruction_summary_by_source.csv`
+## Package Layout
 
-## Downstream Six-Run Matrix
+- `training/ale_cnn.py`: encoder, decoder, autoencoder, and retained ResNet.
+- `training/train_autoencoder.py`: multi-source Stage 1 training and evaluation.
+- `training/train_ale_cnn.py`: Stage 3 contrastive training and retrieval eval.
+- `training/train_text_to_brain.py`: corrected Stage 4 training and final eval.
+- `training/model_wrappers.py`: text projection and model-loading helpers.
+- `training/autoencoder_losses.py`: retained raw-MSE AE objective.
+- `training/generation_losses.py`: Stage 4 reconstruction/latent loss terms.
+- `training/datasets.py`: unified JSONL and shared tensor loader.
+- `evaluation/metrics.py`: rank, recall, MRR, and normalized AUC definitions.
+- `evaluation/generation_metrics.py`: spatial reconstruction metrics.
+- `evaluation/stage4_semantic.py`: semantic evaluation of generated maps.
+- `conventions.py`: fixed domains, branches, cache convention, and paths.
+- `stage1_selection_integration.py`: AE validation and six-run manifest.
+- `notebook_utils.py`: artifact discovery, download, cache validation, and
+  notebook subprocess helpers.
+- `data_building/build_normalized_specter2_cache.py`: canonical SPECTER2 cache
+  builder.
 
-For each domain, Notebook 5 compares the mixed baseline against the matching
-specialized AE:
+## Review Caveats
 
-| Domain | Mixed baseline | Specialized AE |
-| --- | --- | --- |
-| PubMed | `mixed_stage1a` | `mixed_to_pubmed_stage1b` |
-| Nilearn | `mixed_stage1a` | `mixed_to_nilearn_stage1b` |
-| NeuroVault | `mixed_stage1a` | `mixed_to_neurovault_stage1b` |
-
-Every branch uses the same normalized SPECTER2 cache and controlled Stage 3
-recipe. Stage 4 freezes the AE decoder and trains a fresh 768 → 512 → 384
-text-to-latent projection head for that branch. Comparisons are made within
-domain on identical splits.
-
-Stage 4 uses a spatial-first checkpoint policy:
-
-- primary checkpoint: `best_val_top5_dice.pt`;
-- secondary spatial checkpoint: `best_val_spatial_corr.pt`;
-- semantic AUC during training: disabled by default;
-- held-out spatial and semantic metrics: written by the Stage 4 trainer.
-
-## Data Surface
-
-Training consumes the finalized unified `train.jsonl`, `val.jsonl`, and
-`test.jsonl` files plus `atlas_free_cnn_volumes.pt`. These are discovered under
-`cache/unified_jsonl*/splits` and `cache/hf_atlas_free_cnn*`, or downloaded from
-the configured Hugging Face dataset repository.
-
-The only retained builder is
-`data_building/build_normalized_specter2_cache.py`. It creates the canonical
-`specter2_stage3_stage4_emptycentered_unitnorm.pt` cache and its validation
-sidecars. The old ingestion, JSONL rewriting, QC, export, network-evaluation,
-and alternate SPECTER2 cache builders are not part of the final pipeline.
-
-## Evaluation Surface
-
-Training modules produce their own canonical held-out metrics. The remaining
-`evaluation/compare_*.py` modules are not alternate evaluators for the same
-runs; they support the separate CNN-versus-MLP comparison notebooks under
-`../model_comparison/`.
-
-For a focused review, start with:
-
-- `training/ale_cnn.py`
-- `training/train_autoencoder.py`
-- `training/train_ale_cnn.py`
-- `training/train_text_to_brain.py`
-- `conventions.py`
-- `stage1_selection_integration.py`
+- Notebook 4 uses the locked AE resource loaders in
+  `neurovlm.retrieval_resources`. It validates and materializes those resources
+  locally; it does not automatically consume a fresh Notebook 3 checkpoint
+  registry.
+- Notebook 1 passes legacy sparse-loss flags to
+  `training/train_ale_cnn_autoencoder.py`, but that trainer's effective loss is
+  direct raw MSE.
+- The Hugging Face dataset viewer currently encounters a heterogeneous JSONL
+  schema cast issue. The notebooks download/read the raw JSONL files directly,
+  so training does not depend on the viewer conversion.
