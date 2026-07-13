@@ -94,7 +94,6 @@ def _build_ale_autoencoder_from_payload(payload: dict) -> torch.nn.Module:
         pooling=cfg["pooling"],
         encoder_arch=cfg.get("encoder_arch", "plain"),
         blocks_per_stage=cfg.get("blocks_per_stage", 2),
-        use_dilation=cfg.get("use_dilation", False),
         multi_scale=cfg.get("multi_scale", False),
         global_context=cfg.get("global_context", "none"),
     )

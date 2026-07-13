@@ -8,7 +8,7 @@ Important paths:
 
 - `cache/`: moved mixed PubMed/NeuroVault/Nilearn cached artifacts.
 - `data/ale_caches/`: old good PubMed ALE caches.
-- `data_building/`: ingestion, preprocessing, packing, and audit scripts.
+- `data_building/`: the normalized SPECTER2 cache builder used by Notebook 5.
 - `training/`: core model construction, datasets, losses, checkpointing, and
   Stage 1/3/4 trainers.
 - `evaluation/`: checkpoint selection, generation/reconstruction metrics, and
@@ -27,6 +27,16 @@ For mentor review, start with the model/training surface:
 `pipeline_outputs.py`, `stage1_selection_integration.py`, and
 `evaluation/stage1_checkpoint_evaluation.py`.
 
+The retained encoder surface is intentionally small:
+
+- the plain 3D CNN used by Notebooks 1, 4, and 5;
+- the ResNet48 multi-scale attention encoder used by Notebook 3.
+
+Stage 1A uses only the natural-sampling, raw-MSE baseline recipe. The former
+balanced raw-MSE, balanced hybrid-loss, flat-MLP, dilated ResNet, SE-context,
+and wider/deeper architecture experiments have been removed. The three Stage 1B
+domain fine-tuning runs remain because they are required by Notebooks 4, 4b, and 5.
+
 Notebook/report support code is intentionally separate: `notebook_utils.py`,
 `evaluation/compare_*.py`, and `model_comparison/plotting_utils.py` exist to
 keep notebooks readable and to reproduce figures/tables, not to define the core
@@ -40,23 +50,10 @@ selected within each recipe. Each Stage 1A recipe was first checkpoint-selected
 on the same held-out split. The table compares the best checkpoint from each
 recipe.
 
-For module-style commands from the repo root, use:
-
-```bash
-PYTHONPATH=experiments/3dcnn:src .conda/bin/python -m atlas_free_cnn.data_building.audit_preprocessing
-```
-
-To refresh the AE-training JSONL splits from the packed shared tensor:
-
-```bash
-PYTHONPATH=experiments/3dcnn:src .conda/bin/python -m atlas_free_cnn.data_building.export_hf_pack_jsonl
-```
-
 For the current checked-in/moved cache, you do not need to rerun full
 preprocessing before training. The shared tensor pack and train/val/test JSONL
 already exist under `cache/hf_atlas_free_cnn/` and `cache/unified_jsonl/`.
-Rerun ingestion/packing only if you change the source data or rebuild the cache
-from scratch.
+The notebooks can also download these finalized artifacts from Hugging Face.
 
 The text-to-brain order is:
 
@@ -71,13 +68,3 @@ Stage 4 training is spatial-fidelity focused by default:
 - Stage 4 secondary spatial checkpoint: `best_val_spatial_corr.pt`
 - Stage 4 semantic checkpoint: not produced during training unless semantic AUC is explicitly enabled
 - Stage 4 semantic diagnostics: available in Notebook 5b final evaluation
-
-To add the separate network-map test set used by brain-to-text semantic
-evaluation:
-
-```bash
-PYTHONPATH=experiments/3dcnn:src .conda/bin/python -m atlas_free_cnn.data_building.build_network_eval_jsonl
-```
-
-After building it, make sure the SPECTER text embedding cache also includes the
-network test texts before running text-to-brain generation evaluation.

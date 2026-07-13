@@ -13,7 +13,25 @@ import torch.nn.functional as F
 
 NormType = Literal["group", "batch", "instance", "none"]
 PoolType = Literal["max", "stride"]
-GlobalContextType = Literal["none", "se", "attention"]
+GlobalContextType = Literal["none", "attention"]
+
+
+def validate_retained_resnet_architecture(
+    *,
+    base_channels: int,
+    num_stages: int,
+    blocks_per_stage: int,
+    multi_scale: bool,
+    global_context: str,
+) -> None:
+    actual = (base_channels, num_stages, blocks_per_stage, multi_scale, global_context)
+    expected = (48, 4, 2, True, "attention")
+    if actual != expected:
+        raise ValueError(
+            "Only the retained ResNet48 multi-scale attention architecture is supported: "
+            "base_channels=48, num_stages=4, blocks_per_stage=2, "
+            "multi_scale=True, global_context='attention'"
+        )
 
 
 def count_parameters(module: nn.Module, trainable_only: bool = True) -> int:
@@ -67,18 +85,15 @@ class _ResidualBlock3D(nn.Module):
         out_ch: int,
         *,
         stride: int = 1,
-        dilation: int = 1,
         norm: NormType = "group",
     ):
         super().__init__()
-        padding = dilation
         self.conv1 = nn.Conv3d(
             in_ch,
             out_ch,
             kernel_size=3,
             stride=stride,
-            padding=padding,
-            dilation=dilation,
+            padding=1,
             bias=False,
         )
         self.norm1 = _norm_layer(norm, out_ch)
@@ -87,8 +102,7 @@ class _ResidualBlock3D(nn.Module):
             out_ch,
             out_ch,
             kernel_size=3,
-            padding=padding,
-            dilation=dilation,
+            padding=1,
             bias=False,
         )
         self.norm2 = _norm_layer(norm, out_ch)
@@ -105,24 +119,6 @@ class _ResidualBlock3D(nn.Module):
         out = self.act(self.norm1(self.conv1(x)))
         out = self.norm2(self.conv2(out))
         return self.act(out + identity)
-
-
-class _SEGlobalContext3D(nn.Module):
-    def __init__(self, channels: int, reduction: int = 8):
-        super().__init__()
-        hidden = max(8, channels // reduction)
-        self.net = nn.Sequential(
-            nn.AdaptiveAvgPool3d(1),
-            nn.Flatten(),
-            nn.Linear(channels, hidden),
-            nn.GELU(),
-            nn.Linear(hidden, channels),
-            nn.Sigmoid(),
-        )
-
-    def forward(self, x: Tensor) -> Tensor:
-        weights = self.net(x).view(x.shape[0], x.shape[1], 1, 1, 1)
-        return x * weights
 
 
 class _AttentionGlobalToken3D(nn.Module):
@@ -171,8 +167,8 @@ class ALE3DCNNEncoder(nn.Module):
         super().__init__()
         if num_blocks < 1:
             raise ValueError("num_blocks must be >= 1")
-        if num_blocks > 5:
-            raise ValueError("num_blocks > 5 is intentionally unsupported for current ALE volumes")
+        if num_blocks > 4:
+            raise ValueError("num_blocks > 4 is not part of the retained CNN architectures")
 
         channels = [base_channels * (2**i) for i in range(num_blocks)]
         blocks = []
@@ -215,7 +211,6 @@ class ALEResNet3DEncoder(nn.Module):
         out_dim: int = 384,
         dropout: float = 0.1,
         norm: NormType = "group",
-        use_dilation: bool = False,
         multi_scale: bool = False,
         global_context: GlobalContextType = "none",
         attention_pool_shape: tuple[int, int, int] = (4, 4, 4),
@@ -223,8 +218,8 @@ class ALEResNet3DEncoder(nn.Module):
         super().__init__()
         if num_stages < 1:
             raise ValueError("num_stages must be >= 1")
-        if num_stages > 5:
-            raise ValueError("num_stages > 5 is not recommended for current ALE volumes")
+        if num_stages > 4:
+            raise ValueError("num_stages > 4 is not part of the retained CNN architectures")
         if blocks_per_stage < 1:
             raise ValueError("blocks_per_stage must be >= 1")
 
@@ -245,25 +240,16 @@ class ALEResNet3DEncoder(nn.Module):
         for stage_idx, ch in enumerate(channels):
             stage_blocks = []
             stride = 1 if stage_idx == 0 else 2
-            dilation = 1
-            if use_dilation and stage_idx >= max(2, num_stages - 2):
-                dilation = 2 if stage_idx == num_stages - 2 else 4
-                stride = 1
-            stage_blocks.append(
-                _ResidualBlock3D(prev, ch, stride=stride, dilation=dilation, norm=norm)
-            )
+            stage_blocks.append(_ResidualBlock3D(prev, ch, stride=stride, norm=norm))
             for _ in range(1, blocks_per_stage):
-                stage_blocks.append(_ResidualBlock3D(ch, ch, dilation=dilation, norm=norm))
+                stage_blocks.append(_ResidualBlock3D(ch, ch, norm=norm))
             stages.append(nn.Sequential(*stage_blocks))
             prev = ch
         self.stages = nn.ModuleList(stages)
         self.global_pool = nn.AdaptiveAvgPool3d(1)
 
         final_channels = channels[-1]
-        if global_context == "se":
-            self.global_context = _SEGlobalContext3D(final_channels)
-            context_dim = 0
-        elif global_context == "attention":
+        if global_context == "attention":
             self.global_context = _AttentionGlobalToken3D(
                 final_channels, pool_shape=attention_pool_shape
             )
@@ -272,7 +258,7 @@ class ALEResNet3DEncoder(nn.Module):
             self.global_context = nn.Identity()
             context_dim = 0
         else:
-            raise ValueError("global_context must be 'none', 'se', or 'attention'")
+            raise ValueError("global_context must be 'none' or 'attention'")
 
         pooled_dim = sum(channels) if multi_scale else final_channels
         self.proj = nn.Sequential(
@@ -288,9 +274,6 @@ class ALEResNet3DEncoder(nn.Module):
         pooled = []
         for stage_idx, stage in enumerate(self.stages):
             x = stage(x)
-            is_last = stage_idx == len(self.stages) - 1
-            if is_last and self.global_context_type not in {"none", "attention"}:
-                x = self.global_context(x)
             if self.multi_scale:
                 pooled.append(self.global_pool(x).flatten(1))
         if self.global_context_type == "attention":
@@ -349,6 +332,8 @@ class ALE3DCNNDecoder(nn.Module):
             raise ValueError("output_shape must be a 3D (D, H, W) tuple")
         if num_blocks < 1:
             raise ValueError("num_blocks must be >= 1")
+        if num_blocks > 4:
+            raise ValueError("num_blocks > 4 is not part of the retained CNN architectures")
         self.output_shape = tuple(int(v) for v in output_shape)
         self.latent_dim = latent_dim
         self.out_channels = out_channels
@@ -405,7 +390,6 @@ class ALE3DCNNAutoEncoder(nn.Module):
         pooling: PoolType = "max",
         encoder_arch: Literal["plain", "resnet"] = "plain",
         blocks_per_stage: int = 2,
-        use_dilation: bool = False,
         multi_scale: bool = False,
         global_context: GlobalContextType = "none",
     ):
@@ -429,7 +413,6 @@ class ALE3DCNNAutoEncoder(nn.Module):
                 out_dim=latent_dim,
                 dropout=dropout,
                 norm=norm,
-                use_dilation=use_dilation,
                 multi_scale=multi_scale,
                 global_context=global_context,
             )
@@ -446,33 +429,6 @@ class ALE3DCNNAutoEncoder(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return self.decoder(self.encoder(x))
-
-    def count_parameters(self) -> int:
-        return count_parameters(self)
-
-
-class ALEFlatMLPEncoder(nn.Module):
-    """Flattened atlas-free ALE baseline with lazy input sizing."""
-
-    def __init__(
-        self,
-        hidden_dim: int = 1024,
-        out_dim: int = 384,
-        dropout: float = 0.1,
-    ):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Flatten(),
-            nn.LazyLinear(hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, out_dim),
-        )
-        self.out_dim = out_dim
-
-    def forward(self, x: Tensor) -> Tensor:
-        return self.net(x)
 
     def count_parameters(self) -> int:
         return count_parameters(self)

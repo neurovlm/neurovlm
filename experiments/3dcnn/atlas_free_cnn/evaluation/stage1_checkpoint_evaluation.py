@@ -137,18 +137,6 @@ AE_RUN_REGISTRY: dict[str, dict[str, Any]] = {
         "training_domain": "mixed",
         "test_domains": ["mixed", "pubmed", "nilearn", "neurovault"],
     },
-    "mixed_balanced_raw_mse": {
-        "run_dir": str(AE_RUN_ROOT / "01_stage1_ae_pretraining/mixed_balanced_raw_mse"),
-        "stage": "stage1a",
-        "training_domain": "mixed",
-        "test_domains": ["mixed", "pubmed", "nilearn", "neurovault"],
-    },
-    "mixed_balanced_hybrid_loss": {
-        "run_dir": str(AE_RUN_ROOT / "01_stage1_ae_pretraining/mixed_balanced_hybrid_loss"),
-        "stage": "stage1a",
-        "training_domain": "mixed",
-        "test_domains": ["mixed", "pubmed", "nilearn", "neurovault"],
-    },
     "mixed_to_pubmed": {
         "run_dir": str(AE_RUN_ROOT / "02_stage1b_ae_finetuning/pubmed"),
         "stage": "stage1b",
@@ -1835,7 +1823,7 @@ def registry_from_root(run_root: str) -> dict[str, dict[str, Any]]:
                 root / "02_stage1b_domain_finetune/neurovault/mixed_to_neurovault",
             ],
         }
-        for variant in ["mixed_baseline_raw_mse", "mixed_balanced_raw_mse", "mixed_balanced_hybrid_loss"]:
+        for variant in ["mixed_baseline_raw_mse"]:
             registry[variant]["run_dir"] = str(root / "01_stage1_ae_pretraining" / variant)
         for variant, candidates in replacements.items():
             chosen = next((p for p in candidates if p.exists()), candidates[0])

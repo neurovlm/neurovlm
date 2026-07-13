@@ -56,14 +56,7 @@ AE_CHECKPOINT_METRICS = [
     "top10_dice",
     "foreground_mse",
 ]
-MODEL_SIZE_PRESETS = {
-    "base": {"base_channels": 48, "num_blocks": 4, "latent_dim": 384},
-    "wide": {"base_channels": 64, "num_blocks": 4, "latent_dim": 384},
-    "deeper": {"base_channels": 48, "num_blocks": 5, "latent_dim": 384},
-}
-
 BASELINE_RAW_MSE_RECIPE = "baseline_raw_mse"
-LEGACY_BASELINE_RECIPE = "previous_good_compatible"
 
 BASELINE_RAW_MSE_DEFAULTS = {
     "lr": 3e-4,
@@ -123,42 +116,21 @@ def source_counts(dataset: UnifiedMapTextDataset) -> dict[str, int]:
 def apply_ae_recipe_defaults(cfg: dict[str, Any]) -> dict[str, Any]:
     cfg = dict(cfg)
     recipe = str(cfg.get("ae_training_recipe", cfg.get("AE_TRAINING_RECIPE", BASELINE_RAW_MSE_RECIPE)))
-    legacy_alias_used = recipe == LEGACY_BASELINE_RECIPE
-    if legacy_alias_used:
-        recipe = BASELINE_RAW_MSE_RECIPE
+    if recipe != BASELINE_RAW_MSE_RECIPE:
+        raise ValueError(f"Only the retained AE recipe is supported: {BASELINE_RAW_MSE_RECIPE}")
     cfg["ae_training_recipe"] = recipe
-    if legacy_alias_used:
-        cfg["ae_training_recipe_alias"] = LEGACY_BASELINE_RECIPE
-    if recipe == BASELINE_RAW_MSE_RECIPE:
-        for key, value in BASELINE_RAW_MSE_DEFAULTS.items():
-            if key == "model":
-                model = dict(value)
-                model.update(dict(cfg.get("model") or {}))
-                cfg["model"] = model
-            elif key == "loss":
-                loss = dict(value)
-                loss.update(dict(cfg.get("loss") or {}))
-                cfg["loss"] = loss
-            else:
-                cfg.setdefault(key, value)
-        cfg.setdefault("checkpoint_selection_metric", "best_val_loss")
-    elif recipe in {"mixed_balanced_raw_mse", "mixed_balanced_hybrid_loss", "mixed_hybrid"}:
-        cfg.setdefault("data_mode", "mixed")
-        cfg.setdefault("source_sampling", "balanced")
-        if recipe == "mixed_balanced_raw_mse":
-            cfg.setdefault("loss", {"type": "raw_mse"})
+    for key, value in BASELINE_RAW_MSE_DEFAULTS.items():
+        if key == "model":
+            model = dict(value)
+            model.update(dict(cfg.get("model") or {}))
+            cfg["model"] = model
+        elif key == "loss":
+            loss = dict(value)
+            loss.update(dict(cfg.get("loss") or {}))
+            cfg["loss"] = loss
         else:
-            cfg.setdefault(
-                "loss",
-                {
-                    "type": "hybrid_recon",
-                    "lambda_foreground": 0.10,
-                    "lambda_topk": 0.05,
-                    "topk_percent": 5,
-                    "prediction_activation": "none",
-                },
-            )
-        cfg.setdefault("checkpoint_selection_metric", "best_top5_dice")
+            cfg.setdefault(key, value)
+    cfg.setdefault("checkpoint_selection_metric", "best_val_loss")
     return cfg
 
 
@@ -189,17 +161,13 @@ class VolumeCollator:
 
 
 def model_config(cfg: dict[str, Any]) -> dict[str, Any]:
-    size = str(cfg.get("model_size", cfg.get("MODEL_SIZE", "base"))).lower()
-    if size not in MODEL_SIZE_PRESETS:
-        raise ValueError("MODEL_SIZE/model_size must be base, wide, or deeper")
-    out = dict(MODEL_SIZE_PRESETS[size])
-    out.update(cfg.get("model", {}))
+    out = dict(BASELINE_RAW_MSE_DEFAULTS["model"])
+    out.update(dict(cfg.get("model") or {}))
     out.setdefault("encoder_arch", "plain")
     out.setdefault("dropout", 0.1)
     out.setdefault("norm", "group")
     out.setdefault("pooling", "max")
     out.setdefault("blocks_per_stage", 2)
-    out.setdefault("use_dilation", False)
     out.setdefault("multi_scale", False)
     out.setdefault("global_context", "none")
     return out
@@ -217,7 +185,6 @@ def build_model(cfg: dict[str, Any], target_shape: tuple[int, int, int], device:
         pooling=str(mcfg.get("pooling", "max")),
         encoder_arch=str(mcfg.get("encoder_arch", "plain")),
         blocks_per_stage=int(mcfg.get("blocks_per_stage", 2)),
-        use_dilation=bool(mcfg.get("use_dilation", False)),
         multi_scale=bool(mcfg.get("multi_scale", False)),
         global_context=str(mcfg.get("global_context", "none")),
     ).to(device)
@@ -687,7 +654,6 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             pass
         else:
             raise ValueError("freeze_mode must be none, encoder, decoder, all_but_decoder, train_all, or encoder_decoder")
-    _save_legacy_aliases = bool(cfg.get("save_legacy_ae_checkpoint_aliases", False))
     _selection_metric = str(cfg.get("checkpoint_selection_metric", "best_val_loss"))
     if _selection_metric != "last":
         validation_metric_key(_selection_metric)
@@ -782,8 +748,6 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
             },
         }
         ckpt.save_last(payload, epoch=epoch)
-        if _save_legacy_aliases:
-            ckpt.save("last_cnn_autoencoder.pt", payload)
         if val_metrics:
             _improved = {
                 "val_loss": ckpt.maybe_save_best("val_loss", float(val_metrics.get("loss", math.inf)), payload, epoch=epoch),
@@ -793,13 +757,6 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                 "top10_dice": ckpt.maybe_save_best("top10_dice", float(val_metrics.get("top10_dice", 0.0)), payload, epoch=epoch),
                 "foreground_mse": ckpt.maybe_save_best("foreground_mse", float(val_metrics.get("foreground_mse", math.inf)), payload, epoch=epoch),
             }
-            selection = str(cfg.get("checkpoint_selection_metric", "best_val_loss"))
-            metric_name = selection.removeprefix("best_")
-            if _save_legacy_aliases:
-                if metric_name == "last":
-                    ckpt.save("best_cnn_autoencoder.pt", payload)
-                elif _improved.get(metric_name):
-                    ckpt.save("best_cnn_autoencoder.pt", payload)
             if early_stopping:
                 if early_metric_key not in val_metrics:
                     raise KeyError(f"Early-stopping metric {early_metric!r} resolved to missing validation metric {early_metric_key!r}")

@@ -18,19 +18,12 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from atlas_free_cnn.conventions import (
-    AE_BRANCH_MODES,
     BRANCH_KINDS,
-    CORRECTED_LEGACY_STAGE4_DIRNAME,
     CORRECTED_STAGE4_CHECKPOINT,
     CORRECTED_STAGE4_DIRNAME,
     DEFAULT_ATLAS_FREE_HF_REPO,
-    DEFAULT_TEXT_EMBEDDING_CONVENTION,
     DOMAIN_DIRS,
     GENERATION_AUC_VAL_INTERVAL,
-    LEGACY_SPECTER_CACHE_FILENAME,
-    LEGACY_SPECTER_PREPROCESSING,
-    LEGACY_STAGE3_DIRNAME,
-    LEGACY_TEXT_EMBEDDING_CONVENTION,
     LOCKED_REGISTRY_VARIANTS,
     LOCKED_STAGE1_CHECKPOINT_NAMES,
     NORMALIZED_SPECTER_CACHE_FILENAME,
@@ -51,14 +44,11 @@ from atlas_free_cnn.conventions import (
     STAGE4_PRIMARY_SPATIAL_CHECKPOINT,
     STAGE4_SEMANTIC_CHECKPOINT,
     STAGE4_SPATIAL_CORR_CHECKPOINT,
-    TEXT_EMBEDDING_CONVENTION_DIR_SUFFIXES,
     TEXT_EMBEDDING_DIM,
-    ae_branch_specs,
     canonical_text_embedding_convention,
     corrected_stage4_dirname_for_text_embedding_convention,
     discover_stage_outputs,
-    normalize_ae_branch_mode,
-    selected_downstream_runs_for_ae_branch_mode,
+    select_six_downstream_runs,
     sha256_file,
     six_branch_specs,
     stage3_dirname_for_text_embedding_convention,
@@ -219,12 +209,7 @@ def _default_text_cache_dir(repo_dir: str | Path | None = None) -> Path:
     return Path(repo_dir) / "experiments/3dcnn/atlas_free_cnn/cache/text_embeddings"
 
 
-def _canonical_text_embedding_convention(convention: str | None) -> str:
-    return canonical_text_embedding_convention(convention)
-
-
 def resolve_text_embedding_cache(
-    convention: str | None = DEFAULT_TEXT_EMBEDDING_CONVENTION,
     *,
     repo_dir: str | Path | None = None,
     local_cache_dir: str | Path | None = None,
@@ -237,57 +222,30 @@ def resolve_text_embedding_cache(
     notebooks should use this resolver instead of hardcoding a cache path.
     """
 
-    convention = _canonical_text_embedding_convention(convention)
     local_dir = Path(local_cache_dir) if local_cache_dir is not None else _default_text_cache_dir(repo_dir)
-
-    if convention == NORMALIZED_TEXT_EMBEDDING_CONVENTION:
-        cache_name = NORMALIZED_SPECTER_CACHE_FILENAME
-        local_cache_path = local_dir / cache_name
-        override_env_vars = ["NEUROVLM_NORMALIZED_SPECTER_CACHE", "NEUROVLM_TEXT_EMBEDDING_CACHE"]
-        spec = {
-            "convention": convention,
-            "cache_name": cache_name,
-            "hf_repo": hf_repo,
-            "hf_path": f"text_embeddings/{cache_name}",
-            "hf_candidate_paths": [f"text_embeddings/{cache_name}", cache_name],
-            "metadata_hf_path": f"text_embeddings/{NORMALIZED_SPECTER_METADATA_FILENAME}",
-            "validation_hf_path": f"text_embeddings/{NORMALIZED_SPECTER_VALIDATION_FILENAME}",
-            "index_hf_path": f"text_embeddings/{NORMALIZED_SPECTER_INDEX_FILENAME}",
-            "metadata_local_path": str(local_dir / NORMALIZED_SPECTER_METADATA_FILENAME),
-            "validation_local_path": str(local_dir / NORMALIZED_SPECTER_VALIDATION_FILENAME),
-            "index_local_path": str(local_dir / NORMALIZED_SPECTER_INDEX_FILENAME),
-            "preprocessing": NORMALIZED_SPECTER_PREPROCESSING,
-            "expected_dim": TEXT_EMBEDDING_DIM,
-            "expect_unit_norm": True,
-            "encoder_model": SPECTER2_ENCODER_MODEL,
-            "adapter_name": SPECTER2_ADAPTER_NAME,
-            "base_model_hf_repo": SPECTER2_BASE_MODEL_REPO,
-            "adapter_hf_repo": SPECTER2_ADAPTER_REPO,
-        }
-    else:
-        cache_name = LEGACY_SPECTER_CACHE_FILENAME
-        local_cache_path = local_dir / cache_name
-        override_env_vars = ["NEUROVLM_LEGACY_TEXT_EMBEDDING_CACHE", "NEUROVLM_TEXT_EMBEDDING_CACHE"]
-        spec = {
-            "convention": convention,
-            "cache_name": cache_name,
-            "hf_repo": hf_repo,
-            "hf_path": f"text_embeddings/{cache_name}",
-            "hf_candidate_paths": [f"text_embeddings/{cache_name}", cache_name, f"cache/text_embeddings/{cache_name}"],
-            "metadata_hf_path": "",
-            "validation_hf_path": "",
-            "index_hf_path": "",
-            "metadata_local_path": "",
-            "validation_local_path": "",
-            "index_local_path": "",
-            "preprocessing": LEGACY_SPECTER_PREPROCESSING,
-            "expected_dim": TEXT_EMBEDDING_DIM,
-            "expect_unit_norm": False,
-            "encoder_model": SPECTER2_ENCODER_MODEL,
-            "adapter_name": SPECTER2_ADAPTER_NAME,
-            "base_model_hf_repo": SPECTER2_BASE_MODEL_REPO,
-            "adapter_hf_repo": SPECTER2_ADAPTER_REPO,
-        }
+    cache_name = NORMALIZED_SPECTER_CACHE_FILENAME
+    local_cache_path = local_dir / cache_name
+    override_env_vars = ["NEUROVLM_NORMALIZED_SPECTER_CACHE", "NEUROVLM_TEXT_EMBEDDING_CACHE"]
+    spec = {
+        "convention": NORMALIZED_TEXT_EMBEDDING_CONVENTION,
+        "cache_name": cache_name,
+        "hf_repo": hf_repo,
+        "hf_path": f"text_embeddings/{cache_name}",
+        "hf_candidate_paths": [f"text_embeddings/{cache_name}", cache_name],
+        "metadata_hf_path": f"text_embeddings/{NORMALIZED_SPECTER_METADATA_FILENAME}",
+        "validation_hf_path": f"text_embeddings/{NORMALIZED_SPECTER_VALIDATION_FILENAME}",
+        "index_hf_path": f"text_embeddings/{NORMALIZED_SPECTER_INDEX_FILENAME}",
+        "metadata_local_path": str(local_dir / NORMALIZED_SPECTER_METADATA_FILENAME),
+        "validation_local_path": str(local_dir / NORMALIZED_SPECTER_VALIDATION_FILENAME),
+        "index_local_path": str(local_dir / NORMALIZED_SPECTER_INDEX_FILENAME),
+        "preprocessing": NORMALIZED_SPECTER_PREPROCESSING,
+        "expected_dim": TEXT_EMBEDDING_DIM,
+        "expect_unit_norm": True,
+        "encoder_model": SPECTER2_ENCODER_MODEL,
+        "adapter_name": SPECTER2_ADAPTER_NAME,
+        "base_model_hf_repo": SPECTER2_BASE_MODEL_REPO,
+        "adapter_hf_repo": SPECTER2_ADAPTER_REPO,
+    }
 
     if env_override:
         for env_var in override_env_vars:
@@ -583,13 +541,13 @@ def validate_text_embedding_cache(
     spec = cache if isinstance(cache, dict) and "local_cache_path" in cache else None
     if spec is not None:
         path = Path(str(spec["local_cache_path"]))
-        convention = str(spec.get("convention") or convention or DEFAULT_TEXT_EMBEDDING_CONVENTION)
+        convention = str(spec.get("convention") or convention or NORMALIZED_TEXT_EMBEDDING_CONVENTION)
         expected_dim = int(spec.get("expected_dim", expected_dim))
         if expect_unit_norm is None:
             expect_unit_norm = bool(spec.get("expect_unit_norm", False))
     else:
         path = Path(cache)  # type: ignore[arg-type]
-        convention = _canonical_text_embedding_convention(convention)
+        convention = canonical_text_embedding_convention(convention)
         if expect_unit_norm is None:
             expect_unit_norm = convention == NORMALIZED_TEXT_EMBEDDING_CONVENTION
 
@@ -603,7 +561,7 @@ def validate_text_embedding_cache(
     stats = {
         "path": str(path),
         "sha256": sha256_file(path),
-        "convention": _canonical_text_embedding_convention(convention),
+        "convention": canonical_text_embedding_convention(convention),
         "n": int(embeddings.shape[0]),
         "dim": int(embeddings.shape[1]),
         "norm_mean": float(norms.mean().item()),
@@ -662,23 +620,6 @@ def validate_normalized_specter_cache(
         expected_dim=expected_dim,
         expect_unit_norm=True,
         mean_norm_tol=mean_norm_tol,
-    )
-
-
-def validate_legacy_specter_cache(
-    path: str | Path,
-    *,
-    required_text_ids: set[str] | None = None,
-    required_texts: set[str] | None = None,
-    expected_dim: int = 768,
-) -> dict[str, Any]:
-    return validate_text_embedding_cache(
-        path,
-        convention=LEGACY_TEXT_EMBEDDING_CONVENTION,
-        required_text_ids=required_text_ids,
-        required_texts=required_texts,
-        expected_dim=expected_dim,
-        expect_unit_norm=False,
     )
 
 

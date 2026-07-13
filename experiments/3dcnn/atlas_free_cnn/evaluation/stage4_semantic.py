@@ -21,7 +21,6 @@ from atlas_free_cnn.training.model_wrappers import (
     build_cnn_autoencoder,
     build_generative_text_to_ae_latent,
     build_text_projection,
-    build_text_to_brain_projection,
     load_autoencoder_checkpoint,
 )
 from atlas_free_cnn.training.source_sampling import canonical_source
@@ -339,7 +338,6 @@ def _autoencoder_arch(payload: dict[str, Any]) -> dict[str, Any]:
         "norm": str(model_cfg.get("norm", "group")),
         "pooling": str(model_cfg.get("pooling", "max")),
         "blocks_per_stage": int(model_cfg.get("blocks_per_stage", 2)),
-        "use_dilation": bool(model_cfg.get("use_dilation", False)),
         "multi_scale": bool(model_cfg.get("multi_scale", False)),
         "global_context": str(model_cfg.get("global_context", "none")),
         "target_shape": tuple(int(v) for v in target_shape),
@@ -359,7 +357,6 @@ def load_autoencoder_for_eval(checkpoint: str | Path, device: torch.device):
         pooling=arch["pooling"],
         encoder_arch=arch["encoder_arch"],
         blocks_per_stage=arch["blocks_per_stage"],
-        use_dilation=arch["use_dilation"],
         multi_scale=arch["multi_scale"],
         global_context=arch["global_context"],
     ).to(device)
@@ -388,7 +385,6 @@ def load_stage3_evaluator(checkpoint: str | Path, device: torch.device):
         num_blocks=int(cfg.get("num_blocks", 4)),
         blocks_per_stage=int(cfg.get("blocks_per_stage", 2)),
         dropout=float(cfg.get("dropout", 0.1)),
-        use_dilation=bool(cfg.get("use_dilation", False)),
         multi_scale=bool(cfg.get("multi_scale", False)),
         global_context=str(cfg.get("global_context", "none")),
     ).to(device)
@@ -416,20 +412,16 @@ def load_stage4_projector(checkpoint: str | Path, device: torch.device, *, laten
     payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
     cfg = payload.get("config", {}) if isinstance(payload, dict) else {}
     state = _state_dict_from_stage4_payload(payload)
-    projection_cfg = cfg.get("generative_text_to_ae_latent", cfg.get("text_to_brain_projection", {})) if isinstance(cfg, dict) else {}
+    projection_cfg = cfg.get("generative_text_to_ae_latent", {}) if isinstance(cfg, dict) else {}
     hidden_dim = int(projection_cfg.get("hidden_dim", cfg.get("hidden_dim", 512) if isinstance(cfg, dict) else 512))
-    if any(key.startswith("net.") for key in state):
-        model = build_generative_text_to_ae_latent(device=device, in_dim=768, hidden_dim=hidden_dim, latent_dim=latent_dim)
-    else:
-        model = build_text_to_brain_projection(
-            "random",
-            device=device,
-            in_dim=int(projection_cfg.get("in_dim", 768)),
-            hidden_dim=hidden_dim,
-            out_dim=latent_dim,
-            depth=int(projection_cfg.get("depth", cfg.get("depth", 2) if isinstance(cfg, dict) else 2)),
-            dropout=float(projection_cfg.get("dropout", cfg.get("dropout", 0.1) if isinstance(cfg, dict) else 0.1)),
-        )
+    if not any(key.startswith("net.") for key in state):
+        raise ValueError("Stage 4 checkpoint is not the retained GenerativeTextToAELatent architecture")
+    model = build_generative_text_to_ae_latent(
+        device=device,
+        in_dim=int(projection_cfg.get("in_dim", 768)),
+        hidden_dim=hidden_dim,
+        latent_dim=latent_dim,
+    )
     model.load_state_dict(state, strict=True)
     model.eval()
     for param in model.parameters():

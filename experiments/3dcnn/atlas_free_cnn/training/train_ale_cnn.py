@@ -18,7 +18,6 @@ import argparse
 import csv
 import hashlib
 import json
-import shutil
 import sys
 import time
 import traceback
@@ -41,9 +40,13 @@ for path in [THREEDCNN_DIR, REPO_DIR / "src"]:
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from atlas_free_cnn.training.ale_cnn import ALE3DCNNEncoder, ALEFlatMLPEncoder, ALEResNet3DEncoder, count_parameters
+from atlas_free_cnn.training.ale_cnn import (
+    ALE3DCNNEncoder,
+    ALEResNet3DEncoder,
+    count_parameters,
+    validate_retained_resnet_architecture,
+)
 from atlas_free_cnn.training.ale_dataset import ALEPreprocessConfig, ALEVolumeDataset, build_or_load_ale_cache
-from atlas_free_cnn.training.text_projection import TextProjHead
 from neurovlm.loss import InfoNCELoss
 from neurovlm.metrics import (
     bidirectional_retrieval_metrics,
@@ -56,13 +59,10 @@ from neurovlm.metrics import (
 from atlas_free_cnn.pipeline_outputs import select_ae_checkpoint
 from atlas_free_cnn.training.datasets import UnifiedMapTextDataset
 
-SAVE_LEGACY_STAGE3_CHECKPOINT_ALIASES = False
-
-
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train ALE 3D CNN on NeuroVLM PubMed pairs.")
     p.add_argument("--mode", choices=["difumo_compatible", "atlas_free"], default="atlas_free")
-    p.add_argument("--model", choices=["ale_3dcnn", "ale_3dcnn_resnet", "ale_flat_mlp"], default="ale_3dcnn")
+    p.add_argument("--model", choices=["ale_3dcnn", "ale_3dcnn_resnet"], default="ale_3dcnn")
     p.add_argument("--train-jsonl", default=None, help="Unified multi-source train split JSONL.")
     p.add_argument("--val-jsonl", default=None, help="Unified multi-source validation split JSONL.")
     p.add_argument("--test-jsonl", default=None, help="Unified multi-source test split JSONL.")
@@ -107,10 +107,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dropout", type=float, default=0.1)
     p.add_argument("--norm", choices=["group", "batch", "instance", "none"], default="group")
     p.add_argument("--pooling", choices=["max", "stride"], default="max")
-    p.add_argument("--use-dilation", action="store_true")
     p.add_argument("--multi-scale", action="store_true")
-    p.add_argument("--global-context", choices=["none", "se", "attention"], default="none")
-    p.add_argument("--mlp-hidden-dim", type=int, default=1024)
+    p.add_argument("--global-context", choices=["none", "attention"], default="none")
 
     p.add_argument("--kernel-fwhm-mm", type=float, default=9.0)
     p.add_argument("--resolution-mm", type=float, default=4.0)
@@ -128,12 +126,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--max-papers", type=int, default=None, help="Smoke-test subset size.")
 
-    p.add_argument("--encoder-init", choices=["random", "autoencoder_pretrained"], default="random")
+    p.add_argument("--encoder-init", choices=["autoencoder_pretrained"], default="autoencoder_pretrained")
     p.add_argument("--autoencoder-checkpoint", default=None)
     p.add_argument(
         "--ae-init-variant",
         default=None,
-        help="Named AE initialization variant, e.g. mixed_baseline, mixed_balanced, mixed_hybrid, mixed_to_pubmed, mixed_to_statmaps.",
+        help="Named AE initialization variant, e.g. mixed_baseline or mixed_to_pubmed.",
     )
     p.add_argument(
         "--ae-checkpoint-selection",
@@ -142,8 +140,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--ae-ckpt-path", default=None, help="Explicit AE checkpoint path; overrides variant/selection.")
     p.add_argument("--ae-checkpoint-dir", default=None, help="Directory containing Stage 1 AE checkpoint files.")
-    p.add_argument("--text-proj-init", choices=["random", "pretrained_infonce"], default="pretrained_infonce")
-    p.add_argument("--freeze-text-proj", action="store_true")
+    p.add_argument("--text-proj-init", choices=["pretrained_infonce"], default="pretrained_infonce")
     p.add_argument(
         "--strict-controlled-recipe",
         action="store_true",
@@ -565,7 +562,6 @@ PREVIOUS_PUBMED_REFERENCE_ARCHITECTURE = {
     "pooling": "max",
     "encoder_arch": "plain",
     "blocks_per_stage": 2,
-    "use_dilation": False,
     "multi_scale": False,
     "global_context": "none",
     "target_shape": [36, 45, 38],
@@ -609,7 +605,6 @@ def extract_checkpoint_architecture(payload: dict) -> dict:
         "pooling": model_cfg.get("pooling", nested_get(payload, "model_architecture", "pooling")),
         "encoder_arch": model_cfg.get("encoder_arch", nested_get(payload, "model_architecture", "encoder_arch", default="plain")),
         "blocks_per_stage": model_cfg.get("blocks_per_stage", nested_get(payload, "model_architecture", "blocks_per_stage", default=2)),
-        "use_dilation": model_cfg.get("use_dilation", nested_get(payload, "model_architecture", "use_dilation", default=False)),
         "multi_scale": model_cfg.get("multi_scale", nested_get(payload, "model_architecture", "multi_scale", default=False)),
         "global_context": model_cfg.get("global_context", nested_get(payload, "model_architecture", "global_context", default="none")),
         "target_shape": target_shape,
@@ -627,7 +622,6 @@ def stage3_architecture_from_args(args: argparse.Namespace) -> dict:
         "pooling": args.pooling,
         "encoder_arch": "plain" if args.model == "ale_3dcnn" else args.model,
         "blocks_per_stage": args.blocks_per_stage,
-        "use_dilation": args.use_dilation,
         "multi_scale": args.multi_scale,
         "global_context": args.global_context,
         "target_shape": list(parse_target_shape(args.target_shape)) if args.train_jsonl else list(CONTROLLED_MULTISOURCE_ARCHITECTURE["target_shape"]),
@@ -718,8 +712,6 @@ def _load_encoder_from_autoencoder_checkpoint(
 
 
 def resolve_autoencoder_initialization(args: argparse.Namespace) -> dict:
-    if args.encoder_init != "autoencoder_pretrained":
-        return {"encoder_init": args.encoder_init, "ae_checkpoint_path": None}
     explicit = args.ae_ckpt_path or args.autoencoder_checkpoint
     selection = args.ae_checkpoint_selection
     if explicit:
@@ -765,6 +757,13 @@ def build_model(args: argparse.Namespace, input_shape: tuple[int, ...]):
             pooling=args.pooling,
         )
     elif args.model == "ale_3dcnn_resnet":
+        validate_retained_resnet_architecture(
+            base_channels=args.base_channels,
+            num_stages=args.num_blocks,
+            blocks_per_stage=args.blocks_per_stage,
+            multi_scale=args.multi_scale,
+            global_context=args.global_context,
+        )
         brain_encoder = ALEResNet3DEncoder(
             base_channels=args.base_channels,
             num_stages=args.num_blocks,
@@ -772,30 +771,16 @@ def build_model(args: argparse.Namespace, input_shape: tuple[int, ...]):
             out_dim=args.out_dim,
             dropout=args.dropout,
             norm=args.norm,
-            use_dilation=args.use_dilation,
             multi_scale=args.multi_scale,
             global_context=args.global_context,
         )
-    else:
-        brain_encoder = ALEFlatMLPEncoder(
-            hidden_dim=args.mlp_hidden_dim,
-            out_dim=args.out_dim,
-            dropout=args.dropout,
-        )
-    architecture_report = {}
-    if args.encoder_init == "autoencoder_pretrained":
-        if args.model == "ale_flat_mlp":
-            raise ValueError("autoencoder_pretrained is only valid for CNN models")
-        architecture_report = _load_encoder_from_autoencoder_checkpoint(brain_encoder, args.autoencoder_checkpoint, args)
+    architecture_report = _load_encoder_from_autoencoder_checkpoint(brain_encoder, args.autoencoder_checkpoint, args)
 
-    if args.text_proj_init == "pretrained_infonce":
-        if args.out_dim != 384:
-            raise ValueError("pretrained_infonce text projector requires --out-dim 384")
-        from neurovlm.models import ProjHead
+    if args.out_dim != 384:
+        raise ValueError("pretrained_infonce text projector requires --out-dim 384")
+    from neurovlm.models import ProjHead
 
-        text_proj = ProjHead.from_pretrained("text_infonce")
-    else:
-        text_proj = TextProjHead(in_dim=768, hidden_dim=512, out_dim=args.out_dim)
+    text_proj = ProjHead.from_pretrained("text_infonce")
 
     with torch.no_grad():
         dummy = torch.zeros(2, 1, *input_shape)
@@ -817,12 +802,10 @@ class ALETrainer:
         self.args = args
         self.device = device
         self.loss_fn = InfoNCELoss(args.temperature)
-        if args.freeze_text_proj:
-            for p in self.text_proj.parameters():
-                p.requires_grad_(False)
-        groups = [{"params": self.brain_encoder.parameters(), "lr": args.lr_cnn}]
-        if not args.freeze_text_proj:
-            groups.append({"params": self.text_proj.parameters(), "lr": args.lr_proj})
+        groups = [
+            {"params": self.brain_encoder.parameters(), "lr": args.lr_cnn},
+            {"params": self.text_proj.parameters(), "lr": args.lr_proj},
+        ]
         self.optimizer = torch.optim.AdamW(groups, weight_decay=args.weight_decay)
         self.scheduler: Optional[torch.optim.lr_scheduler.LambdaLR] = None
         self.grad_accum_steps = max(1, int(args.grad_accum_steps))
@@ -1113,9 +1096,7 @@ class ALETrainer:
             print(f"[timing] train_epoch epoch={epoch} seconds={epoch_time:.2f}", flush=True)
             self.history["peak_vram_mb"].append(float(peak_vram))
             self.history["lr_brain"].append(float(self.optimizer.param_groups[0]["lr"]))
-            self.history["lr_proj"].append(
-                0.0 if self.args.freeze_text_proj else float(self.optimizer.param_groups[1]["lr"])
-            )
+            self.history["lr_proj"].append(float(self.optimizer.param_groups[1]["lr"]))
 
             if epoch % self.args.val_interval == 0:
                 val_start = time.perf_counter()
@@ -1189,7 +1170,7 @@ class ALETrainer:
     def evaluate(self, ds) -> tuple[dict[str, float], torch.Tensor, torch.Tensor]:
         # Evaluation ranks projected SPECTER embeddings against projected ALE
         # embeddings: text_proj(SPECTER) vs brain_encoder(ALE volume), never
-        # raw SPECTER vectors.
+        # unprojected text vectors.
         brain, text = self.collect_embeddings(ds)
         metrics = bidirectional_retrieval_metrics(text, brain)
         metrics["paper_recall_curve_auc"] = metrics["mean_normalized_k_recall_curve_auc"]
@@ -1213,8 +1194,6 @@ class ALETrainer:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
         canonical = ckpt_dir / "best_val_normalized_recall_auc.pt"
         torch.save(self.best_state, canonical)
-        if SAVE_LEGACY_STAGE3_CHECKPOINT_ALIASES:
-            shutil.copy2(canonical, ckpt_dir / "best_ale_cnn.pt")
 
     def save_last(self, epoch: Optional[int] = None, bad_checks: int = 0) -> None:
         ckpt_dir = Path(self.args.checkpoint_dir)
@@ -1339,7 +1318,7 @@ def write_training_diff_report(args: argparse.Namespace) -> dict:
         "pooling": args.pooling,
         "encoder_init": args.encoder_init,
         "text_proj_init": args.text_proj_init,
-        "freeze_text_proj": args.freeze_text_proj,
+        "freeze_text_proj": False,
     }
     diffs = {}
     for key, previous in PREVIOUS_PUBMED_REFERENCE_TRAINING.items():
@@ -1572,7 +1551,6 @@ def append_comparison_row(args, payload, metrics, trainer, input_shape) -> dict:
         "encoder_init": args.encoder_init,
         "autoencoder_checkpoint": args.autoencoder_checkpoint or "",
         "blocks_per_stage": args.blocks_per_stage,
-        "use_dilation": args.use_dilation,
         "multi_scale": args.multi_scale,
         "global_context": args.global_context,
         "batch_size": args.batch_size,
@@ -1708,7 +1686,6 @@ def main() -> None:
                 "dropout": args.dropout,
                 "norm": args.norm,
                 "pooling": args.pooling,
-                "use_dilation": args.use_dilation,
                 "multi_scale": args.multi_scale,
                 "global_context": args.global_context,
                 "encoder_init": args.encoder_init,
@@ -1726,7 +1703,7 @@ def main() -> None:
     print(f"  split train={len(train_ds):,} val={len(val_ds):,} test={len(test_ds):,}")
     print("\n== Model ==")
     print(f"  {args.model} brain params={count_parameters(brain_encoder):,}")
-    print(f"  text params={count_parameters(text_proj):,} train_text={not args.freeze_text_proj}")
+    print(f"  text params={count_parameters(text_proj):,} train_text=True")
     batch_label = "auto" if args.batch_size_auto else str(args.batch_size)
     print(f"  device={device} amp={args.amp and device.type == 'cuda'} batch={batch_label}")
 
@@ -1804,14 +1781,6 @@ def main() -> None:
         json.dump(vars(args), f, indent=2)
     with (config_dir / "ae_init_config.json").open("w") as f:
         json.dump(ae_init_report, f, indent=2, default=str)
-    best_src = Path(args.checkpoint_dir) / "best_val_normalized_recall_auc.pt"
-    last_src = Path(args.checkpoint_dir) / "last.pt"
-    if SAVE_LEGACY_STAGE3_CHECKPOINT_ALIASES and best_src.exists():
-        shutil.copy2(best_src, ckpt_stage_dir / "best_contrastive.pt")
-        shutil.copy2(best_src, ckpt_stage_dir / "best_ale_cnn.pt")
-    if SAVE_LEGACY_STAGE3_CHECKPOINT_ALIASES and last_src.exists():
-        shutil.copy2(last_src, ckpt_stage_dir / "last_ale_cnn.pt")
-        shutil.copy2(last_src, ckpt_stage_dir / "last_contrastive.pt")
     artifact_time = time.perf_counter() - artifact_start
     trainer.timing_profile["artifact_save_sec"].append({"artifact": "final_core_artifacts", "seconds": float(artifact_time)})
     print(f"[timing] artifact_save artifact=final_core_artifacts seconds={artifact_time:.2f}", flush=True)

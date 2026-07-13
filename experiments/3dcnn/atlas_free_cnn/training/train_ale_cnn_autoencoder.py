@@ -49,9 +49,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dropout", type=float, default=0.1)
     p.add_argument("--norm", choices=["group", "batch", "instance", "none"], default="group")
     p.add_argument("--pooling", choices=["max", "stride"], default="max")
-    p.add_argument("--use-dilation", action="store_true")
     p.add_argument("--multi-scale", action="store_true")
-    p.add_argument("--global-context", choices=["none", "se", "attention"], default="none")
+    p.add_argument("--global-context", choices=["none", "attention"], default="none")
 
     p.add_argument("--kernel-fwhm-mm", type=float, default=9.0)
     p.add_argument("--resolution-mm", type=float, default=4.0)
@@ -98,6 +97,16 @@ def make_loader(ds, args: argparse.Namespace, shuffle: bool) -> DataLoader:
 
 
 def build_autoencoder(args: argparse.Namespace, output_shape: tuple[int, int, int]) -> ALE3DCNNAutoEncoder:
+    if args.model == "ale_3dcnn_resnet":
+        from atlas_free_cnn.training.ale_cnn import validate_retained_resnet_architecture
+
+        validate_retained_resnet_architecture(
+            base_channels=args.base_channels,
+            num_stages=args.num_blocks,
+            blocks_per_stage=args.blocks_per_stage,
+            multi_scale=args.multi_scale,
+            global_context=args.global_context,
+        )
     return ALE3DCNNAutoEncoder(
         output_shape=output_shape,
         base_channels=args.base_channels,
@@ -108,7 +117,6 @@ def build_autoencoder(args: argparse.Namespace, output_shape: tuple[int, int, in
         pooling=args.pooling,
         encoder_arch="resnet" if args.model == "ale_3dcnn_resnet" else "plain",
         blocks_per_stage=args.blocks_per_stage,
-        use_dilation=args.use_dilation,
         multi_scale=args.multi_scale,
         global_context=args.global_context,
     )

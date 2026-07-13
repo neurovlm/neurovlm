@@ -1,5 +1,4 @@
-# Default Stage 1 AE recipe: baseline_raw_mse.
-# `previous_good_compatible` remains accepted as a legacy alias.
+# Retained Stage 1 AE recipe: baseline_raw_mse.
 train_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/train.jsonl
 val_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/val.jsonl
 test_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/test.jsonl
@@ -12,12 +11,9 @@ checkpoint_selection_metric: best_val_loss
 device: auto
 seed: 42
 target_shape: [36, 45, 38]
-data_mode: mixed          # pubmed_only | mixed
-source_sampling: natural  # natural | balanced | temperature | manual
-source_sampling_alpha: 0.5
-source_sampling_weights:
+data_mode: mixed
+source_sampling: natural
 
-model_size: base          # base | wide | deeper
 model:
   latent_dim: 384
   base_channels: 64
@@ -28,11 +24,7 @@ model:
   pooling: max
 
 loss:
-  type: raw_mse           # raw_mse | hybrid_recon
-  lambda_foreground: 0.0
-  lambda_topk: 0.0
-  foreground_threshold:
-  topk_percent: 5
+  type: raw_mse
   prediction_activation: none
 
 batch_size: 64

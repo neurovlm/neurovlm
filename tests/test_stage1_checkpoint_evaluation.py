@@ -51,7 +51,6 @@ def _stage1a_row(recipe: str, checkpoint: str, domain: str, *, spatial: float, t
 def test_stage1a_selector_writes_recipe_best_after_per_recipe_checkpoint_selection(tmp_path: Path) -> None:
     registry = {
         "mixed_baseline_raw_mse": {"stage": "stage1a"},
-        "mixed_balanced_raw_mse": {"stage": "stage1a"},
     }
     comparison_rows = []
     domains = ["mixed", "pubmed", "nilearn", "neurovault"]
@@ -60,8 +59,6 @@ def test_stage1a_selector_writes_recipe_best_after_per_recipe_checkpoint_selecti
             [
                 _stage1a_row("mixed_baseline_raw_mse", "best_top1_dice.pt", domain, spatial=0.80, top5=0.70, mse=0.20),
                 _stage1a_row("mixed_baseline_raw_mse", "last.pt", domain, spatial=0.20, top5=0.30, mse=0.80),
-                _stage1a_row("mixed_balanced_raw_mse", "best_top5_dice.pt", domain, spatial=0.70, top5=0.90, mse=0.30),
-                _stage1a_row("mixed_balanced_raw_mse", "last.pt", domain, spatial=0.10, top5=0.20, mse=0.90),
             ]
         )
 
@@ -78,12 +75,10 @@ def test_stage1a_selector_writes_recipe_best_after_per_recipe_checkpoint_selecti
     assert [column for column in STAGE1A_RECIPE_BEST_COLUMNS if column not in recipe_best[0]] == []
     assert {row["recipe"]: row["best_checkpoint_name"] for row in recipe_best} == {
         "mixed_baseline_raw_mse": "best_top1_dice.pt",
-        "mixed_balanced_raw_mse": "best_top5_dice.pt",
     }
-    assert len(all_checkpoints) == 4
+    assert len(all_checkpoints) == 2
     assert {row["checkpoint_name"] for row in all_checkpoints if row["is_recipe_best"] == "True"} == {
         "best_top1_dice.pt",
-        "best_top5_dice.pt",
     }
     assert {row["recipe"] for row in compat_baseline} == {"mixed_baseline_raw_mse"}
 
@@ -93,10 +88,10 @@ def test_stage1a_checkpoint_discovery_includes_top10_candidate() -> None:
 
 
 def test_stage1a_selector_marks_missing_recipe_explicitly(tmp_path: Path) -> None:
-    registry = {"mixed_balanced_hybrid_loss": {"stage": "stage1a"}}
+    registry = {"mixed_baseline_raw_mse": {"stage": "stage1a"}}
     manifest = [
         {
-            "variant": "mixed_balanced_hybrid_loss",
+            "variant": "mixed_baseline_raw_mse",
             "stage": "stage1a",
             "run_dir": "/missing/run",
             "load_status": "missing_run_or_checkpoints",
@@ -109,6 +104,6 @@ def test_stage1a_selector_marks_missing_recipe_explicitly(tmp_path: Path) -> Non
     assert selection_rows == []
     assert selected is None
     rows = _read_rows(tmp_path / "01_stage1a" / "stage1a_all_checkpoint_eval.csv")
-    assert rows[0]["recipe"] == "mixed_balanced_hybrid_loss"
+    assert rows[0]["recipe"] == "mixed_baseline_raw_mse"
     assert rows[0]["status"] == "missing_run_or_checkpoints"
     assert "No requested checkpoint" in rows[0]["error_message"]

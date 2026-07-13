@@ -1,17 +1,9 @@
 #!/usr/bin/env python
 """Build an empty-string-centered, unit-normalized SPECTER2 cache.
 
-The workflow is intentionally conservative:
-
-1. List the Hugging Face dataset repository and print relevant files.
-2. Download the current raw/legacy text cache plus manifests.
-3. Audit the source cache convention against a reproducible SPECTER2 sample
-   when model weights are available.
-4. Apply ``raw - empty_embedding`` followed by L2 normalization, or rebuild
-   from the exact text when the source convention cannot be verified.
-
-The output cache keeps the requested canonical ID-indexed tensor structure and
-also includes text-keyed compatibility maps for the current Stage 3/4 loaders.
+The builder encodes the exact primary texts from the three unified split
+manifests, subtracts the SPECTER2 empty-string embedding, and L2-normalizes the
+result. The output includes ID- and text-keyed indexes used by Stage 3 and 4.
 """
 
 from __future__ import annotations
@@ -22,7 +14,6 @@ import hashlib
 import json
 import os
 import platform
-import random
 import subprocess
 import sys
 import time
@@ -186,28 +177,6 @@ def download_file(repo_id: str, filename: str, local_dir: Path) -> Path:
     )
 
 
-def select_source_cache(repo_files: list[dict[str, Any]], override: str | None) -> str:
-    if override:
-        return override
-    candidates = [
-        row["path"]
-        for row in repo_files
-        if "specter" in row["path"].lower() and Path(row["path"]).suffix.lower() in {".pt", ".pth"}
-    ]
-    candidates = sorted(
-        candidates,
-        key=lambda p: (
-            0 if Path(p).name == "specter_text_cache.pt" else 1,
-            0 if "raw" in p.lower() else 1,
-            p,
-        ),
-    )
-    if not candidates:
-        raise FileNotFoundError("No SPECTER/SPECTER2 .pt cache was found in the HF repository listing.")
-    print("\nSelected source text embedding cache:", candidates[0])
-    return candidates[0]
-
-
 def primary_positive(row: dict[str, Any]) -> dict[str, Any]:
     positives = row.get("positive_texts") or []
     if not positives:
@@ -290,59 +259,6 @@ def collect_text_records(split_paths: dict[str, Path]) -> tuple[list[dict[str, A
         )
     records.sort(key=lambda r: r["text_id"])
     return records, map_rows
-
-
-def load_source_cache(path: Path) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, Any]]:
-    payload = torch.load(path, map_location="cpu", weights_only=False)
-    by_text: dict[str, torch.Tensor] = {}
-    by_id: dict[str, torch.Tensor] = {}
-    metadata: dict[str, Any] = {}
-
-    if isinstance(payload, dict):
-        metadata = dict(payload.get("metadata", {})) if isinstance(payload.get("metadata"), dict) else {}
-        if torch.is_tensor(payload.get("embeddings")) and isinstance(payload.get("text_ids"), list):
-            embeddings = payload["embeddings"].float().cpu()
-            text_ids = [str(v) for v in payload["text_ids"]]
-            texts = [str(v) for v in payload.get("texts", [])]
-            by_id.update({text_id: embeddings[i].flatten() for i, text_id in enumerate(text_ids)})
-            if len(texts) == len(text_ids):
-                by_text.update({text: embeddings[i].flatten() for i, text in enumerate(texts)})
-        for key in ["embedding_by_text", "processed_embedding_by_text", "text_to_embedding", "embeddings_by_text"]:
-            value = payload.get(key)
-            if isinstance(value, dict):
-                by_text.update({str(k): torch.as_tensor(v, dtype=torch.float32).flatten() for k, v in value.items()})
-        for key in ["embedding_by_text_id", "processed_embedding_by_text_id", "text_id_to_embedding"]:
-            value = payload.get(key)
-            if isinstance(value, dict):
-                by_id.update({str(k): torch.as_tensor(v, dtype=torch.float32).flatten() for k, v in value.items()})
-        if not by_text and not by_id and all(torch.is_tensor(v) for v in payload.values()):
-            by_text = {str(k): v.float().cpu().flatten() for k, v in payload.items()}
-    if not by_text and not by_id:
-        raise TypeError(f"Unsupported source embedding cache structure: {path}")
-    return by_text, by_id, metadata
-
-
-def embedding_matrix_for_records(
-    records: list[dict[str, Any]],
-    by_text: dict[str, torch.Tensor],
-    by_id: dict[str, torch.Tensor],
-) -> torch.Tensor | None:
-    vectors = []
-    missing = []
-    for rec in records:
-        text_id = rec["text_id"]
-        text = rec["text"]
-        vector = by_id.get(text_id)
-        if vector is None:
-            vector = by_text.get(text)
-        if vector is None:
-            missing.append({"text_id": text_id, "text_preview": text[:160]})
-            continue
-        vectors.append(vector.float().flatten())
-    if missing:
-        print(f"Source cache is missing {len(missing)} required primary texts; first missing: {missing[0]}")
-        return None
-    return torch.stack(vectors)
 
 
 def numeric_stats(emb: torch.Tensor, *, seed: int = RANDOM_SEED, pairwise_n: int = 2048) -> dict[str, Any]:
@@ -449,75 +365,6 @@ def encode_texts_specter2(
     return torch.cat(outputs, dim=0), info
 
 
-def compare_candidate(cached: torch.Tensor, candidate: torch.Tensor) -> dict[str, float]:
-    cached = cached.float()
-    candidate = candidate.float()
-    diff = candidate - cached
-    return {
-        "cosine_mean": float(F.cosine_similarity(candidate, cached, dim=1, eps=1e-8).mean().item()),
-        "mse_mean": float(diff.pow(2).mean(dim=1).mean().item()),
-        "max_abs_error": float(diff.abs().max().item()),
-    }
-
-
-def infer_cache_convention(
-    records: list[dict[str, Any]],
-    source_emb: torch.Tensor | None,
-    *,
-    model_name: str,
-    adapter_name: str | None,
-    device: str,
-    batch_size: int,
-    max_length: int,
-    sample_n: int,
-    skip_reproduction: bool,
-) -> tuple[str, dict[str, Any], torch.Tensor | None]:
-    if source_emb is None:
-        return "missing_required_texts", {"status": "not_run", "reason": "source cache missing required texts"}, None
-    if source_emb.ndim != 2 or source_emb.shape[1] != EXPECTED_DIM:
-        raise RuntimeError(f"Source embeddings must be N x 768, got {tuple(source_emb.shape)}")
-    if skip_reproduction:
-        return "unverified", {"status": "skipped"}, None
-
-    rng = random.Random(RANDOM_SEED)
-    indices = list(range(len(records)))
-    rng.shuffle(indices)
-    indices = indices[: min(sample_n, len(indices))]
-    sample_texts = [records[i]["text"] for i in indices]
-    sample_cached = source_emb[indices].float()
-    raw_plus_empty, encoder_info = encode_texts_specter2(
-        sample_texts + [""],
-        model_name=model_name,
-        adapter_name=adapter_name,
-        device=device,
-        batch_size=batch_size,
-        max_length=max_length,
-    )
-    raw = raw_plus_empty[:-1]
-    empty = raw_plus_empty[-1]
-    candidates = {
-        "raw_specter2": raw,
-        "unit_normalized_raw_specter2": F.normalize(raw, dim=1, eps=EPSILON),
-        "empty_string_centered_specter2": raw - empty,
-        "empty_string_centered_unitnorm_specter2": F.normalize(raw - empty, dim=1, eps=EPSILON),
-    }
-    comparisons = {name: compare_candidate(sample_cached, value) for name, value in candidates.items()}
-    best_name = min(comparisons, key=lambda k: (comparisons[k]["mse_mean"], -comparisons[k]["cosine_mean"]))
-    best = comparisons[best_name]
-    verified = best["cosine_mean"] >= 0.999 and best["mse_mean"] <= 1e-6
-    report = {
-        "status": "run",
-        "sample_n": len(indices),
-        "sample_seed": RANDOM_SEED,
-        "best_convention": best_name,
-        "best_verified": verified,
-        "comparisons": comparisons,
-        "encoder_info": encoder_info,
-        "empty_string_embedding_checksum": sha256_bytes(empty.numpy().astype("float32").tobytes()),
-    }
-    return (best_name if verified else "unverified"), report, empty
-
-
 def output_paths(output_dir: Path, basename: str) -> dict[str, Path]:
     return {
         "pt": output_dir / f"{basename}.pt",
@@ -556,7 +403,6 @@ def build_payload(
 def validate_output(
     records: list[dict[str, Any]],
     map_rows: list[dict[str, Any]],
-    source_emb: torch.Tensor | None,
     centered: torch.Tensor,
     normalized: torch.Tensor,
 ) -> dict[str, Any]:
@@ -577,12 +423,6 @@ def validate_output(
     validation = {
         "output": output_stats,
         "after_empty_string_centering": numeric_stats(centered),
-        "source_before_processing": numeric_stats(source_emb) if source_emb is not None else None,
-        "average_cosine_old_new": (
-            float(F.cosine_similarity(source_emb.float(), normalized.float(), dim=1, eps=1e-8).mean().item())
-            if source_emb is not None
-            else None
-        ),
         "one_output_vector_per_unique_text_id": len(records) == len(text_ids) == len(set(text_ids)),
         "all_required_manifest_text_ids_present": not missing,
         "domain_norm_statistics": {},
@@ -649,14 +489,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local-dir", default="experiments/3dcnn/atlas_free_cnn/cache/hf_normalized_specter2")
     parser.add_argument("--output-dir", default="experiments/3dcnn/atlas_free_cnn/cache/text_embeddings")
     parser.add_argument("--output-basename", default=DEFAULT_OUTPUT_BASENAME)
-    parser.add_argument("--source-cache-filename", default="")
     parser.add_argument("--encoder-model", default=DEFAULT_ENCODER)
     parser.add_argument("--adapter-name", default=DEFAULT_ADAPTER)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--max-length", type=int, default=512)
-    parser.add_argument("--sample-n", type=int, default=32)
-    parser.add_argument("--skip-reproduction", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--upload", action="store_true")
     parser.add_argument("--upload-prefix", default="text_embeddings")
@@ -673,9 +510,8 @@ def main() -> None:
 
     repo_files = hf_file_table(args.repo_id)
     print_hf_table(repo_files)
-    source_filename = select_source_cache(repo_files, args.source_cache_filename or None)
 
-    required_names = [source_filename, "train.jsonl", "val.jsonl", "test.jsonl"]
+    required_names = ["train.jsonl", "val.jsonl", "test.jsonl"]
     optional_names = [
         "atlas_free_cnn_rows.parquet",
         "atlas_free_cnn_text_pairs.parquet",
@@ -697,70 +533,25 @@ def main() -> None:
     print(f"\nUnique primary text IDs: {len(records):,}")
     print("Domain counts:", dict(Counter(d for rec in records for d in rec["source_domains"])))
 
-    source_by_text, source_by_id, source_metadata = load_source_cache(downloaded[source_filename])
-    source_emb = embedding_matrix_for_records(records, source_by_text, source_by_id)
-    source_stats = numeric_stats(source_emb) if source_emb is not None else None
-    if source_stats:
-        print("\nSource cache stats")
-        print(json.dumps(source_stats, indent=2))
-        if source_stats["embedding_dim"] != EXPECTED_DIM:
-            raise RuntimeError(f"Expected source embedding dimension 768, got {source_stats['embedding_dim']}")
-
-    convention, reproduction, empty_embedding = infer_cache_convention(
-        records,
-        source_emb,
+    all_texts = [rec["text"] for rec in records]
+    print(f"Encoding {len(all_texts):,} unique texts plus the empty-string reference.", flush=True)
+    encoded, encoder_info = encode_texts_specter2(
+        all_texts + [""],
         model_name=args.encoder_model,
         adapter_name=args.adapter_name or None,
         device=args.device,
         batch_size=args.batch_size,
         max_length=args.max_length,
-        sample_n=args.sample_n,
-        skip_reproduction=args.skip_reproduction,
     )
-    print("\nSource cache convention:", convention)
-    print(json.dumps(reproduction, indent=2, default=str)[:5000])
-
-    encoder_info = reproduction.get("encoder_info", {})
-    if convention == "raw_specter2":
-        assert source_emb is not None and empty_embedding is not None
-        centered = source_emb.float() - empty_embedding.float().view(1, -1)
-    elif convention == "empty_string_centered_specter2":
-        assert source_emb is not None
-        centered = source_emb.float()
-    elif convention == "empty_string_centered_unitnorm_specter2":
-        assert source_emb is not None
-        centered = source_emb.float()
-    else:
-        print("Rebuilding all embeddings because the source cache convention was not confidently verified.")
-        all_texts = [rec["text"] for rec in records]
-        print(f"Starting full SPECTER2 rebuild for {len(all_texts):,} unique texts plus empty-string reference.", flush=True)
-        raw_plus_empty, encoder_info = encode_texts_specter2(
-            all_texts + [""],
-            model_name=args.encoder_model,
-            adapter_name=args.adapter_name or None,
-            device=args.device,
-            batch_size=args.batch_size,
-            max_length=args.max_length,
-        )
-        raw = raw_plus_empty[:-1]
-        empty_embedding = raw_plus_empty[-1]
-        centered = raw.float() - empty_embedding.float().view(1, -1)
-        convention = "rebuilt_raw_specter2"
-
-    print("Applying empty-string centering and L2 unit normalization.", flush=True)
-    normalized = F.normalize(centered.float(), dim=1, eps=EPSILON).contiguous()
+    empty_embedding = encoded[-1]
+    centered = encoded[:-1].float() - empty_embedding.float().view(1, -1)
+    normalized = F.normalize(centered, dim=1, eps=EPSILON).contiguous()
     print("Validating normalized cache.", flush=True)
-    validation = validate_output(records, map_rows, source_emb, centered, normalized)
-
-    if empty_embedding is None:
-        empty_checksum = ""
-    else:
-        empty_checksum = sha256_bytes(empty_embedding.float().cpu().numpy().astype("float32").tobytes())
+    validation = validate_output(records, map_rows, centered, normalized)
+    empty_checksum = sha256_bytes(empty_embedding.float().cpu().numpy().astype("float32").tobytes())
 
     metadata = {
         "hugging_face_source_repository": args.repo_id,
-        "source_embedding_filename": source_filename,
-        "source_embedding_checksum": sha256_file(downloaded[source_filename]),
         "output_filename": paths["pt"].name,
         "text_encoder_model_name": args.encoder_model,
         "base_model_repository": encoder_info.get("base_model", ""),
@@ -783,9 +574,6 @@ def main() -> None:
         "software_versions": import_versions(),
         "random_seed_for_validation_samples": RANDOM_SEED,
         "git_commit": git_commit(repo_dir),
-        "source_cache_convention": convention,
-        "source_cache_metadata": source_metadata,
-        "reproduction_audit": reproduction,
         "downloaded_files": {name: str(path) for name, path in downloaded.items()},
     }
 
@@ -799,8 +587,7 @@ def main() -> None:
     write_csv(paths["index"], prepare_index(records, normalized))
     validation.update(
         {
-            "source_cache_convention": convention,
-            "metadata_checksum": sha256_file(paths["metadata"]),
+                "metadata_checksum": sha256_file(paths["metadata"]),
             "output_checksum": metadata["output_checksum"],
             "map_to_text_rows": len(map_rows),
         }

@@ -3,8 +3,8 @@ val_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/val.jsonl
 test_jsonl: experiments/3dcnn/atlas_free_cnn/cache/unified_jsonl/splits/test.jsonl
 eval_jsonls:
   networks_test: experiments/3dcnn/atlas_free_cnn/cache/network_eval/network_test.jsonl
-text_embedding_cache: experiments/3dcnn/atlas_free_cnn/cache/text_embeddings/specter_text_cache.pt
-autoencoder_checkpoint: experiments/3dcnn/atlas_free_cnn/outputs/runs/autoencoder_stable_mixed_base/checkpoints/best_cnn_autoencoder.pt
+text_embedding_cache: experiments/3dcnn/atlas_free_cnn/cache/text_embeddings/specter2_stage3_stage4_emptycentered_unitnorm.pt
+autoencoder_checkpoint: experiments/3dcnn/atlas_free_cnn/outputs/runs/autoencoder_stable_mixed_base/checkpoints/best_val_loss.pt
 output_dir: experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain_pretrained_infonce
 checkpoint_dir: experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain_pretrained_infonce/checkpoints
 
@@ -27,7 +27,7 @@ early_stopping_min_delta: 0.0
 lr: 0.0001
 weight_decay: 0.0001
 positive_texts_per_map: 1
-text_projection_init: pretrained_text_infonce  # random | pretrained_text_infonce
+text_projection_init: random
 prediction_activation: none
 max_train_batches:
 max_val_batches:
@@ -52,21 +52,21 @@ freeze:
 
 model:
   latent_dim: 384
-  base_channels: 48
+  base_channels: 64
   num_blocks: 4
   encoder_arch: plain
   dropout: 0.1
   norm: group
   pooling: max
   blocks_per_stage: 2
-  use_dilation: false
   multi_scale: false
   global_context: none
 
-text_to_brain_projection:
-  hidden_dim: 512   # ablate 512, 1024, 2048
-  depth: 2
-  dropout: 0.1
+generative_text_to_ae_latent:
+  name: generative_text_to_ae_latent
+  in_dim: 768
+  hidden_dim: 512
+  latent_dim: 384
 
 weighted_recon:
   type: mse

@@ -60,9 +60,6 @@ from atlas_free_cnn.training.ale_cnn import count_parameters
 
 TEXT_TO_BRAIN_BATCH_CANDIDATES = [4096, 3072, 2048, 1536, 1024, 768, 512, 384, 256, 192, 128, 96, 64]
 
-SAVE_LEGACY_CHECKPOINT_ALIASES = False
-
-
 def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -275,7 +272,6 @@ def checkpoint_architecture(payload: dict[str, Any]) -> dict[str, Any]:
         "norm": model_cfg.get("norm", "group"),
         "pooling": model_cfg.get("pooling", "max"),
         "blocks_per_stage": model_cfg.get("blocks_per_stage", 2),
-        "use_dilation": model_cfg.get("use_dilation", False),
         "multi_scale": model_cfg.get("multi_scale", False),
         "global_context": model_cfg.get("global_context", "none"),
         "target_shape": target_shape,
@@ -296,7 +292,6 @@ def apply_checkpoint_architecture(cfg: dict[str, Any]) -> tuple[dict[str, Any], 
         "norm",
         "pooling",
         "blocks_per_stage",
-        "use_dilation",
         "multi_scale",
         "global_context",
     ]:
@@ -553,7 +548,6 @@ def load_stage3_contrastive_models(stage3_checkpoint: str | Path, device: torch.
         num_blocks=int(cfg.get("num_blocks", 4)),
         blocks_per_stage=int(cfg.get("blocks_per_stage", 2)),
         dropout=float(cfg.get("dropout", 0.1)),
-        use_dilation=bool(cfg.get("use_dilation", False)),
         multi_scale=bool(cfg.get("multi_scale", False)),
         global_context=str(cfg.get("global_context", "none")),
     ).to(device)
@@ -641,7 +635,6 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         pooling=str(model_cfg.get("pooling", "max")),
         encoder_arch=str(model_cfg.get("encoder_arch", "plain")),
         blocks_per_stage=int(model_cfg.get("blocks_per_stage", 2)),
-        use_dilation=bool(model_cfg.get("use_dilation", False)),
         multi_scale=bool(model_cfg.get("multi_scale", False)),
         global_context=str(model_cfg.get("global_context", "none")),
     ).to(device)
@@ -659,7 +652,7 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     trainable_ae = sum(p.numel() for p in autoencoder.parameters() if p.requires_grad)
     if trainable_ae:
         raise RuntimeError(f"Corrected Stage 4 requires frozen AE encoder/decoder; found {trainable_ae} trainable AE parameters")
-    projection_cfg = cfg.get("generative_text_to_ae_latent", cfg.get("text_to_brain_projection", {}))
+    projection_cfg = cfg.get("generative_text_to_ae_latent", {})
     projector_name = str(projection_cfg.get("name", "generative_text_to_ae_latent"))
     input_dim = int(projection_cfg.get("in_dim", 768))
     hidden_dim = int(projection_cfg.get("hidden_dim", cfg.get("hidden_dim", 512)))
@@ -789,14 +782,6 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     }
     if compute_semantic_auc_during_training:
         _ckpt_maximize[semantic_checkpoint_metric] = metric_higher_is_better(semantic_checkpoint_metric)
-    if SAVE_LEGACY_CHECKPOINT_ALIASES:
-        _ckpt_maximize.update({
-            "val_loss": False,
-            "val_latent_mse": False,
-            "val_reconstruction_mse": False,
-            "generation_top5_dice": True,
-            "generation_spatial_correlation": True,
-        })
     ckpt = CheckpointManager(
         cfg.get("checkpoint_dir", "experiments/3dcnn/atlas_free_cnn/outputs/runs/text_to_brain/checkpoints"),
         maximize=_ckpt_maximize,
@@ -993,10 +978,6 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         ckpt.save_last(payload, epoch=epoch)
         stop_now = False
         if validated_this_epoch and val_metrics:
-            if SAVE_LEGACY_CHECKPOINT_ALIASES:
-                ckpt.maybe_save_best("val_loss", val_metrics.get("loss", float("inf")), payload)
-                ckpt.maybe_save_best("val_latent_mse", val_metrics.get("latent_mse", float("inf")), payload)
-                ckpt.maybe_save_best("val_reconstruction_mse", val_metrics.get("reconstruction_mse", float("inf")), payload)
             ckpt.maybe_save_best(
                 spatial_corr_checkpoint_metric,
                 _metric_value_for_checkpoint(spatial_corr_checkpoint_metric, val_metrics),
@@ -1016,9 +997,6 @@ def train_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
                     payload,
                     epoch=epoch,
                 )
-            if SAVE_LEGACY_CHECKPOINT_ALIASES:
-                ckpt.maybe_save_best("generation_top5_dice", val_metrics.get("top5_dice", 0.0), payload)
-                ckpt.maybe_save_best("generation_spatial_correlation", val_metrics.get("spatial_corr", -1.0), payload)
             if early_stopping:
                 if early_metric_key not in val_metrics:
                     current = float("nan")

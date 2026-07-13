@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 
+import pytest
 import torch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +16,7 @@ from atlas_free_cnn.training.ale_cnn import (
     ALE3DCNNDecoder,
     ALE3DCNNEncoder,
     ALEResNet3DEncoder,
+    validate_retained_resnet_architecture,
 )
 
 
@@ -27,13 +29,12 @@ def test_ale_3dcnn_encoder_shape():
     assert out.shape == (2, 384)
 
 
-def test_ale_resnet_3d_encoder_global_variants_shape():
+def test_retained_resnet48_multiscale_attention_shape():
     model = ALEResNet3DEncoder(
         base_channels=4,
         num_stages=4,
         blocks_per_stage=1,
         out_dim=384,
-        use_dilation=True,
         multi_scale=True,
         global_context="attention",
     )
@@ -44,26 +45,23 @@ def test_ale_resnet_3d_encoder_global_variants_shape():
     assert out.shape == (2, 384)
 
 
+def test_production_resnet_rejects_discarded_variants():
+    with pytest.raises(ValueError, match="Only the retained ResNet48"):
+        validate_retained_resnet_architecture(
+            base_channels=64,
+            num_stages=4,
+            blocks_per_stage=2,
+            multi_scale=True,
+            global_context="attention",
+        )
+
+
 def test_ale_3dcnn_decoder_exact_output_shape():
     model = ALE3DCNNDecoder(
         output_shape=(13, 17, 19),
         latent_dim=384,
         base_channels=4,
         num_blocks=2,
-    )
-    z = torch.randn(2, 384)
-
-    out = model(z)
-
-    assert out.shape == (2, 1, 13, 17, 19)
-
-
-def test_ale_3dcnn_decoder_supports_five_blocks():
-    model = ALE3DCNNDecoder(
-        output_shape=(13, 17, 19),
-        latent_dim=384,
-        base_channels=4,
-        num_blocks=5,
     )
     z = torch.randn(2, 384)
 
@@ -100,7 +98,7 @@ def test_ale_resnet_autoencoder_backward():
         encoder_arch="resnet",
         blocks_per_stage=1,
         multi_scale=True,
-        global_context="se",
+        global_context="attention",
     )
     x = torch.rand(2, 1, 13, 17, 19)
 

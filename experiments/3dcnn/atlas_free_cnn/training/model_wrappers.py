@@ -14,51 +14,6 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 
-class TextProjectionHead(nn.Module):
-    def __init__(self, in_dim: int = 768, hidden_dim: int = 512, out_dim: int = 384):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim),
-            nn.GELU(),
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, out_dim),
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-
-class TextToBrainProjectionHead(nn.Module):
-    """SPECTER/SPECTER2 embedding -> AE decoder latent projection."""
-
-    def __init__(
-        self,
-        in_dim: int = 768,
-        hidden_dim: int = 512,
-        out_dim: int = 384,
-        *,
-        depth: int = 2,
-        dropout: float = 0.1,
-    ):
-        super().__init__()
-        if depth < 2:
-            raise ValueError("depth must be >= 2")
-        layers: list[nn.Module] = [nn.Linear(in_dim, hidden_dim), nn.ReLU()]
-        if dropout:
-            layers.append(nn.Dropout(dropout))
-        for _ in range(depth - 2):
-            layers.extend([nn.Linear(hidden_dim, hidden_dim), nn.ReLU()])
-            if dropout:
-                layers.append(nn.Dropout(dropout))
-        layers.append(nn.Linear(hidden_dim, out_dim))
-        # The 2-layer, dropout=0 case intentionally matches neurovlm.models.ProjHead
-        # key names enough for shape-compatible pretrained text_infonce initialization.
-        self.aligner = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.aligner(x)
-
-
 class GenerativeTextToAELatent(nn.Module):
     """Fresh SPECTER2 -> frozen AE decoder latent projector for Stage 4."""
 
@@ -103,45 +58,6 @@ def build_generative_text_to_ae_latent(
     return GenerativeTextToAELatent(in_dim=in_dim, hidden_dim=hidden_dim, latent_dim=latent_dim).to(device)
 
 
-def build_text_to_brain_projection(
-    init: str = "random",
-    *,
-    device: str | torch.device = "cpu",
-    in_dim: int = 768,
-    hidden_dim: int = 512,
-    out_dim: int = 384,
-    depth: int = 2,
-    dropout: float = 0.1,
-) -> nn.Module:
-    model = TextToBrainProjectionHead(
-        in_dim=in_dim,
-        hidden_dim=hidden_dim,
-        out_dim=out_dim,
-        depth=depth,
-        dropout=dropout,
-    ).to(device)
-    if init in {"random", "scratch"}:
-        return model
-    if init in {"pretrained_text_infonce", "text_infonce"}:
-        from neurovlm.models import ProjHead
-
-        pretrained = ProjHead.from_pretrained("text_infonce").state_dict()
-        current = model.state_dict()
-        compatible = {
-            key: value
-            for key, value in pretrained.items()
-            if key in current and tuple(value.shape) == tuple(current[key].shape)
-        }
-        current.update(compatible)
-        model.load_state_dict(current)
-        model.pretrained_init_summary = {  # type: ignore[attr-defined]
-            "loaded_tensors": len(compatible),
-            "checkpoint_tensors": len(pretrained),
-        }
-        return model
-    raise ValueError("init must be 'random' or 'pretrained_text_infonce'")
-
-
 def build_brain_encoder(
     out_dim: int = 384,
     *,
@@ -150,11 +66,14 @@ def build_brain_encoder(
     num_blocks: int = 4,
     blocks_per_stage: int = 2,
     dropout: float = 0.1,
-    use_dilation: bool = False,
     multi_scale: bool = False,
     global_context: str = "none",
 ):
-    from atlas_free_cnn.training.ale_cnn import ALE3DCNNEncoder, ALEResNet3DEncoder
+    from atlas_free_cnn.training.ale_cnn import (
+        ALE3DCNNEncoder,
+        ALEResNet3DEncoder,
+        validate_retained_resnet_architecture,
+    )
 
     if encoder_arch == "plain":
         return ALE3DCNNEncoder(
@@ -164,13 +83,19 @@ def build_brain_encoder(
             dropout=dropout,
         )
     if encoder_arch == "resnet":
+        validate_retained_resnet_architecture(
+            base_channels=base_channels,
+            num_stages=num_blocks,
+            blocks_per_stage=blocks_per_stage,
+            multi_scale=multi_scale,
+            global_context=global_context,
+        )
         return ALEResNet3DEncoder(
             base_channels=base_channels,
             num_stages=num_blocks,
             blocks_per_stage=blocks_per_stage,
             out_dim=out_dim,
             dropout=dropout,
-            use_dilation=use_dilation,
             multi_scale=multi_scale,
             global_context=global_context,
         )
@@ -188,11 +113,19 @@ def build_cnn_autoencoder(
     pooling: str = "max",
     encoder_arch: str = "plain",
     blocks_per_stage: int = 2,
-    use_dilation: bool = False,
     multi_scale: bool = False,
     global_context: str = "none",
 ):
-    from atlas_free_cnn.training.ale_cnn import ALE3DCNNAutoEncoder
+    from atlas_free_cnn.training.ale_cnn import ALE3DCNNAutoEncoder, validate_retained_resnet_architecture
+
+    if encoder_arch == "resnet":
+        validate_retained_resnet_architecture(
+            base_channels=base_channels,
+            num_stages=num_blocks,
+            blocks_per_stage=blocks_per_stage,
+            multi_scale=multi_scale,
+            global_context=global_context,
+        )
 
     return ALE3DCNNAutoEncoder(
         output_shape=output_shape,
@@ -204,7 +137,6 @@ def build_cnn_autoencoder(
         pooling=pooling,
         encoder_arch=encoder_arch,
         blocks_per_stage=blocks_per_stage,
-        use_dilation=use_dilation,
         multi_scale=multi_scale,
         global_context=global_context,
     )
@@ -215,15 +147,6 @@ def load_autoencoder_checkpoint(model: nn.Module, checkpoint_path: str | Path, *
     state = payload.get("model") or payload.get("autoencoder") or payload.get("state_dict")
     if state is None:
         raise KeyError("Checkpoint must contain 'model', 'autoencoder', or 'state_dict'")
-    model.load_state_dict(state, strict=strict)
-    return payload
-
-
-def load_text_projection_checkpoint(model: nn.Module, checkpoint_path: str | Path, *, strict: bool = True) -> dict:
-    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    state = payload.get("text_projector") or payload.get("text_projection") or payload.get("state_dict")
-    if state is None:
-        raise KeyError("Checkpoint must contain 'text_projector', 'text_projection', or 'state_dict'")
     model.load_state_dict(state, strict=strict)
     return payload
 

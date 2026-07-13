@@ -19,12 +19,9 @@ SPECIALIZED_BRANCHES = {
     "neurovault": "specialized_mixed_to_neurovault",
 }
 BRANCH_KINDS = ("baseline", "specialized")
-AE_BRANCH_MODES = ("mixed_only", "mixed_and_specialized", "specialized_only")
 
 NORMALIZED_STAGE3_DIRNAME = "stage3_normalized_specter"
 CORRECTED_STAGE4_DIRNAME = "corrected_stage4_normalized_specter"
-LEGACY_STAGE3_DIRNAME = "stage3_legacy_specter"
-CORRECTED_LEGACY_STAGE4_DIRNAME = "corrected_stage4_legacy_specter"
 
 NORMALIZED_STAGE3_CHECKPOINT = "best_val_normalized_recall_auc.pt"
 CORRECTED_STAGE4_CHECKPOINT = "best_val_generation_normalized_auc.pt"
@@ -36,16 +33,13 @@ STAGE4_SEMANTIC_CHECKPOINT = "best_val_generation_normalized_auc.pt"
 
 DEFAULT_ATLAS_FREE_HF_REPO = "neurovlm/atlas_free_cnn_dataset"
 DEFAULT_TEXT_EMBEDDING_CONVENTION = "normalized_specter2"
-LEGACY_TEXT_EMBEDDING_CONVENTION = "legacy_specter2"
 NORMALIZED_TEXT_EMBEDDING_CONVENTION = "normalized_specter2"
-LEGACY_SPECTER_CACHE_FILENAME = "specter_text_cache.pt"
 NORMALIZED_SPECTER_CACHE_STEM = "specter2_stage3_stage4_emptycentered_unitnorm"
 NORMALIZED_SPECTER_CACHE_FILENAME = "specter2_stage3_stage4_emptycentered_unitnorm.pt"
 NORMALIZED_SPECTER_METADATA_FILENAME = f"{NORMALIZED_SPECTER_CACHE_STEM}_metadata.json"
 NORMALIZED_SPECTER_VALIDATION_FILENAME = f"{NORMALIZED_SPECTER_CACHE_STEM}_validation.json"
 NORMALIZED_SPECTER_INDEX_FILENAME = f"{NORMALIZED_SPECTER_CACHE_STEM}_index.csv"
 NORMALIZED_SPECTER_PREPROCESSING = "empty_string_centered_l2_unit_normalized"
-LEGACY_SPECTER_PREPROCESSING = "legacy_existing_cache_convention"
 SPECTER2_ENCODER_MODEL = "allenai/specter2_aug2023refresh"
 SPECTER2_ADAPTER_NAME = "adhoc_query"
 SPECTER2_BASE_MODEL_REPO = "allenai/specter2_aug2023refresh_base"
@@ -53,7 +47,6 @@ SPECTER2_ADAPTER_REPO = "allenai/specter2_aug2023refresh_adhoc_query"
 TEXT_EMBEDDING_DIM = 768
 TEXT_EMBEDDING_CONVENTION_DIR_SUFFIXES = {
     NORMALIZED_TEXT_EMBEDDING_CONVENTION: "normalized_specter",
-    LEGACY_TEXT_EMBEDDING_CONVENTION: "legacy_specter",
 }
 
 LOCKED_STAGE1_CHECKPOINT_NAMES = {
@@ -77,13 +70,6 @@ def sha256_file(path: str | Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
-
-
-def normalize_ae_branch_mode(mode: str) -> str:
-    mode = str(mode).strip().lower()
-    if mode not in AE_BRANCH_MODES:
-        raise ValueError(f"AE_BRANCH_MODE must be one of {AE_BRANCH_MODES}; got {mode!r}")
-    return mode
 
 
 def _ae_branch_spec(domain: str, branch_kind: str) -> dict[str, str]:
@@ -110,35 +96,30 @@ def _ae_branch_spec(domain: str, branch_kind: str) -> dict[str, str]:
     raise ValueError(f"branch_kind must be one of {BRANCH_KINDS}; got {branch_kind!r}")
 
 
-def ae_branch_specs(mode: str = "mixed_and_specialized") -> list[dict[str, str]]:
-    mode = normalize_ae_branch_mode(mode)
+def six_branch_specs() -> list[dict[str, str]]:
+    """Return the fixed three baseline plus three domain-specialized runs."""
+
     rows: list[dict[str, str]] = []
     for domain in ["pubmed", "nilearn", "neurovault"]:
-        if mode in {"mixed_only", "mixed_and_specialized"}:
-            rows.append(_ae_branch_spec(domain, "baseline"))
-        if mode in {"mixed_and_specialized", "specialized_only"}:
-            rows.append(_ae_branch_spec(domain, "specialized"))
+        rows.append(_ae_branch_spec(domain, "baseline"))
+        rows.append(_ae_branch_spec(domain, "specialized"))
     return rows
 
 
-def six_branch_specs() -> list[dict[str, str]]:
-    return ae_branch_specs("mixed_and_specialized")
-
-
-def selected_downstream_runs_for_ae_branch_mode(runs: list[dict[str, Any]], mode: str) -> list[dict[str, Any]]:
-    """Return manifest rows in the exact order selected by AE_BRANCH_MODE."""
+def select_six_downstream_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return all six manifest rows in their fixed pipeline order."""
 
     by_name = {str(run.get("run", "")): run for run in runs}
     selected: list[dict[str, Any]] = []
     missing: list[str] = []
-    for spec in ae_branch_specs(mode):
+    for spec in six_branch_specs():
         row = by_name.get(spec["run"])
         if row is None:
             missing.append(spec["run"])
             continue
         selected.append({**spec, **row})
     if missing:
-        raise KeyError(f"Downstream manifest is missing runs required for AE_BRANCH_MODE={mode!r}: {missing}")
+        raise KeyError(f"Downstream manifest is missing required six-branch runs: {missing}")
     return selected
 
 
@@ -148,14 +129,11 @@ def canonical_text_embedding_convention(convention: str | None) -> str:
         "normalized": NORMALIZED_TEXT_EMBEDDING_CONVENTION,
         "normalized_specter": NORMALIZED_TEXT_EMBEDDING_CONVENTION,
         "normalized_specter2": NORMALIZED_TEXT_EMBEDDING_CONVENTION,
-        "legacy": LEGACY_TEXT_EMBEDDING_CONVENTION,
-        "legacy_specter": LEGACY_TEXT_EMBEDDING_CONVENTION,
-        "legacy_specter2": LEGACY_TEXT_EMBEDDING_CONVENTION,
     }
     if value not in aliases:
         raise ValueError(
             f"Unknown text embedding convention {convention!r}. "
-            f"Expected {NORMALIZED_TEXT_EMBEDDING_CONVENTION!r} or {LEGACY_TEXT_EMBEDDING_CONVENTION!r}."
+            f"Expected {NORMALIZED_TEXT_EMBEDDING_CONVENTION!r}."
         )
     return aliases[value]
 
@@ -179,8 +157,6 @@ def _text_convention_from_layout(layout: str | None, convention: str | None = No
         return canonical_text_embedding_convention(convention)
     if layout in {"6a_normalized_corrected", "normalized_specter", "6a_normalized_specter"}:
         return NORMALIZED_TEXT_EMBEDDING_CONVENTION
-    if layout in {"legacy_specter", "6a_legacy_specter"}:
-        return LEGACY_TEXT_EMBEDDING_CONVENTION
     return None
 
 
@@ -231,10 +207,9 @@ def discover_stage_outputs(
     *,
     layout: str = "6a_normalized_corrected",
     text_embedding_convention: str | None = None,
-    ae_branch_mode: str = "mixed_and_specialized",
 ) -> list[dict[str, Any]]:
     rows = []
-    for spec in ae_branch_specs(ae_branch_mode):
+    for spec in six_branch_specs():
         stage3_dir = stage_output_dir(run_root, spec["domain"], spec["branch"], "stage3", layout=layout, text_embedding_convention=text_embedding_convention)
         stage4_dir = stage_output_dir(run_root, spec["domain"], spec["branch"], "stage4", layout=layout, text_embedding_convention=text_embedding_convention)
         rows.append(

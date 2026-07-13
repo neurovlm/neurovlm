@@ -97,7 +97,7 @@ def resolve_test_jsonl(test_jsonl: str | Path | None) -> Path:
 
 
 def resolve_text_cache_path(text_embedding_cache: str | Path | None) -> tuple[Path, dict[str, Any]]:
-    spec = notebook_utils.resolve_text_embedding_cache("normalized_specter2")
+    spec = notebook_utils.resolve_text_embedding_cache()
     if text_embedding_cache is not None:
         spec["local_cache_path"] = str(Path(text_embedding_cache).expanduser())
         spec["local_cache_override_env"] = "cli"

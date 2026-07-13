@@ -1,12 +1,10 @@
-"""Source-aware sampling helpers for mixed atlas-free AE training."""
+"""Natural source-sampling reports for mixed atlas-free AE training."""
 
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
-
-from torch.utils.data import WeightedRandomSampler
 
 
 def canonical_source(row: dict[str, Any]) -> str:
@@ -29,21 +27,13 @@ def source_detail(row: dict[str, Any]) -> str:
 @dataclass
 class SourceSamplingConfig:
     mode: str = "natural"
-    alpha: float = 0.5
-    manual_weights: dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def from_config(cls, cfg: dict[str, Any]) -> "SourceSamplingConfig":
-        raw_weights = (
-            cfg.get("source_sampling_weights")
-            or cfg.get("SOURCE_SAMPLING_WEIGHTS")
-            or {}
-        )
-        return cls(
-            mode=str(cfg.get("source_sampling", cfg.get("SOURCE_SAMPLING", "natural"))).lower(),
-            alpha=float(cfg.get("source_sampling_alpha", cfg.get("SOURCE_SAMPLING_ALPHA", 0.5))),
-            manual_weights={str(k).lower(): float(v) for k, v in dict(raw_weights).items()},
-        )
+        mode = str(cfg.get("source_sampling", cfg.get("SOURCE_SAMPLING", "natural"))).lower()
+        if mode != "natural":
+            raise ValueError("The retained Stage 1 recipe requires source_sampling='natural'")
+        return cls(mode=mode)
 
 
 def source_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -56,35 +46,15 @@ def source_probabilities(
 ) -> dict[str, float]:
     if not counts:
         return {}
-    mode = cfg.mode
-    if mode == "natural":
-        denom = float(sum(counts.values()))
-        return {src: float(n) / denom for src, n in counts.items()}
-    if mode == "balanced":
-        return {src: 1.0 / float(len(counts)) for src in counts}
-    if mode == "temperature":
-        denom = sum(float(n) ** float(cfg.alpha) for n in counts.values())
-        return {src: (float(n) ** float(cfg.alpha)) / denom for src, n in counts.items()}
-    if mode == "manual":
-        missing = sorted(set(counts) - set(cfg.manual_weights))
-        if missing:
-            raise ValueError(f"manual source_sampling_weights missing sources: {missing}")
-        total = sum(max(0.0, cfg.manual_weights[src]) for src in counts)
-        if total <= 0:
-            raise ValueError("manual source_sampling_weights must sum to a positive value")
-        return {src: max(0.0, cfg.manual_weights[src]) / total for src in counts}
-    raise ValueError("source_sampling must be natural, balanced, temperature, or manual")
+    denom = float(sum(counts.values()))
+    return {src: float(n) / denom for src, n in counts.items()}
 
 
 def build_source_sampler(rows: list[dict[str, Any]], cfg: dict[str, Any]):
     sampling = SourceSamplingConfig.from_config(cfg)
     counts = source_counts(rows)
     probs = source_probabilities(counts, sampling)
-    if sampling.mode == "natural":
-        return None, sampler_report(rows, sampling, counts, probs)
-    weights = [probs[canonical_source(row)] / float(counts[canonical_source(row)]) for row in rows]
-    sampler = WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
-    return sampler, sampler_report(rows, sampling, counts, probs)
+    return None, sampler_report(rows, sampling, counts, probs)
 
 
 def sampler_report(
@@ -98,8 +68,6 @@ def sampler_report(
     n = len(rows)
     return {
         "source_sampling": cfg.mode,
-        "source_sampling_alpha": cfg.alpha,
-        "source_sampling_weights": cfg.manual_weights,
         "dataset_source_counts": counts,
         "effective_source_probabilities": probs,
         "expected_source_exposures_per_epoch": {
