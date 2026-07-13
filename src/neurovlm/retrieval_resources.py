@@ -13,7 +13,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Tuple
 import gzip, json, pickle
-import sys
 
 import numpy as np
 import pandas as pd
@@ -83,10 +82,6 @@ __all__ = [
     "_load_latent_kg_mesh_brain_rankable",
     "_load_llm_neuro_terms_dataset",
     "_load_latent_llm_neuro_terms",
-    "_load_mixed_ae",
-    "_load_pubmed_finetuned_ae",
-    "_load_nilearn_finetuned_ae",
-    "_load_neurovault_finetuned_ae",
     "_load_cnn_contrastive_checkpoint_path",
     "_load_cnn_t2b_checkpoint_path",
 ]
@@ -1149,69 +1144,6 @@ def _load_latent_llm_neuro_terms() -> Tuple[torch.Tensor, np.ndarray]:
     latent = latent_payload["latent"]
     terms = np.asarray(latent_payload["term"])
     return latent, terms
-
-
-def _build_ale_autoencoder_from_payload(payload: dict) -> ALE3DCNNAutoEncoder:
-    try:
-        from atlas_free_cnn.training.ale_cnn import ALE3DCNNAutoEncoder
-    except ModuleNotFoundError:
-        repo_root = Path(__file__).resolve().parents[2]
-        threedcnn_dir = repo_root / "experiments" / "3dcnn"
-        if threedcnn_dir.exists() and str(threedcnn_dir) not in sys.path:
-            sys.path.insert(0, str(threedcnn_dir))
-        from atlas_free_cnn.training.ale_cnn import ALE3DCNNAutoEncoder
-
-    cfg = payload["config"]["model"]
-    target_shape = tuple(payload["target_shape"])
-    model = ALE3DCNNAutoEncoder(
-        output_shape=target_shape,
-        base_channels=cfg["base_channels"],
-        num_blocks=cfg["num_blocks"],
-        latent_dim=cfg["latent_dim"],
-        dropout=cfg["dropout"],
-        norm=cfg["norm"],
-        pooling=cfg["pooling"],
-        encoder_arch=cfg.get("encoder_arch", "plain"),
-        blocks_per_stage=cfg.get("blocks_per_stage", 2),
-        use_dilation=cfg.get("use_dilation", False),
-        multi_scale=cfg.get("multi_scale", False),
-        global_context=cfg.get("global_context", "none"),
-    )
-    model.load_state_dict(payload["model"], strict=True)
-    model.eval()
-    return model
-
-
-@lru_cache(maxsize=1)
-def _load_mixed_ae() -> ALE3DCNNAutoEncoder:
-    """Load the mixed-source pretrained AE (Stage 1A) from HuggingFace."""
-    path = _download_from_hf("neurovlm/3d_cnn", "mixed_ae.pt", repo_type="model")
-    payload = torch.load(path, map_location="cpu", weights_only=False)
-    return _build_ale_autoencoder_from_payload(payload)
-
-
-@lru_cache(maxsize=1)
-def _load_pubmed_finetuned_ae() -> ALE3DCNNAutoEncoder:
-    """Load the PubMed domain-finetuned AE (Stage 1B) from HuggingFace."""
-    path = _download_from_hf("neurovlm/3d_cnn", "pubmed_finetuned_ae_top5_dice.pt", repo_type="model")
-    payload = torch.load(path, map_location="cpu", weights_only=False)
-    return _build_ale_autoencoder_from_payload(payload)
-
-
-@lru_cache(maxsize=1)
-def _load_nilearn_finetuned_ae() -> ALE3DCNNAutoEncoder:
-    """Load the Nilearn domain-finetuned AE (Stage 1B) from HuggingFace."""
-    path = _download_from_hf("neurovlm/3d_cnn", "nilearn_finetuned_ae_spatial_corr.pt", repo_type="model")
-    payload = torch.load(path, map_location="cpu", weights_only=False)
-    return _build_ale_autoencoder_from_payload(payload)
-
-
-@lru_cache(maxsize=1)
-def _load_neurovault_finetuned_ae() -> ALE3DCNNAutoEncoder:
-    """Load the NeuroVault domain-finetuned AE (Stage 1B) from HuggingFace."""
-    path = _download_from_hf("neurovlm/3d_cnn", "neurovault_finetuned_ae_spatial_corr.pt", repo_type="model")
-    payload = torch.load(path, map_location="cpu", weights_only=False)
-    return _build_ale_autoencoder_from_payload(payload)
 
 
 @lru_cache(maxsize=8)

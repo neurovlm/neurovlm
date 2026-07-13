@@ -1,11 +1,13 @@
 """Model registry resolving MLP and atlas-free CNN checkpoints for comparison.
 
-Resolution is done through the HuggingFace loaders in
-``neurovlm.retrieval_resources`` so this module never hardcodes a repo
-filename. All CNN contrastive (Stage 3) and CNN text-to-brain (Stage 4)
-checkpoint variants are uploaded to the ``neurovlm/3d_cnn`` model repo, but
-resolution still falls back to a ``missing_checkpoint`` status instead of
-crashing if a variant is later renamed or pulled upstream.
+MLP resources and Stage 3/4 checkpoint paths are resolved through the
+HuggingFace loaders in ``neurovlm.retrieval_resources``. Stage 1 CNN
+autoencoders are resolved by experiment-local adapters because constructing
+those models depends on the repo-local ``atlas_free_cnn`` package. All CNN
+contrastive (Stage 3) and CNN text-to-brain (Stage 4) checkpoint variants are
+uploaded to the ``neurovlm/3d_cnn`` model repo, but resolution still falls back
+to a ``missing_checkpoint`` status instead of crashing if a variant is later
+renamed or pulled upstream.
 
 Stage 3/4 come in six variants per family: three ``mixed_to_{domain}``
 baseline branches (the Stage 1A mixed AE evaluated on that domain) and three
@@ -61,9 +63,9 @@ def _resolve_mlp() -> dict[str, Any]:
 
 
 def _resolve_cnn_ae(domain: str) -> dict[str, Any]:
-    import neurovlm.retrieval_resources as rr
+    from atlas_free_cnn.evaluation import model_comparison_adapters as adapters
 
-    loader = getattr(rr, _CNN_AE_LOADER_NAMES[domain])
+    loader = getattr(adapters, _CNN_AE_LOADER_NAMES[domain])
     loader()
     return {"status": "resolved", "checkpoint_path": None, "error": None}
 

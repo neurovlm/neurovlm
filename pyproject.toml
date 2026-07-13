@@ -68,11 +68,6 @@ llm = [
   "ollama",
   "accelerate"
 ]
-gnn = [
-  "torch_geometric",
-  "torch_scatter",
-  "torch_sparse",
-]
 docs = [
   "sphinx>=7.2,<9",
   "sphinx-book-theme>=1.1,<2",

@@ -19,6 +19,7 @@ still raise if a variant is later renamed or pulled upstream.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
 import torch
@@ -44,6 +45,12 @@ _CNN_AE_LOADER_NAMES = {
     "nilearn": "_load_nilearn_finetuned_ae",
     "neurovault": "_load_neurovault_finetuned_ae",
 }
+_CNN_AE_FILENAMES = {
+    "mixed": "mixed_ae.pt",
+    "pubmed": "pubmed_finetuned_ae_top5_dice.pt",
+    "nilearn": "nilearn_finetuned_ae_spatial_corr.pt",
+    "neurovault": "neurovault_finetuned_ae_spatial_corr.pt",
+}
 
 
 def _check_ae_domain(domain: str) -> None:
@@ -57,7 +64,7 @@ def _check_stage_variant(variant: str) -> None:
 
 
 def _stage_variant_ae_loader_name(variant: str) -> str:
-    """Return the retrieval_resources AE loader name backing a Stage 3/4 variant."""
+    """Return the experiment-local AE loader name backing a Stage 3/4 variant."""
 
     if variant.startswith("mixed_to_"):
         return _CNN_AE_LOADER_NAMES["mixed"]
@@ -70,6 +77,66 @@ def _l2_normalize(x: torch.Tensor) -> torch.Tensor:
 
 def _as_2d(x: torch.Tensor) -> torch.Tensor:
     return x.unsqueeze(0) if x.ndim == 1 else x
+
+
+def _build_ale_autoencoder_from_payload(payload: dict) -> torch.nn.Module:
+    from atlas_free_cnn.training.ale_cnn import ALE3DCNNAutoEncoder
+
+    cfg = payload["config"]["model"]
+    target_shape = tuple(payload["target_shape"])
+    model = ALE3DCNNAutoEncoder(
+        output_shape=target_shape,
+        base_channels=cfg["base_channels"],
+        num_blocks=cfg["num_blocks"],
+        latent_dim=cfg["latent_dim"],
+        dropout=cfg["dropout"],
+        norm=cfg["norm"],
+        pooling=cfg["pooling"],
+        encoder_arch=cfg.get("encoder_arch", "plain"),
+        blocks_per_stage=cfg.get("blocks_per_stage", 2),
+        use_dilation=cfg.get("use_dilation", False),
+        multi_scale=cfg.get("multi_scale", False),
+        global_context=cfg.get("global_context", "none"),
+    )
+    model.load_state_dict(payload["model"], strict=True)
+    model.eval()
+    return model
+
+
+@lru_cache(maxsize=4)
+def _load_cnn_ae(domain: str) -> torch.nn.Module:
+    _check_ae_domain(domain)
+    path = rr._download_from_hf(
+        rr.ATLAS_FREE_CNN_MODEL_REPO_ID,
+        _CNN_AE_FILENAMES[domain],
+        repo_type="model",
+    )
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    return _build_ale_autoencoder_from_payload(payload)
+
+
+def _load_mixed_ae() -> torch.nn.Module:
+    """Load the mixed-source pretrained AE (Stage 1A) from HuggingFace."""
+
+    return _load_cnn_ae("mixed")
+
+
+def _load_pubmed_finetuned_ae() -> torch.nn.Module:
+    """Load the PubMed domain-finetuned AE (Stage 1B) from HuggingFace."""
+
+    return _load_cnn_ae("pubmed")
+
+
+def _load_nilearn_finetuned_ae() -> torch.nn.Module:
+    """Load the Nilearn domain-finetuned AE (Stage 1B) from HuggingFace."""
+
+    return _load_cnn_ae("nilearn")
+
+
+def _load_neurovault_finetuned_ae() -> torch.nn.Module:
+    """Load the NeuroVault domain-finetuned AE (Stage 1B) from HuggingFace."""
+
+    return _load_cnn_ae("neurovault")
 
 
 class MLPAutoencoderAdapter:
@@ -96,7 +163,7 @@ class CNNAutoencoderAdapter:
         _check_ae_domain(domain)
         self.domain = domain
         self.device = torch.device(device)
-        loader = getattr(rr, _CNN_AE_LOADER_NAMES[domain])
+        loader = globals()[_CNN_AE_LOADER_NAMES[domain]]
         self.autoencoder = loader().to(self.device).eval()
 
     @torch.no_grad()
@@ -165,7 +232,7 @@ class CNNTextToBrainAdapter:
         _check_stage_variant(variant)
         self.variant = variant
         self.device = torch.device(device)
-        ae_loader = getattr(rr, _stage_variant_ae_loader_name(variant))
+        ae_loader = globals()[_stage_variant_ae_loader_name(variant)]
         self.autoencoder = ae_loader().to(self.device).eval()
         checkpoint_path = rr._load_cnn_t2b_checkpoint_path(variant)
         latent_dim = int(getattr(self.autoencoder.decoder, "latent_dim", 384))

@@ -44,24 +44,50 @@ class _FakeCNNAutoencoder(nn.Module):
 
 @pytest.fixture(autouse=True)
 def _clear_hf_caches():
+    for module, names in [
+        (
+            rr,
+            [
+                "_load_autoencoder",
+                "_load_masker",
+                "_proj_head_image_infonce",
+                "_proj_head_text_infonce",
+                "_proj_head_text_mse",
+                "_load_cnn_contrastive_checkpoint_path",
+                "_load_cnn_t2b_checkpoint_path",
+            ],
+        ),
+        (
+            adapters,
+            [
+                "_load_cnn_ae",
+            ],
+        ),
+    ]:
+        for name in names:
+            func = getattr(module, name, None)
+            cache_clear = getattr(func, "cache_clear", None)
+            if cache_clear is not None:
+                cache_clear()
+    yield
+
+
+def _patch_cnn_ae_loaders(monkeypatch) -> None:
     for name in [
-        "_load_autoencoder",
-        "_load_masker",
-        "_proj_head_image_infonce",
-        "_proj_head_text_infonce",
-        "_proj_head_text_mse",
         "_load_mixed_ae",
         "_load_pubmed_finetuned_ae",
         "_load_nilearn_finetuned_ae",
         "_load_neurovault_finetuned_ae",
-        "_load_cnn_contrastive_checkpoint_path",
-        "_load_cnn_t2b_checkpoint_path",
     ]:
-        func = getattr(rr, name, None)
-        cache_clear = getattr(func, "cache_clear", None)
-        if cache_clear is not None:
-            cache_clear()
-    yield
+        monkeypatch.setattr(adapters, name, lambda: _FakeCNNAutoencoder())
+
+
+def _patch_mlp_loaders(monkeypatch) -> None:
+    monkeypatch.setattr(rr, "_load_autoencoder", lambda: _FakeMLPAutoencoder())
+    monkeypatch.setattr(rr, "_load_masker", lambda: object())
+    monkeypatch.setattr(rr, "_proj_head_image_infonce", lambda: nn.Linear(LATENT_DIM, SHARED_DIM))
+    monkeypatch.setattr(rr, "_proj_head_text_infonce", lambda: nn.Linear(TEXT_DIM, SHARED_DIM))
+    monkeypatch.setattr(rr, "_proj_head_text_mse", lambda: nn.Linear(TEXT_DIM, LATENT_DIM))
 
 
 def test_registry_covers_all_expected_model_ids() -> None:
@@ -98,18 +124,8 @@ def test_registry_marks_baseline_vs_specialized_branch() -> None:
 
 
 def test_registry_resolves_uploaded_models(monkeypatch) -> None:
-    monkeypatch.setattr(rr, "_load_autoencoder", lambda: _FakeMLPAutoencoder())
-    monkeypatch.setattr(rr, "_load_masker", lambda: object())
-    monkeypatch.setattr(rr, "_proj_head_image_infonce", lambda: nn.Linear(LATENT_DIM, SHARED_DIM))
-    monkeypatch.setattr(rr, "_proj_head_text_infonce", lambda: nn.Linear(TEXT_DIM, SHARED_DIM))
-    monkeypatch.setattr(rr, "_proj_head_text_mse", lambda: nn.Linear(TEXT_DIM, LATENT_DIM))
-    for name in [
-        "_load_mixed_ae",
-        "_load_pubmed_finetuned_ae",
-        "_load_nilearn_finetuned_ae",
-        "_load_neurovault_finetuned_ae",
-    ]:
-        monkeypatch.setattr(rr, name, lambda: _FakeCNNAutoencoder())
+    _patch_mlp_loaders(monkeypatch)
+    _patch_cnn_ae_loaders(monkeypatch)
 
     manifest = registry.resolve_model_registry(
         ("mlp_neurovlm", "cnn_ae_mixed", "cnn_ae_pubmed", "cnn_ae_nilearn", "cnn_ae_neurovault")
@@ -136,18 +152,8 @@ def test_registry_reports_missing_checkpoint_instead_of_crashing(monkeypatch) ->
 
 
 def test_write_resolved_registry_produces_valid_json(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(rr, "_load_autoencoder", lambda: _FakeMLPAutoencoder())
-    monkeypatch.setattr(rr, "_load_masker", lambda: object())
-    monkeypatch.setattr(rr, "_proj_head_image_infonce", lambda: nn.Linear(LATENT_DIM, SHARED_DIM))
-    monkeypatch.setattr(rr, "_proj_head_text_infonce", lambda: nn.Linear(TEXT_DIM, SHARED_DIM))
-    monkeypatch.setattr(rr, "_proj_head_text_mse", lambda: nn.Linear(TEXT_DIM, LATENT_DIM))
-    for name in [
-        "_load_mixed_ae",
-        "_load_pubmed_finetuned_ae",
-        "_load_nilearn_finetuned_ae",
-        "_load_neurovault_finetuned_ae",
-    ]:
-        monkeypatch.setattr(rr, name, lambda: _FakeCNNAutoencoder())
+    _patch_mlp_loaders(monkeypatch)
+    _patch_cnn_ae_loaders(monkeypatch)
 
     def _raise(variant: str) -> str:
         raise FileNotFoundError("not uploaded yet")
@@ -180,7 +186,7 @@ def test_mlp_autoencoder_adapter_encode_decode_shapes(monkeypatch) -> None:
 
 
 def test_cnn_autoencoder_adapter_encode_decode_shapes(monkeypatch) -> None:
-    monkeypatch.setattr(rr, "_load_mixed_ae", lambda: _FakeCNNAutoencoder())
+    monkeypatch.setattr(adapters, "_load_mixed_ae", lambda: _FakeCNNAutoencoder())
 
     adapter = adapters.CNNAutoencoderAdapter("mixed")
     volume = torch.randn(2, VOXELS)
@@ -249,7 +255,7 @@ def test_cnn_contrastive_adapter_baseline_variant_uses_mixed_to_domain_checkpoin
 
 
 def test_cnn_t2b_adapter_specialized_variant_uses_domain_finetuned_ae(monkeypatch) -> None:
-    monkeypatch.setattr(rr, "_load_pubmed_finetuned_ae", lambda: _FakeCNNAutoencoder())
+    monkeypatch.setattr(adapters, "_load_pubmed_finetuned_ae", lambda: _FakeCNNAutoencoder())
     monkeypatch.setattr(rr, "_load_cnn_t2b_checkpoint_path", lambda variant: f"/fake/{variant}.pt")
 
     def fake_load_stage4_projector(checkpoint_path, device, *, latent_dim):
@@ -268,7 +274,7 @@ def test_cnn_t2b_adapter_specialized_variant_uses_domain_finetuned_ae(monkeypatc
 
 
 def test_cnn_t2b_adapter_baseline_variant_uses_mixed_ae(monkeypatch) -> None:
-    monkeypatch.setattr(rr, "_load_mixed_ae", lambda: _FakeCNNAutoencoder())
+    monkeypatch.setattr(adapters, "_load_mixed_ae", lambda: _FakeCNNAutoencoder())
     monkeypatch.setattr(rr, "_load_cnn_t2b_checkpoint_path", lambda variant: f"/fake/{variant}.pt")
 
     def fake_load_stage4_projector(checkpoint_path, device, *, latent_dim):
