@@ -13,11 +13,10 @@ The documented workflow uses:
 3. `../4 multi source stage3 stage4.ipynb` for the fixed six Stage 3
    contrastive branches and six matching Stage 4 text-to-brain branches.
 
-Start with [`../NOTEBOOK_GUIDE.md`](../NOTEBOOK_GUIDE.md). The full technical
-design, data provenance, parameter tables, training recipes, evaluation rules,
-and code-review paths are in
-[`../3DCNN_TECHNICAL_GUIDE.md`](../3DCNN_TECHNICAL_GUIDE.md) and the standalone
-[`../3DCNN_TECHNICAL_GUIDE.html`](../3DCNN_TECHNICAL_GUIDE.html).
+Start with [`../3DCNN_TECHNICAL_GUIDE.md`](../3DCNN_TECHNICAL_GUIDE.md) for the
+full technical design, data provenance, parameter tables, training recipes,
+evaluation rules, and code-review paths. A standalone rendered version is
+available at [`../3DCNN_TECHNICAL_GUIDE.html`](../3DCNN_TECHNICAL_GUIDE.html).
 
 ## Finalized Data
 

@@ -75,13 +75,13 @@ def test_stage3_non_strict_controlled_recipe_warns_invalid_recipe(tmp_path: Path
 
 
 def test_current_stage3_launches_with_strict_controlled_recipe() -> None:
-    nb = json.loads((THREEDCNN / "5 multi source stage3 stage4.ipynb").read_text())
+    nb = json.loads((THREEDCNN / "4 multi source stage3 stage4.ipynb").read_text())
     source = "\n".join("".join(cell.get("source", "")) for cell in nb["cells"])
     assert '"--strict-controlled-recipe"' in source
 
 
-def test_notebook_guide_references_existing_notebooks() -> None:
-    guide = (THREEDCNN / "NOTEBOOK_GUIDE.md").read_text()
+def test_technical_guide_references_existing_notebooks() -> None:
+    guide = (THREEDCNN / "3DCNN_TECHNICAL_GUIDE.md").read_text()
     notebooks = re.findall(r"`([^`]+\.ipynb)`", guide)
     assert notebooks
     missing = [name for name in notebooks if not (THREEDCNN / name).exists()]

@@ -118,10 +118,14 @@ def test_status_requires_all_six_branches(tmp_path: Path) -> None:
 
 
 def test_notebook_defaults_use_fixed_six_runs_and_required_stage1b() -> None:
-    nb6a = json.loads((REPO_ROOT / "experiments/3dcnn/5 multi source stage3 stage4.ipynb").read_text())
-    nb5 = json.loads((REPO_ROOT / "experiments/3dcnn/4 multi source autoencoder.ipynb").read_text())
-    source6a = "\n".join("".join(cell.get("source", "")) for cell in nb6a["cells"])
-    source5 = "\n".join("".join(cell.get("source", "")) for cell in nb5["cells"])
+    stage34_nb = json.loads(
+        (REPO_ROOT / "experiments/3dcnn/4 multi source stage3 stage4.ipynb").read_text()
+    )
+    autoencoder_nb = json.loads(
+        (REPO_ROOT / "experiments/3dcnn/3 multi source autoencoder.ipynb").read_text()
+    )
+    source6a = "\n".join("".join(cell.get("source", "")) for cell in stage34_nb["cells"])
+    source5 = "\n".join("".join(cell.get("source", "")) for cell in autoencoder_nb["cells"])
 
     assert "AE_BRANCH_MODE" not in source6a
     assert "six_branch_specs()" in source6a
