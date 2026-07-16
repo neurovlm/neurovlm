@@ -118,7 +118,7 @@
     <div class="eyebrow">Technical review</div>
     <h2>Atlas-Free 3D CNN</h2>
     <a href="#overview">1. System overview</a>
-    <a href="#notebooks">2. Notebooks 1, 3, 4</a>
+    <a href="#notebooks">2. Notebooks 1–4</a>
     <a href="#data">3. Data used</a>
     <a class="sub" href="#pubmed">PubMed</a>
     <a class="sub" href="#nilearn">Nilearn</a>
@@ -139,7 +139,7 @@
       <header class="hero">
         <div class="eyebrow">NeuroVLM experiment documentation</div>
         <h1>Atlas-Free 3D CNN</h1>
-        <p>An implementation-level account of the data, image and text preparation, dense 3D architecture, training recipes, checkpoint policies, evaluation, and notebooks 1, 3, and 4.</p>
+        <p>An implementation-level account of the data, image and text preparation, dense 3D architecture, training recipes, checkpoint policies, evaluation, and notebooks 1 through 4.</p>
         <div class="chips">
           <span class="chip">33,657 brain maps</span>
           <span class="chip">36 × 45 × 38 voxels</span>
@@ -167,11 +167,12 @@
       </section>
 
       <section id="notebooks">
-        <h2>2. What notebooks 1, 3, and 4 do</h2>
+        <h2>2. What notebooks 1 through 4 do</h2>
         <table>
           <thead><tr><th>Notebook</th><th>Role</th><th>Main products</th></tr></thead>
           <tbody>
             <tr><td><a href="1%20best%20contrastive%20recipe%20on%20pubmed.ipynb">1 — best contrastive recipe on PubMed</a></td><td>Standalone historical/reference path using coordinate-derived PubMed maps and a base-48 CNN.</td><td>One AE, selected AE checkpoint, one PubMed Stage 3 contrastive model.</td></tr>
+            <tr><td><a href="2%20resnet48%20multi%20scale%20attention.ipynb">2 — ResNet48 multi-scale attention</a></td><td>Independent architecture validation: test whether multi-scale spatial features plus a global attention token perform well on PubMed brain-text retrieval.</td><td>One matching ResNet48 AE and one contrastive model; no dependency for notebooks 1, 3, or 4.</td></tr>
             <tr><td><a href="3%20multi%20source%20autoencoder.ipynb">3 — multi-source autoencoder</a></td><td>Finalized Stage 1 training for a base-64 CNN.</td><td>Mixed Stage 1A AE, three Stage 1B domain fine-tunes, reconstruction comparisons.</td></tr>
             <tr><td><a href="4%20multi%20source%20stage3%20stage4.ipynb">4 — multi-source Stage 3/4</a></td><td>Final downstream six-branch pipeline.</td><td>Six contrastive models, six generation projectors, audits, metrics, comparisons.</td></tr>
           </tbody>
@@ -455,7 +456,7 @@ loss = 0.5 * (CE(logits, diagonal) + CE(logits.T, diagonal))</code></pre>
         <table>
           <thead><tr><th>Review focus</th><th>Implementation path</th><th>Key symbols</th></tr></thead>
           <tbody>
-            <tr><td>CNN, decoder, AE</td><td><a href="atlas_free_cnn/training/ale_cnn.py">training/ale_cnn.py</a></td><td><code>ALE3DCNNEncoder</code>, <code>ALE3DCNNDecoder</code>, <code>ALE3DCNNAutoEncoder</code></td></tr>
+            <tr><td>CNN, decoder, AE</td><td><a href="../../src/neurovlm/ale_cnn.py">src/neurovlm/ale_cnn.py</a></td><td><code>ALE3DCNNEncoder</code>, <code>ALE3DCNNDecoder</code>, <code>ALE3DCNNAutoEncoder</code>; the experiment module keeps a compatibility import path.</td></tr>
             <tr><td>Multi-source Stage 1</td><td><a href="atlas_free_cnn/training/train_autoencoder.py">training/train_autoencoder.py</a></td><td><code>VolumeCollator</code>, <code>train_from_config</code>, <code>train_stage1b_from_config</code></td></tr>
             <tr><td>Stage 1 loss</td><td><a href="atlas_free_cnn/training/autoencoder_losses.py">training/autoencoder_losses.py</a></td><td><code>reconstruction_loss</code></td></tr>
             <tr><td>Stage 3 recipe</td><td><a href="atlas_free_cnn/training/train_ale_cnn.py">training/train_ale_cnn.py</a></td><td>strict AE initialization, <code>ALETrainer</code>, retrieval evaluation</td></tr>
@@ -484,7 +485,7 @@ loss = 0.5 * (CE(logits, diagonal) + CE(logits.T, diagonal))</code></pre>
           <li><strong>Notebook 3→4 handoff:</strong> Notebook 4 uses locked AE resource loaders and builds its own validated manifest; it does not automatically pick up Notebook 3's newest registry.</li>
           <li><strong>Hugging Face viewer:</strong> the viewer can fail schema auto-casting on heterogeneous raw JSONL rows. Notebook loading uses raw files and is unaffected.</li>
           <li><strong>Image builders:</strong> the finalized image ingestion scripts were removed from the active tree. The public manifest/audit and repository history preserve the preparation provenance; the active tree retains the reproducible text-cache builder.</li>
-          <li><strong>Notebook 2:</strong> the ResNet48 multi-scale-attention experiment is retained separately but is outside this requested Notebook 1/3/4 path.</li>
+          <li><strong>Notebook 2:</strong> retained as architecture-decision evidence for the global retrieval task; it is independent and does not feed the production Notebook 1/3/4 path.</li>
         </ol>
       </section>
 

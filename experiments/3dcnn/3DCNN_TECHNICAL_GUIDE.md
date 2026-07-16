@@ -4,7 +4,7 @@ This document is the technical review guide for the retained atlas-free 3D CNN
 workflow in `experiments/3dcnn`. It describes the code as implemented, including
 the exact data artifacts, preprocessing, tensor shapes, model parameters,
 training recipes, checkpoint policies, evaluation metrics, and the behavior of
-notebooks 1, 3, and 4.
+notebooks 1, 2, 3, and 4.
 
 ## 1. What the system does
 
@@ -23,6 +23,9 @@ one-channel MNI crop with shape `[1, 36, 45, 38]`.
 There are two experiment tracks:
 
 - Notebook 1 is a standalone PubMed reference experiment using a base-48 CNN.
+- Notebook 2 is an independent architecture-validation experiment testing
+  whether a retained ResNet48 with multi-scale features and global attention
+  can perform well on the global PubMed brain-text retrieval task.
 - Notebooks 3 and 4 are the finalized multi-source pipeline using a base-64 CNN
   and controlled mixed-versus-specialized comparisons.
 
@@ -31,6 +34,7 @@ There are two experiment tracks:
 | Notebook | Stages | Purpose | Dependency |
 | --- | --- | --- | --- |
 | `1 best contrastive recipe on pubmed.ipynb` | 1, checkpoint selection, 3 | Reproduce the known-best PubMed-only AE-pretrained contrastive recipe | Independent |
+| `2 resnet48 multi scale attention.ipynb` | matching AE pretraining, 3 | Validate the retained ResNet48 multi-scale-attention architecture on global brain-text retrieval | Independent; not consumed by notebooks 1, 3, or 4 |
 | `3 multi source autoencoder.ipynb` | 1A, 1B, reconstruction eval | Train one mixed AE and three domain-specialized AEs | Uses finalized unified data |
 | `4 multi source stage3 stage4.ipynb` | resource validation, 3, 4, final comparisons | Run six controlled contrastive and generation branches | Uses locked AEs and finalized unified data |
 
@@ -553,7 +557,7 @@ Review in this order:
 
 | Review question | Path | Key symbols |
 | --- | --- | --- |
-| What is the CNN/AE structure? | `atlas_free_cnn/training/ale_cnn.py` | `_ConvBlock`, `ALE3DCNNEncoder`, `ALE3DCNNDecoder`, `ALE3DCNNAutoEncoder` |
+| What is the CNN/AE structure? | `../../src/neurovlm/ale_cnn.py` | `_ConvBlock`, `ALE3DCNNEncoder`, `ALE3DCNNDecoder`, `ALE3DCNNAutoEncoder`; the experiment path re-exports the public classes |
 | How is the multi-source AE trained? | `atlas_free_cnn/training/train_autoencoder.py` | `VolumeCollator`, `run_epoch`, `train_from_config`, `train_stage1b_from_config` |
 | What exactly is the Stage 1 loss? | `atlas_free_cnn/training/autoencoder_losses.py` | `AutoencoderLossConfig`, `reconstruction_loss` |
 | How is Stage 3 initialized/trained? | `atlas_free_cnn/training/train_ale_cnn.py` | `_load_encoder_from_autoencoder_checkpoint`, `ALETrainer`, `bidirectional_retrieval_metrics` |
@@ -584,5 +588,7 @@ Review in this order:
 4. The original image ingestion/build scripts were removed after finalization.
    The active repository retains the normalized text-cache builder; image-data
    provenance is preserved in the published manifest/audit and in git history.
-5. Notebook 2 contains the retained ResNet48 multi-scale-attention experiment,
-   but it is not part of the Notebook 1/3/4 workflow described here.
+5. Notebook 2 is retained as evidence for the architecture decision: it tests
+   whether multi-scale spatial features plus an attention-pooled global token
+   let a CNN perform well on the global PubMed retrieval task. It is not part
+   of the production Notebook 1/3/4 workflow and does not feed their outputs.
