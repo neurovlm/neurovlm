@@ -85,6 +85,22 @@ Pretrained models return from load_model or calling .from_pretrained on model cl
    Specter
    load_model
 
+Atlas-Free CNN
+~~~~~~~~~~~~~~
+
+Installable 3D CNN architectures and conversion helpers for the MLP and CNN
+input spaces. Pretrained instances are returned by ``load_model``.
+
+.. currentmodule:: neurovlm.cnn
+
+.. autosummary::
+   :toctree: generated/
+
+   CNNContrastiveModel
+   CNNTextToBrainModel
+   atlas_free_volume_to_mlp_flat
+   mlp_flat_to_atlas_free_volume
+
 Loss Functions
 --------------
 

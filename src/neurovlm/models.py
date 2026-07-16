@@ -371,13 +371,32 @@ def load_model(name: str):
 
     Parameters
     ----------
-    name: str, {"proj_head_text_infonce", "proj_head_image_infonce", "proj_head_text_mse", "autoencoder", "specter"}
-        Name of model.
+    name: str
+        Name of a packaged model. CNN names use ``autoencoder_cnn`` (mixed
+        pretraining), ``autoencoder_cnn_{domain}``,
+        ``contrastive_cnn_{variant}``, or ``text_to_brain_cnn_{variant}``.
 
     Returns
     -------
     model
     """
+    if name == "autoencoder_cnn":
+        from neurovlm.retrieval_resources import _load_cnn_autoencoder
+
+        return _load_cnn_autoencoder("mixed")
+    if name.startswith("autoencoder_cnn_"):
+        from neurovlm.retrieval_resources import _load_cnn_autoencoder
+
+        return _load_cnn_autoencoder(name.removeprefix("autoencoder_cnn_"))
+    if name.startswith("contrastive_cnn_"):
+        from neurovlm.retrieval_resources import _load_cnn_contrastive
+
+        return _load_cnn_contrastive(name.removeprefix("contrastive_cnn_"))
+    if name.startswith("text_to_brain_cnn_"):
+        from neurovlm.retrieval_resources import _load_cnn_text_to_brain
+
+        return _load_cnn_text_to_brain(name.removeprefix("text_to_brain_cnn_"))
+
     match name:
         case "proj_head_text_infonce":
             return ProjHead().from_pretrained("text_infonce")
@@ -404,5 +423,9 @@ def load_model(name: str):
                 "specter",
                 "neuro_qformer",
                 "neuro_adapter",
+                "autoencoder_cnn",
+                "autoencoder_cnn_{mixed|pubmed|nilearn|neurovault}",
+                "contrastive_cnn_{variant}",
+                "text_to_brain_cnn_{variant}",
             ]
             raise ValueError(f"{name} not in {valid_names}")

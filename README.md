@@ -54,6 +54,19 @@ result = nvlm.brain(load_latent("networks_neuro")["Du"]["AUD"]).to_text()
 result.top_k(5).query("cosine_similarity > 0.4") # return up to 5 examples per dataset
 ```
 
+Load the atlas-free CNN directly from the installed package:
+
+```python
+from neurovlm.models import load_model
+
+autoencoder = load_model("autoencoder_cnn")
+contrastive = load_model("contrastive_cnn_pubmed")
+text_to_brain = load_model("text_to_brain_cnn_pubmed")
+```
+
+See the atlas-free CNN tutorial for MLP/CNN reconstruction, retrieval, and
+inference-speed examples.
+
 ## Documentation
 
 See the [docs](https://neurovlm.github.io/neurovlm/) for the [API](https://neurovlm.github.io/neurovlm/api.html) and [tutorials](https://neurovlm.github.io/neurovlm/tutorials/index.html).

@@ -2,11 +2,8 @@
 
 Every notebook imports from here so a given model id always renders in the
 same color, bars are ordered the same way, and no chart ends up with two
-y-axes or an arbitrary matplotlib color cycle. Colors come from the
-validated 8-hue categorical palette in the `dataviz` skill
-(`references/palette.md`); only 5 of the 8 slots are used here, one per
-model family, so adjacent-hue separation is comfortably above the
-colorblind-safety floor.
+y-axes or an arbitrary matplotlib color cycle. The categorical colors are
+defined inline below so the figures do not depend on an external palette.
 """
 
 from __future__ import annotations
@@ -19,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-# Validated categorical hues (light-mode steps from references/palette.md).
+# Fixed categorical hues shared by all model-comparison figures.
 BLUE = "#2a78d6"
 AQUA = "#1baf7a"
 YELLOW = "#eda100"

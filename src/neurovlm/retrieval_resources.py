@@ -84,6 +84,9 @@ __all__ = [
     "_load_latent_llm_neuro_terms",
     "_load_cnn_contrastive_checkpoint_path",
     "_load_cnn_t2b_checkpoint_path",
+    "_load_cnn_autoencoder",
+    "_load_cnn_contrastive",
+    "_load_cnn_text_to_brain",
 ]
 
 NEURO_QWEN_REPO_ID = "neurovlm/NeuroQwen3-0.6B"
@@ -96,6 +99,12 @@ ATLAS_FREE_CNN_MODEL_REPO_ID = "neurovlm/3d_cnn"
 ALE_ONLY_CACHE_FILENAMES = {
     "atlas_free": "atlas_free_4mm_fwhm9_crop_float16.pt",
     "difumo_compatible": "difumo_compatible_4mm_fwhm9_crop_float16.pt",
+}
+CNN_AUTOENCODER_FILENAMES = {
+    "mixed": "mixed_ae.pt",
+    "pubmed": "pubmed_finetuned_ae_top5_dice.pt",
+    "nilearn": "nilearn_finetuned_ae_spatial_corr.pt",
+    "neurovault": "neurovault_finetuned_ae_spatial_corr.pt",
 }
 CNN_CONTRASTIVE_FILENAMES = {
     "mixed_to_pubmed": "cnn_contrastive_mixed_to_pubmed.pt",
@@ -661,9 +670,8 @@ def _load_ale_only_cache_path(
     kernel_fwhm_mm: int | float = 9,
     crop_to_brain: bool = True,
     cache_dtype: str = "float16",
-    repo_id: str = ATLAS_FREE_CNN_DATASET_REPO,
 ) -> str:
-    """Download or resolve the legacy ALE-only cache from Hugging Face."""
+    """Resolve an ALE-only cache from NeuroVLM's trusted dataset repo."""
 
     filename = _ale_only_cache_filename(
         mode,
@@ -672,7 +680,7 @@ def _load_ale_only_cache_path(
         crop_to_brain=crop_to_brain,
         cache_dtype=cache_dtype,
     )
-    return _download_from_hf(repo_id, filename, repo_type="dataset")
+    return _download_from_hf(ATLAS_FREE_CNN_DATASET_REPO, filename, repo_type="dataset")
 
 
 @lru_cache(maxsize=8)
@@ -683,9 +691,8 @@ def _load_ale_only_cache(
     kernel_fwhm_mm: int | float = 9,
     crop_to_brain: bool = True,
     cache_dtype: str = "float16",
-    repo_id: str = ATLAS_FREE_CNN_DATASET_REPO,
 ) -> dict:
-    """Load the legacy ALE-only cache payload from Hugging Face."""
+    """Load an ALE-only cache from NeuroVLM's trusted dataset repo."""
 
     path = _load_ale_only_cache_path(
         mode,
@@ -693,8 +700,10 @@ def _load_ale_only_cache(
         kernel_fwhm_mm=kernel_fwhm_mm,
         crop_to_brain=crop_to_brain,
         cache_dtype=cache_dtype,
-        repo_id=repo_id,
     )
+    # This legacy payload contains NumPy metadata that the restricted
+    # unpickler cannot decode. The path is safe-by-default because callers
+    # cannot override the fixed NeuroVLM repository above.
     payload = torch.load(path, weights_only=False, map_location="cpu")
     if not isinstance(payload, dict):
         raise TypeError(f"Expected {path} to contain a dict payload.")
@@ -1180,3 +1189,58 @@ def _load_cnn_t2b_checkpoint_path(variant: str) -> str:
             f"Unknown CNN text-to-brain variant {variant!r}; expected one of {sorted(CNN_T2B_FILENAMES)}"
         )
     return _download_from_hf(ATLAS_FREE_CNN_MODEL_REPO_ID, CNN_T2B_FILENAMES[variant], repo_type="model")
+
+
+def _load_trusted_cnn_checkpoint(filename: str) -> dict[str, Any]:
+    """Load tensor weights and primitive metadata from NeuroVLM's model repo.
+
+    The repository is intentionally fixed here. ``weights_only=True`` keeps
+    PyTorch's restricted unpickler enabled for these public checkpoints.
+    """
+
+    path = _download_from_hf(ATLAS_FREE_CNN_MODEL_REPO_ID, filename, repo_type="model")
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(payload, dict):
+        raise TypeError(f"Expected {filename} to contain a checkpoint dictionary")
+    return payload
+
+
+@lru_cache(maxsize=4)
+def _load_cnn_autoencoder(variant: str = "mixed") -> torch.nn.Module:
+    """Load a pretrained atlas-free CNN autoencoder by domain variant."""
+
+    if variant not in CNN_AUTOENCODER_FILENAMES:
+        raise ValueError(
+            f"Unknown CNN autoencoder variant {variant!r}; expected one of {sorted(CNN_AUTOENCODER_FILENAMES)}"
+        )
+    from neurovlm.cnn import autoencoder_from_payload
+
+    return autoencoder_from_payload(_load_trusted_cnn_checkpoint(CNN_AUTOENCODER_FILENAMES[variant]))
+
+
+@lru_cache(maxsize=6)
+def _load_cnn_contrastive(variant: str = "pubmed") -> torch.nn.Module:
+    """Load a pretrained Stage 3 CNN brain/text contrastive model."""
+
+    if variant not in CNN_CONTRASTIVE_FILENAMES:
+        raise ValueError(
+            f"Unknown CNN contrastive variant {variant!r}; expected one of {sorted(CNN_CONTRASTIVE_FILENAMES)}"
+        )
+    from neurovlm.cnn import contrastive_from_payload
+
+    return contrastive_from_payload(_load_trusted_cnn_checkpoint(CNN_CONTRASTIVE_FILENAMES[variant]))
+
+
+@lru_cache(maxsize=6)
+def _load_cnn_text_to_brain(variant: str = "pubmed") -> torch.nn.Module:
+    """Load a pretrained Stage 4 CNN text-to-brain generator."""
+
+    if variant not in CNN_T2B_FILENAMES:
+        raise ValueError(
+            f"Unknown CNN text-to-brain variant {variant!r}; expected one of {sorted(CNN_T2B_FILENAMES)}"
+        )
+    from neurovlm.cnn import text_to_brain_from_payload
+
+    autoencoder_variant = "mixed" if variant.startswith("mixed_to_") else variant
+    payload = _load_trusted_cnn_checkpoint(CNN_T2B_FILENAMES[variant])
+    return text_to_brain_from_payload(payload, _load_cnn_autoencoder(autoencoder_variant))

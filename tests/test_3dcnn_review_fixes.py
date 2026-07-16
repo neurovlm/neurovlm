@@ -88,6 +88,40 @@ def test_technical_guide_references_existing_notebooks() -> None:
     assert missing == []
 
 
+def test_technical_guide_explains_notebook_2_global_task() -> None:
+    guide = (THREEDCNN / "3DCNN_TECHNICAL_GUIDE.md").read_text()
+    assert "`2 resnet48 multi scale attention.ipynb`" in guide
+    assert "global PubMed brain-text retrieval task" in guide
+    assert "Independent; not consumed by notebooks 1, 3, or 4" in guide
+
+
+def test_ae_comparison_defines_figure_before_export() -> None:
+    notebook = json.loads((THREEDCNN / "model_comparison" / "ae_reconstruction_comparison.ipynb").read_text())
+    source = "\n".join("".join(cell.get("source", "")) for cell in notebook["cells"])
+    assert "fig_metrics, axes = plt.subplots" in source
+    assert source.index("fig_metrics, axes = plt.subplots") < source.index(
+        'figures={"ae_reconstruction_metrics": fig_metrics}'
+    )
+
+
+def test_plotting_palette_is_self_contained() -> None:
+    source = (THREEDCNN / "model_comparison" / "plotting_utils.py").read_text()
+    assert "references/palette.md" not in source
+    assert "FAMILY_COLOR" in source
+
+
+def test_cnn_tutorial_uses_only_packaged_model_api() -> None:
+    notebook = json.loads((REPO_ROOT / "docs" / "tutorials" / "06_atlas_free_cnn.ipynb").read_text())
+    source = "\n".join("".join(cell.get("source", "")) for cell in notebook["cells"])
+    code = "\n".join(
+        "".join(cell.get("source", "")) for cell in notebook["cells"] if cell.get("cell_type") == "code"
+    )
+    assert 'load_model("autoencoder_cnn")' in source
+    assert 'load_model("contrastive_cnn_pubmed")' in source
+    assert "experiments/" not in code
+    assert "sys.path" not in code
+
+
 def test_core_3dcnn_modules_do_not_import_notebook_helpers() -> None:
     core_paths = [
         THREEDCNN / "atlas_free_cnn" / "pipeline_outputs.py",

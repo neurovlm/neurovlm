@@ -62,9 +62,11 @@ Parameter counts:
 | Autoencoder | 11,580,993 |
 | Fresh Stage 4 768→512→384 projector | 590,720 |
 
-The separately retained ResNet48 multi-scale-attention variant lives in
-`ale_cnn.py` and Notebook 2, but it is not part of the requested Notebook
-1→3→4 workflow.
+The separately retained ResNet48 multi-scale-attention variant lives in the
+installable `src/neurovlm/ale_cnn.py` module and Notebook 2. The experiment's
+`training/ale_cnn.py` keeps the original import path as a compatibility shim.
+Notebook 2 is architecture-validation evidence and is not part of the
+requested Notebook 1→3→4 workflow.
 
 ## Stage Summary
 

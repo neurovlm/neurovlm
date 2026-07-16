@@ -37,6 +37,11 @@ def test_ale_only_cache_rejects_unuploaded_variants() -> None:
         rr._load_ale_only_cache_path("unknown")
 
 
+def test_ale_only_cache_does_not_accept_an_arbitrary_repo() -> None:
+    with pytest.raises(TypeError, match="repo_id"):
+        rr._load_ale_only_cache_path("atlas_free", repo_id="untrusted/repo")
+
+
 def test_ale_only_cache_loader_reads_hf_payload(monkeypatch, tmp_path: Path) -> None:
     payload_path = tmp_path / "atlas_free_4mm_fwhm9_crop_float16.pt"
     torch.save({"volumes": torch.zeros(1, 1, 2, 2, 2), "pmids": ["1"]}, payload_path)
@@ -52,3 +57,20 @@ def test_ale_only_cache_loader_reads_hf_payload(monkeypatch, tmp_path: Path) -> 
 
     assert torch.equal(payload["volumes"], torch.zeros(1, 1, 2, 2, 2))
     assert payload["pmids"] == ["1"]
+
+
+def test_ale_only_cache_loads_legacy_metadata_from_fixed_repo(monkeypatch) -> None:
+    calls = []
+
+    monkeypatch.setattr(rr, "_load_ale_only_cache_path", lambda *args, **kwargs: "/trusted/cache.pt")
+
+    def fake_load(path, *, weights_only, map_location):
+        calls.append((path, weights_only, map_location))
+        return {"volumes": torch.zeros(1)}
+
+    monkeypatch.setattr(torch, "load", fake_load)
+    rr._load_ale_only_cache.cache_clear()
+
+    rr._load_ale_only_cache()
+
+    assert calls == [("/trusted/cache.pt", False, "cpu")]
