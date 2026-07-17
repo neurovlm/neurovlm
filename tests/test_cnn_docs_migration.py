@@ -1,4 +1,3 @@
-import csv
 import json
 from pathlib import Path
 
@@ -14,9 +13,6 @@ NOTEBOOKS = (
     "docs/cnn/evaluation/text_to_brain_comparison.ipynb",
     "docs/tutorials/06_atlas_free_cnn.ipynb",
 )
-EVIDENCE = ROOT / "docs/cnn/evaluation/artifacts/contrastive_retrieval"
-
-
 def test_cnn_notebooks_are_valid_package_only_workflows():
     forbidden = (
         "experiments/3dcnn",
@@ -40,32 +36,23 @@ def test_cnn_notebooks_are_valid_package_only_workflows():
         assert not any(token in code for token in forbidden)
 
 
-def test_preserved_contrastive_evidence_is_portable_and_unchanged():
-    for path in EVIDENCE.rglob("*"):
-        if path.suffix in {".csv", ".json"}:
-            content = path.read_text(encoding="utf-8")
-            assert "/Users/" not in content
-            assert "experiments/3dcnn" not in content
+def test_mixed_baseline_decision_is_documented_without_external_artifacts():
+    guide = (ROOT / "docs/cnn/technical_guide.md").read_text(encoding="utf-8")
+    notebook_path = ROOT / "docs/cnn/evaluation/contrastive_comparison.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    notebook_markdown = "\n".join(
+        "".join(cell.get("source", ()))
+        for cell in notebook["cells"]
+        if cell["cell_type"] == "markdown"
+    )
+    decision_record = f"{guide}\n{notebook_markdown}"
 
-    with (EVIDENCE / "contrastive_retrieval_summary.csv").open(
-        encoding="utf-8", newline=""
-    ) as stream:
-        rows = list(csv.DictReader(stream))
-    values = {
-        (row["dataset"], row["requested_model_id"]): float(
-            row["mean_normalized_k_recall_curve_auc"]
-        )
-        for row in rows
-    }
-    expected = {
-        ("pubmed", "cnn_contrastive_mixed"): 0.8076171875,
-        ("pubmed", "cnn_contrastive_pubmed"): 0.8046875,
-        ("nilearn", "cnn_contrastive_mixed"): 0.9072265625,
-        ("nilearn", "cnn_contrastive_nilearn"): 0.9072265625,
-        ("neurovault", "cnn_contrastive_mixed"): 0.8505859375,
-        ("neurovault", "cnn_contrastive_neurovault"): 0.845703125,
-    }
-    assert {key: values[key] for key in expected} == expected
+    for value in ("0.807617", "0.804688", "0.907227", "0.850586", "0.845703"):
+        assert value in decision_record
+    assert "32 test examples per domain" in guide
+    assert "mixed baseline as the safe default" in guide
+    assert "do not establish universal superiority" in guide
+    assert "artifacts/contrastive_retrieval" not in decision_record
 
 
 def test_historical_cnn_notebooks_were_moved_out_of_experiments():

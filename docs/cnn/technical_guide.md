@@ -140,7 +140,7 @@ The preserved executed contrastive ablation evaluated 32 test examples per domai
 | Nilearn | 0.907227 | 0.907227 |
 | NeuroVault | 0.850586 | 0.845703 |
 
-These limited results motivate the mixed baseline as the safe default: it is slightly higher on PubMed and NeuroVault and tied on Nilearn. They do not establish universal superiority. The exact CSV, JSON, recall curves, and plots are preserved under `evaluation/artifacts/contrastive_retrieval/`.
+These limited results motivate the mixed baseline as the safe default: it is slightly higher on PubMed and NeuroVault and tied on Nilearn. They do not establish universal superiority. Fine-tuning therefore remains available as an explicit opt-in rather than the default.
 
 Use `default_comparison_matrix(...)` and the three `evaluate_*_comparison(...)` functions for current MLP/CNN comparisons. Each runtime is resolved independently, missing resources are recorded in the manifest instead of aborting the matrix, and metrics declare whether they are in native CNN volume space or the MLP masker flat-map space.
 
