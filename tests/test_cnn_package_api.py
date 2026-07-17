@@ -82,8 +82,6 @@ def test_cnn_autoencoder_loader_uses_fixed_repo_and_restricted_unpickler(monkeyp
 
     monkeypatch.setattr(rr, "_download_from_hf", fake_download)
     monkeypatch.setattr(torch, "load", fake_torch_load)
-    rr._load_cnn_autoencoder.cache_clear()
-
     model = rr._load_cnn_autoencoder("mixed")
 
     assert tuple(model(torch.zeros(1, 1, 8, 8, 8)).shape) == (1, 1, 8, 8, 8)

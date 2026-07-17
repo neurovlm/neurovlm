@@ -54,18 +54,42 @@ result = nvlm.brain(load_latent("networks_neuro")["Du"]["AUD"]).to_text()
 result.top_k(5).query("cosine_similarity > 0.4") # return up to 5 examples per dataset
 ```
 
-Load the atlas-free CNN directly from the installed package:
+Select either model family with the structured inference API. CNN autoencoders
+always default to the mixed-source baseline; domain-specific contrastive and
+text-to-brain heads use the mixed baseline unless `variant="finetuned"` is
+requested explicitly:
 
 ```python
-from neurovlm.models import load_model
+from neurovlm.runtime import load_pipeline
 
-autoencoder = load_model("autoencoder_cnn")
-contrastive = load_model("contrastive_cnn_pubmed")
-text_to_brain = load_model("text_to_brain_cnn_pubmed")
+autoencoder = load_pipeline(family="cnn", task="autoencoder")
+contrastive = load_pipeline(
+    family="cnn", task="contrastive", domain="pubmed"
+)
+text_to_brain = load_pipeline(
+    family="cnn", task="text_to_brain", domain="nilearn"
+)
+
+# The same task-level surface loads a standardized local training run.
+local = load_pipeline(
+    family="cnn", task="contrastive", domain="pubmed",
+    from_run="runs/<run-id>",
+)
 ```
 
-See the atlas-free CNN tutorial for MLP/CNN reconstruction, retrieval, and
-inference-speed examples.
+Training uses typed configs and automatically writes reproducible config,
+provenance, best/last checkpoints, metric CSVs, plots, and logs:
+
+```python
+from neurovlm.training import ContrastiveTrainConfig, train_contrastive
+
+result = train_contrastive(ContrastiveTrainConfig(domain="neurovault"))
+print(result.run_dir / "metrics/history.csv")
+```
+
+See the atlas-free CNN tutorial and technical guide for all PubMed, Nilearn,
+and NeuroVault switches; MLP/CNN reconstruction, retrieval, and generation;
+resume; and explicit local-run chaining.
 
 ## Documentation
 

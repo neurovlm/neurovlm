@@ -65,6 +65,8 @@ __all__ = [
     "_load_neurovault_images",
     "_load_pubmed_images",
     "_load_atlas_free_cnn_dataset",
+    "_load_atlas_free_cnn_split_path",
+    "_load_atlas_free_cnn_split_rows",
     "_load_atlas_free_cnn_volumes",
     "_load_atlas_free_cnn_rows",
     "_load_atlas_free_cnn_text_pairs",
@@ -95,6 +97,11 @@ PROJECTION_HEADS_REPO_ID = "neurovlm/ProjectionHeads"
 NEURO_QFORMER_REPO_ID = "neurovlm/NeuroQformer"
 NEURO_ADAPTER_REPO_ID = "neurovlm/NeuroAdapter"
 ATLAS_FREE_CNN_DATASET_REPO = "neurovlm/atlas_free_cnn_dataset"
+ATLAS_FREE_CNN_SPLIT_FILENAMES = {
+    "train": "splits/train.jsonl",
+    "val": "splits/val.jsonl",
+    "test": "splits/test.jsonl",
+}
 ATLAS_FREE_CNN_MODEL_REPO_ID = "neurovlm/3d_cnn"
 ALE_ONLY_CACHE_FILENAMES = {
     "atlas_free": "atlas_free_4mm_fwhm9_crop_float16.pt",
@@ -725,6 +732,41 @@ def _load_atlas_free_cnn_volumes() -> dict:
     return payload
 
 
+@lru_cache(maxsize=3)
+def _load_atlas_free_cnn_split_path(split: str) -> str:
+    """Resolve a published atlas-free CNN split through the HF cache."""
+
+    split = str(split).lower()
+    if split not in ATLAS_FREE_CNN_SPLIT_FILENAMES:
+        expected = ", ".join(ATLAS_FREE_CNN_SPLIT_FILENAMES)
+        raise ValueError(f"Unknown atlas-free CNN split {split!r}; expected one of: {expected}.")
+    return _download_from_hf(
+        ATLAS_FREE_CNN_DATASET_REPO,
+        ATLAS_FREE_CNN_SPLIT_FILENAMES[split],
+        repo_type="dataset",
+    )
+
+
+@lru_cache(maxsize=3)
+def _load_atlas_free_cnn_split_rows(split: str) -> tuple[dict[str, Any], ...]:
+    """Load a published atlas-free CNN JSONL split from Hugging Face."""
+
+    path = Path(_load_atlas_free_cnn_split_path(split))
+    rows: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid JSON in {path} at line {line_number}.") from exc
+            if not isinstance(row, dict):
+                raise TypeError(f"Expected an object in {path} at line {line_number}.")
+            rows.append(row)
+    return tuple(rows)
+
+
 @lru_cache(maxsize=1)
 def _load_atlas_free_cnn_rows() -> pd.DataFrame:
     """Load map-level atlas-free CNN metadata from HuggingFace."""
@@ -1205,9 +1247,13 @@ def _load_trusted_cnn_checkpoint(filename: str) -> dict[str, Any]:
     return payload
 
 
-@lru_cache(maxsize=4)
 def _load_cnn_autoencoder(variant: str = "mixed") -> torch.nn.Module:
-    """Load a pretrained atlas-free CNN autoencoder by domain variant."""
+    """Load a fresh pretrained atlas-free CNN autoencoder by domain variant.
+
+    Hugging Face caches the immutable checkpoint file.  The trainable module
+    itself is intentionally not cached so callers cannot mutate shared model
+    state across inference or fine-tuning runs.
+    """
 
     if variant not in CNN_AUTOENCODER_FILENAMES:
         raise ValueError(
@@ -1218,9 +1264,8 @@ def _load_cnn_autoencoder(variant: str = "mixed") -> torch.nn.Module:
     return autoencoder_from_payload(_load_trusted_cnn_checkpoint(CNN_AUTOENCODER_FILENAMES[variant]))
 
 
-@lru_cache(maxsize=6)
 def _load_cnn_contrastive(variant: str = "pubmed") -> torch.nn.Module:
-    """Load a pretrained Stage 3 CNN brain/text contrastive model."""
+    """Load a fresh pretrained Stage 3 CNN brain/text contrastive model."""
 
     if variant not in CNN_CONTRASTIVE_FILENAMES:
         raise ValueError(
@@ -1231,9 +1276,8 @@ def _load_cnn_contrastive(variant: str = "pubmed") -> torch.nn.Module:
     return contrastive_from_payload(_load_trusted_cnn_checkpoint(CNN_CONTRASTIVE_FILENAMES[variant]))
 
 
-@lru_cache(maxsize=6)
 def _load_cnn_text_to_brain(variant: str = "pubmed") -> torch.nn.Module:
-    """Load a pretrained Stage 4 CNN text-to-brain generator."""
+    """Load a fresh pretrained Stage 4 CNN text-to-brain generator."""
 
     if variant not in CNN_T2B_FILENAMES:
         raise ValueError(

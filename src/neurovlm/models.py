@@ -5,6 +5,16 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from neurovlm.model_registry import (
+    ModelDomain,
+    ModelFamily,
+    ModelLoader,
+    ModelSpec,
+    ModelTask,
+    ModelVariant,
+    resolve_model_spec,
+)
+
 class NormalizeLayer(nn.Module):
     def forward(self, x):
         return F.normalize(x, dim=1)
@@ -365,67 +375,88 @@ class ConceptClf(nn.Module):
         raise NotImplementedError
 
 
-# Unified interface for all datasets
-def load_model(name: str):
-    """Alias to .from_pretrained methods in model classes.
+# Unified interface for all packaged models
+def _load_resolved_model(spec: ModelSpec):
+    """Dispatch a resolved model specification to its resource loader."""
+
+    if spec.loader is ModelLoader.CNN_AUTOENCODER:
+        from neurovlm.retrieval_resources import _load_cnn_autoencoder
+
+        return _load_cnn_autoencoder(spec.loader_variant)
+    if spec.loader is ModelLoader.CNN_CONTRASTIVE:
+        from neurovlm.retrieval_resources import _load_cnn_contrastive
+
+        return _load_cnn_contrastive(spec.loader_variant)
+    if spec.loader is ModelLoader.CNN_TEXT_TO_BRAIN:
+        from neurovlm.retrieval_resources import _load_cnn_text_to_brain
+
+        return _load_cnn_text_to_brain(spec.loader_variant)
+    if spec.loader is ModelLoader.MLP_TEXT_INFONCE:
+        return ProjHead().from_pretrained("text_infonce")
+    if spec.loader is ModelLoader.MLP_IMAGE_INFONCE:
+        return ProjHead().from_pretrained("image_infonce")
+    if spec.loader is ModelLoader.MLP_TEXT_MSE:
+        return ProjHead().from_pretrained("text_mse")
+    if spec.loader is ModelLoader.MLP_AUTOENCODER:
+        return NeuroAutoEncoder.from_pretrained()
+    if spec.loader is ModelLoader.MLP_SPECTER:
+        return Specter()
+    if spec.loader is ModelLoader.MLP_NEURO_QFORMER:
+        from neurovlm.retrieval_resources import _load_neuro_qformer
+
+        return _load_neuro_qformer()
+    if spec.loader is ModelLoader.MLP_NEURO_ADAPTER:
+        from neurovlm.retrieval_resources import _load_neuro_adapter
+
+        return _load_neuro_adapter()
+    raise RuntimeError(f"Model registry contains unsupported loader {spec.loader!r}")
+
+
+def load_model(
+    name: str | None = None,
+    *,
+    family: ModelFamily | str = ModelFamily.MLP,
+    task: ModelTask | str | None = None,
+    domain: ModelDomain | str | None = None,
+    variant: ModelVariant | str | None = None,
+):
+    """Load a packaged model by legacy name or structured fields.
 
     Parameters
     ----------
-    name: str
-        Name of a packaged model. CNN names use ``autoencoder_cnn`` (mixed
-        pretraining), ``autoencoder_cnn_{domain}``,
-        ``contrastive_cnn_{variant}``, or ``text_to_brain_cnn_{variant}``.
+    name : str, optional
+        Existing packaged-model name.  Every name supported before the
+        structured API remains an alias to the same checkpoint.
+    family : {"mlp", "cnn"}, default: "mlp"
+        Architecture family.  MLP remains the global default.
+    task : str, optional
+        Structured task identifier. Required when ``name`` is omitted.
+    domain : {"pubmed", "nilearn", "neurovault"}, optional
+        Required for CNN contrastive/text-to-brain models and for fine-tuned
+        CNN autoencoders.
+    variant : str, optional
+        CNN models default to ``mixed_baseline``. Domain-specialized CNN
+        checkpoints require the explicit value ``finetuned``.
 
     Returns
     -------
     model
+
+    Examples
+    --------
+    Existing calls continue to work:
+
+    >>> model = load_model("autoencoder")
+
+    Structured CNN selection defaults to the mixed baseline:
+
+    >>> model = load_model(family="cnn", task="contrastive", domain="nilearn")
     """
-    if name == "autoencoder_cnn":
-        from neurovlm.retrieval_resources import _load_cnn_autoencoder
-
-        return _load_cnn_autoencoder("mixed")
-    if name.startswith("autoencoder_cnn_"):
-        from neurovlm.retrieval_resources import _load_cnn_autoencoder
-
-        return _load_cnn_autoencoder(name.removeprefix("autoencoder_cnn_"))
-    if name.startswith("contrastive_cnn_"):
-        from neurovlm.retrieval_resources import _load_cnn_contrastive
-
-        return _load_cnn_contrastive(name.removeprefix("contrastive_cnn_"))
-    if name.startswith("text_to_brain_cnn_"):
-        from neurovlm.retrieval_resources import _load_cnn_text_to_brain
-
-        return _load_cnn_text_to_brain(name.removeprefix("text_to_brain_cnn_"))
-
-    match name:
-        case "proj_head_text_infonce":
-            return ProjHead().from_pretrained("text_infonce")
-        case "proj_head_image_infonce":
-            return ProjHead().from_pretrained("image_infonce")
-        case "proj_head_text_mse":
-            return ProjHead().from_pretrained("text_mse")
-        case "autoencoder":
-            return NeuroAutoEncoder.from_pretrained()
-        case "specter":
-            return Specter()
-        case "neuro_qformer":
-            from neurovlm.retrieval_resources import _load_neuro_qformer
-            return _load_neuro_qformer()
-        case "neuro_adapter":
-            from neurovlm.retrieval_resources import _load_neuro_adapter
-            return _load_neuro_adapter()
-        case _:
-            valid_names = [
-                "proj_head_text_infonce",
-                "proj_head_image_infonce",
-                "proj_head_text_mse",
-                "autoencoder",
-                "specter",
-                "neuro_qformer",
-                "neuro_adapter",
-                "autoencoder_cnn",
-                "autoencoder_cnn_{mixed|pubmed|nilearn|neurovault}",
-                "contrastive_cnn_{variant}",
-                "text_to_brain_cnn_{variant}",
-            ]
-            raise ValueError(f"{name} not in {valid_names}")
+    spec = resolve_model_spec(
+        name,
+        family=family,
+        task=task,
+        domain=domain,
+        variant=variant,
+    )
+    return _load_resolved_model(spec)

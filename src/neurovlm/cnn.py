@@ -37,20 +37,31 @@ def _as_batch(x: torch.Tensor, *, expected_ndim: int) -> torch.Tensor:
 
 
 def _autoencoder_arch(payload: dict[str, Any]) -> dict[str, Any]:
+    recorded_arch = payload.get("architecture", {}) if isinstance(payload, dict) else {}
     config = payload.get("config", {}) if isinstance(payload, dict) else {}
     model_config = config.get("model", {}) if isinstance(config, dict) else {}
-    target_shape = payload.get("target_shape") or config.get("target_shape") or ATLAS_FREE_VOLUME_SHAPE
+    target_shape = (
+        recorded_arch.get("output_shape")
+        or recorded_arch.get("target_shape")
+        or payload.get("target_shape")
+        or config.get("target_shape")
+        or ATLAS_FREE_VOLUME_SHAPE
+    )
     return {
-        "latent_dim": int(model_config.get("latent_dim", payload.get("latent_dim", 384))),
-        "base_channels": int(model_config.get("base_channels", 64)),
-        "num_blocks": int(model_config.get("num_blocks", 4)),
-        "encoder_arch": str(model_config.get("encoder_arch", "plain")),
-        "dropout": float(model_config.get("dropout", 0.1)),
-        "norm": str(model_config.get("norm", "group")),
-        "pooling": str(model_config.get("pooling", "max")),
-        "blocks_per_stage": int(model_config.get("blocks_per_stage", 2)),
-        "multi_scale": bool(model_config.get("multi_scale", False)),
-        "global_context": str(model_config.get("global_context", "none")),
+        "latent_dim": int(
+            recorded_arch.get(
+                "latent_dim", model_config.get("latent_dim", payload.get("latent_dim", 384))
+            )
+        ),
+        "base_channels": int(recorded_arch.get("base_channels", model_config.get("base_channels", 64))),
+        "num_blocks": int(recorded_arch.get("num_blocks", model_config.get("num_blocks", 4))),
+        "encoder_arch": str(recorded_arch.get("encoder_arch", model_config.get("encoder_arch", "plain"))),
+        "dropout": float(recorded_arch.get("dropout", model_config.get("dropout", 0.1))),
+        "norm": str(recorded_arch.get("norm", model_config.get("norm", "group"))),
+        "pooling": str(recorded_arch.get("pooling", model_config.get("pooling", "max"))),
+        "blocks_per_stage": int(recorded_arch.get("blocks_per_stage", model_config.get("blocks_per_stage", 2))),
+        "multi_scale": bool(recorded_arch.get("multi_scale", model_config.get("multi_scale", False))),
+        "global_context": str(recorded_arch.get("global_context", model_config.get("global_context", "none"))),
         "target_shape": tuple(int(value) for value in target_shape),
     }
 
@@ -72,9 +83,17 @@ def autoencoder_from_payload(payload: dict[str, Any]) -> ALE3DCNNAutoEncoder:
         multi_scale=architecture["multi_scale"],
         global_context=architecture["global_context"],
     )
-    state = payload.get("model") or payload.get("autoencoder") or payload.get("state_dict")
+    state = (
+        payload.get("model_state_dict")
+        or payload.get("model")
+        or payload.get("autoencoder")
+        or payload.get("state_dict")
+    )
     if not isinstance(state, dict):
-        raise KeyError("CNN autoencoder checkpoint must contain 'model', 'autoencoder', or 'state_dict'")
+        raise KeyError(
+            "CNN autoencoder checkpoint must contain 'model_state_dict', 'model', "
+            "'autoencoder', or 'state_dict'"
+        )
     model.load_state_dict(state, strict=True)
     return _freeze(model)
 
@@ -105,20 +124,37 @@ class CNNContrastiveModel(nn.Module):
 
 def _stage3_encoder(payload: dict[str, Any]) -> nn.Module:
     config = payload.get("config", {}) if isinstance(payload, dict) else {}
-    model_name = config.get("model", "ale_3dcnn")
+    architecture = payload.get("architecture", {}) if isinstance(payload, dict) else {}
+    if not isinstance(config, dict):
+        config = {}
+    if not isinstance(architecture, dict):
+        architecture = {}
+    # Standardized checkpoints keep reload-critical fields in architecture;
+    # historical Stage 3 payloads kept the same values directly in config.
+    merged = {**config, **architecture}
+    model_name = merged.get("model", "ale_3dcnn")
+    if isinstance(model_name, dict):
+        model_name = model_name.get("name", "ale_3dcnn")
     common = {
-        "out_dim": int(config.get("out_dim", 384)),
-        "base_channels": int(config.get("base_channels", 64)),
-        "dropout": float(config.get("dropout", 0.1)),
+        "out_dim": int(merged.get("out_dim", merged.get("latent_dim", 384))),
+        "base_channels": int(merged.get("base_channels", 64)),
+        "dropout": float(merged.get("dropout", 0.1)),
+        "norm": str(merged.get("norm", "group")),
     }
     if model_name in {None, "", "ale_3dcnn"}:
-        return ALE3DCNNEncoder(num_blocks=int(config.get("num_blocks", 4)), **common)
+        return ALE3DCNNEncoder(
+            in_channels=int(merged.get("in_channels", 1)),
+            num_blocks=int(merged.get("num_blocks", 4)),
+            pooling=str(merged.get("pooling", "max")),
+            **common,
+        )
     if model_name == "ale_3dcnn_resnet":
         return ALEResNet3DEncoder(
-            num_stages=int(config.get("num_blocks", 4)),
-            blocks_per_stage=int(config.get("blocks_per_stage", 2)),
-            multi_scale=bool(config.get("multi_scale", False)),
-            global_context=str(config.get("global_context", "none")),
+            in_channels=int(merged.get("in_channels", 1)),
+            num_stages=int(merged.get("num_blocks", 4)),
+            blocks_per_stage=int(merged.get("blocks_per_stage", 2)),
+            multi_scale=bool(merged.get("multi_scale", False)),
+            global_context=str(merged.get("global_context", "none")),
             **common,
         )
     raise ValueError(f"Unknown Stage 3 CNN architecture {model_name!r}")
@@ -130,8 +166,30 @@ def contrastive_from_payload(payload: dict[str, Any]) -> CNNContrastiveModel:
     from neurovlm.models import ProjHead
 
     brain_encoder = _stage3_encoder(payload)
-    text_projection = ProjHead(latent_in_dim=768, hidden_dim=512, latent_out_dim=384)
-    brain_encoder.load_state_dict(payload["brain_encoder"], strict=True)
+    architecture = payload.get("architecture") or {}
+    text_projection = ProjHead(
+        latent_in_dim=int(architecture.get("text_in_dim", 768)),
+        hidden_dim=int(architecture.get("text_hidden_dim", 512)),
+        latent_out_dim=int(architecture.get("text_out_dim", 384)),
+    )
+    composite_state = payload.get("model_state_dict")
+    if isinstance(composite_state, dict):
+        model = CNNContrastiveModel(brain_encoder, text_projection)
+        try:
+            model.load_state_dict(composite_state, strict=True)
+        except RuntimeError as error:
+            raise ValueError(
+                f"Contrastive checkpoint weights do not match recorded architecture: {error}"
+            ) from error
+        return _freeze(model)
+
+    brain_state = payload.get("brain_encoder")
+    if not isinstance(brain_state, dict):
+        raise KeyError(
+            "CNN contrastive checkpoint must contain standardized 'model_state_dict' "
+            "or legacy 'brain_encoder' weights"
+        )
+    brain_encoder.load_state_dict(brain_state, strict=True)
     text_state = payload.get("text_proj") or payload.get("text_projection")
     if not isinstance(text_state, dict):
         raise KeyError("CNN contrastive checkpoint must contain 'text_proj' or 'text_projection'")
@@ -168,10 +226,25 @@ class CNNTextToBrainModel(nn.Module):
 
 
 def _stage4_state(payload: dict[str, Any]) -> dict[str, torch.Tensor]:
-    keys = ("generative_text_to_ae_latent", "text_projector", "text_projection", "model", "state_dict")
+    keys = (
+        "model_state_dict",
+        "generative_text_to_ae_latent",
+        "text_projector",
+        "text_projection",
+        "model",
+        "state_dict",
+    )
     for key in keys:
         state = payload.get(key)
         if isinstance(state, dict) and state and all(torch.is_tensor(value) for value in state.values()):
+            for prefix in ("text_projection.", "text_projector."):
+                selected = {
+                    name.removeprefix(prefix): value
+                    for name, value in state.items()
+                    if name.startswith(prefix)
+                }
+                if selected:
+                    return selected
             return state
     if payload and all(torch.is_tensor(value) for value in payload.values()):
         return payload
@@ -185,7 +258,10 @@ def text_to_brain_from_payload(
     """Construct a frozen Stage 4 generator from trusted checkpoint payloads."""
 
     config = payload.get("config", {}) if isinstance(payload, dict) else {}
+    architecture = payload.get("architecture", {}) if isinstance(payload, dict) else {}
     projection_config = config.get("generative_text_to_ae_latent", {}) if isinstance(config, dict) else {}
+    if not projection_config and isinstance(architecture, dict):
+        projection_config = architecture.get("text_projection", architecture)
     state = _stage4_state(payload)
     if not any(key.startswith("net.") for key in state):
         raise ValueError("Stage 4 checkpoint is not the retained GenerativeTextToAELatent architecture")

@@ -1,15 +1,7 @@
 """Tests for ALE 3D CNN models."""
 
-import sys
-from pathlib import Path
-
 import pytest
 import torch
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-THREEDCNN = REPO_ROOT / "experiments" / "3dcnn"
-if str(THREEDCNN) not in sys.path:
-    sys.path.insert(0, str(THREEDCNN))
 
 from neurovlm.ale_cnn import (
     ALE3DCNNAutoEncoder,
@@ -18,13 +10,6 @@ from neurovlm.ale_cnn import (
     ALEResNet3DEncoder,
     validate_retained_resnet_architecture,
 )
-
-
-def test_experiment_module_reexports_packaged_architecture():
-    from atlas_free_cnn.training.ale_cnn import ALE3DCNNAutoEncoder as ExperimentAutoEncoder
-
-    assert ExperimentAutoEncoder is ALE3DCNNAutoEncoder
-
 
 def test_ale_3dcnn_encoder_shape():
     model = ALE3DCNNEncoder(base_channels=4, num_blocks=2, out_dim=384)
