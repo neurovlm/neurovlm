@@ -108,6 +108,25 @@ def test_cnn_tutorial_visualizes_reconstruction_and_top_five_image_to_text_resul
     assert 'set_title("Reconstructed")' in code
 
 
+def test_comparison_notebooks_include_requested_qualitative_examples():
+    autoencoder = _notebook_code("autoencoder_comparison.ipynb")
+    assert "VISUAL_EXAMPLES_PER_DOMAIN = 3" in autoencoder
+    assert "_first_nonempty_examples" in autoencoder
+    assert 'plot_reconstruction_domain("pubmed")' in autoencoder
+    assert 'plot_reconstruction_domain("nilearn")' in autoencoder
+    assert 'plot_reconstruction_domain("neurovault")' in autoencoder
+    assert "fig, axes = plt.subplots(count, 3" in autoencoder
+
+    text_to_brain = _notebook_code("text_to_brain_comparison.ipynb")
+    assert "EXAMPLES_PER_DOMAIN = 3" in text_to_brain
+    assert "generated_examples[domain] = generated" in text_to_brain
+    assert "paired_originals[domain]" in text_to_brain
+    assert "_first_nonempty_rows" in text_to_brain
+    assert "paired_slice_specs[domain]" in text_to_brain
+    assert "paired_text" in text_to_brain
+    assert "len(DOMAINS), EXAMPLES_PER_DOMAIN" in text_to_brain
+
+
 def test_historical_cnn_notebooks_were_moved_out_of_experiments():
     assert not list((ROOT / "experiments/3dcnn").glob("*.ipynb"))
     assert not list((ROOT / "experiments/3dcnn/model_comparison").glob("*.ipynb"))
