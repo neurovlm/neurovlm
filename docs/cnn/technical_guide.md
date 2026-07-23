@@ -144,6 +144,12 @@ These limited results motivate the mixed baseline as the safe default: it is sli
 
 Use `default_comparison_matrix(...)` and the three `evaluate_*_comparison(...)` functions for current MLP/CNN comparisons. Each runtime is resolved independently, missing resources are recorded in the manifest instead of aborting the matrix, and metrics declare whether they are in native CNN volume space or the MLP masker flat-map space.
 
+Current comparisons use the explicit `paired_atlas_free` protocol: MLP and CNN models receive the same atlas-free map/text rows, then each family uses its declared brain representation. Contrastive and text-to-brain MLP rows re-encode raw positive text with the released SPECTER2 `adhoc_query` convention; CNN rows use the published empty-string-centered normalized cache. These fields are recorded in every result row.
+
+The comparison notebooks default to the complete published test split for each domain: 3,066 PubMed, 79 Nilearn, and 202 NeuroVault examples. Set `LIMIT_PER_DOMAIN` to an integer only for an explicitly labeled quick run. Family-native MLP text encoding is batched, as is model inference, so the full PubMed evaluation does not require encoding all texts simultaneously.
+
+This protocol distinction explains an apparent PubMed MLP contrastive regression. The historical MLP plot reported mean normalized recall-curve AUC `0.831055` for 32 examples from the MLP-native PubMed resource and its official test split. The first integrated paired run reported `0.718262` on 32 different examples from the atlas-free unified test split and incorrectly shared the CNN-oriented cached text inputs with the MLP row. Restoring family-native MLP text preprocessing raises the verified paired result to `0.744629`; the remaining difference from `0.831055` is expected because the cohort is still different. The AUC implementation did not change. Likewise, older PubMed MLP autoencoder runs used the MLP-native image resource rather than the paired atlas-free subset. The older computations were valid within their native protocols; the presentation was misleading when it implied a direct paired comparison.
+
 ## Notebook map
 
 - `training/autoencoder.ipynb`: mixed pretraining, explicit fine-tuning, resume, and artifacts.

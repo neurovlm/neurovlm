@@ -27,7 +27,10 @@ class _Maps(Dataset):
             self.rows.append({
                 "volume": torch.rand(1, 36, 45, 38, generator=torch.Generator().manual_seed(index)),
                 "map_id": f"map-{index}",
-                "positive_texts": [{"text_id": f"text-{index}"}],
+                "positive_texts": [{
+                    "text_id": f"text-{index}",
+                    "text": f"raw positive text {index}",
+                }],
                 "metadata": {
                     "source": source,
                     # These historical fields must be ignored by comparison.
@@ -143,6 +146,7 @@ def test_reconstruction_returns_standard_summary_source_and_sample_rows(_offline
     assert {row["comparison_space"] for row in result.summary} == {
         "mlp_masker_flatmap", "native_atlas_free_volume"
     }
+    assert {row["comparison_protocol"] for row in result.summary} == {"paired_atlas_free"}
     assert all("reconstruction_mse" in row and "top5_dice" in row for row in result.summary)
     assert all(row["status"] == "resolved" for row in result.manifest)
 
@@ -172,6 +176,38 @@ def test_contrastive_reuses_bidirectional_metrics_and_curves(_offline):
     assert "i2t_mrr" in result.summary[0]
     assert len(result.recall_curves) == 3
     assert len(result.by_sample) == 3
+
+
+def test_mlp_comparison_reencodes_raw_text_with_family_native_preprocessing(_offline):
+    encoded_texts = []
+    encoded_batch_sizes = []
+
+    def encode(texts):
+        encoded_texts.extend(texts)
+        encoded_batch_sizes.append(len(texts))
+        embeddings = torch.zeros(len(texts), 768)
+        embeddings[:, 0] = 1
+        return embeddings
+
+    result = evaluate_contrastive_comparison(
+        selections=(ComparisonSelection("mlp", "contrastive"),),
+        data=_Maps(),
+        lookup=_lookup(),
+        mlp_text_encoder=encode,
+        batch_size=2,
+    )
+
+    assert encoded_texts == [
+        "raw positive text 0",
+        "raw positive text 1",
+        "raw positive text 2",
+    ]
+    assert encoded_batch_sizes == [2, 1]
+    assert result.summary[0]["comparison_protocol"] == "paired_atlas_free"
+    assert (
+        result.summary[0]["text_preprocessing"]
+        == "specter2_adhoc_query_orthogonalized_then_l2"
+    )
 
 
 def test_text_to_brain_returns_generation_metrics_without_reading_local_paths(_offline):

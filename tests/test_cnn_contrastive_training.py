@@ -13,6 +13,7 @@ from neurovlm.ale_cnn import ALE3DCNNAutoEncoder
 from neurovlm.atlas_free_text import (
     AtlasFreeContrastiveCollator,
     AtlasFreeTextEmbeddingLookup,
+    primary_positive_text,
     primary_positive_text_id,
 )
 from neurovlm.cnn import CNNContrastiveModel
@@ -93,6 +94,7 @@ def test_lookup_is_id_strict_linear_safe_and_numpy_payload_compatible() -> None:
     lookup = _lookup()
     item = _Pairs("train")[0]
     assert primary_positive_text_id(item) == "text-0"
+    assert primary_positive_text(item) == "text 0"
     assert torch.equal(lookup["text-0"], torch.nn.functional.one_hot(torch.tensor(0), 768).float())
     payload_lookup = AtlasFreeTextEmbeddingLookup.from_payload(
         {"embeddings": lookup.embeddings, "text_ids": np.asarray(lookup.text_ids)}

@@ -21,7 +21,12 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 
 from neurovlm.atlas_free_dataset import AtlasFreeCNNDataProvider, canonical_atlas_free_domain
-from neurovlm.atlas_free_text import AtlasFreeContrastiveCollator, AtlasFreeTextEmbeddingLookup
+from neurovlm.atlas_free_text import (
+    AtlasFreeContrastiveCollator,
+    AtlasFreeTextEmbeddingLookup,
+    primary_positive_text,
+    primary_positive_text_id,
+)
 from neurovlm.cnn import atlas_free_volume_to_mlp_flat
 from neurovlm.evaluation.contrastive import evaluate_contrastive
 from neurovlm.evaluation.spatial import reconstruction_metrics
@@ -229,6 +234,22 @@ def _space(runtime: NeuroVLMRuntime) -> str:
     return "mlp_masker_flatmap" if runtime.metadata.family == "mlp" else "native_atlas_free_volume"
 
 
+def _comparison_base(
+    selection: ComparisonSelection,
+    runtime: NeuroVLMRuntime,
+    *,
+    text_preprocessing: str | None = None,
+) -> dict[str, Any]:
+    base = {
+        **_base(selection, runtime),
+        "comparison_protocol": "paired_atlas_free",
+        "comparison_space": _space(runtime),
+    }
+    if text_preprocessing is not None:
+        base["text_preprocessing"] = text_preprocessing
+    return base
+
+
 def _mean_rows(rows: Sequence[Mapping[str, Any]]) -> dict[str, float]:
     names = {
         key for row in rows for key, value in row.items()
@@ -305,7 +326,7 @@ def evaluate_reconstruction_comparison(
         rows = []
         selected_data = _DomainView(dataset, selection.evaluation_domain)
         if not len(selected_data):
-            base = {**_base(selection, runtime), "comparison_space": _space(runtime)}
+            base = _comparison_base(selection, runtime)
             summary.append({**base, "status": "unsupported_dataset", "reason":
                             f"No samples for evaluation domain {selection.evaluation_domain!r}", "n": 0})
             continue
@@ -318,7 +339,7 @@ def evaluate_reconstruction_comparison(
             for index in range(len(target)):
                 metrics = reconstruction_metrics(prediction[index:index + 1], target[index:index + 1])
                 rows.append({"sample_id": batch["map_id"][index], "source": batch["source"][index], **metrics})
-        base = {**_base(selection, runtime), "comparison_space": _space(runtime)}
+        base = _comparison_base(selection, runtime)
         summary.append({**base, "n": len(rows), **_mean_rows(rows)})
         by_source.extend(_group(rows, base))
         by_sample.extend({**base, **row} for row in rows)
@@ -337,19 +358,72 @@ class _RuntimeContrastive(nn.Module):
         return self.runtime.encode_brain(brain), self.runtime.encode_text(text)
 
 
+def _family_text_lookup(
+    data: _DomainView,
+    encoder: Callable[[Sequence[str]], Tensor],
+    *,
+    batch_size: int,
+) -> AtlasFreeTextEmbeddingLookup:
+    """Encode paired rows in bounded batches with the released MLP convention."""
+
+    rows = data.rows
+    text_ids = [primary_positive_text_id(row) for row in rows]
+    texts = [primary_positive_text(row) for row in rows]
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    batches = []
+    for start in range(0, len(texts), batch_size):
+        text_batch = texts[start:start + batch_size]
+        encoded = torch.as_tensor(
+            encoder(text_batch), dtype=torch.float32
+        ).detach().cpu()
+        if encoded.ndim != 2 or encoded.shape != (len(text_batch), 768):
+            raise ValueError(
+                "MLP text encoder must return one 768-dimensional embedding per input; "
+                f"got {tuple(encoded.shape)} for {len(text_batch)} texts"
+            )
+        batches.append(encoded)
+    embeddings = torch.cat(batches)
+    embeddings = F.normalize(embeddings, dim=1)
+    return AtlasFreeTextEmbeddingLookup(
+        embeddings,
+        text_ids,
+        {
+            "source": "family_native_runtime_encoding",
+            "text_preprocessing": "specter2_adhoc_query_orthogonalized_then_l2",
+        },
+    )
+
+
+def _default_mlp_text_encoder(device: str | torch.device) -> Callable[[Sequence[str]], Tensor]:
+    """Construct the MLP family's released SPECTER2 query encoder lazily."""
+
+    from neurovlm.models import Specter
+
+    return Specter(device=str(device))
+
+
 def evaluate_contrastive_comparison(
     *,
     selections: Sequence[ComparisonSelection] | None = None,
     data: Dataset | None = None,
     provider: AtlasFreeCNNDataProvider | None = None,
     lookup: AtlasFreeTextEmbeddingLookup | None = None,
+    mlp_text_encoder: Callable[[Sequence[str]], Tensor] | None = None,
     split: str = "test",
     domains: Iterable[str] = ("pubmed", "nilearn", "neurovault"),
     device: str | torch.device = "cpu",
     batch_size: int = 64,
     include_finetuned: bool = False,
 ) -> ComparisonResult:
-    """Evaluate full-split bidirectional retrieval for MLP and CNN models."""
+    """Evaluate paired full-split retrieval with family-native text preprocessing.
+
+    Every family sees the same atlas-free map/text rows. CNN models consume the
+    immutable published normalized cache; MLP models re-encode the raw positive
+    text with their released SPECTER2 ``adhoc_query`` convention. This paired
+    protocol is intentionally distinct from historical family-native benchmarks
+    that used different sample cohorts.
+    """
 
     chosen = tuple(selections or default_comparison_matrix(
         "contrastive", domains=domains, include_finetuned=include_finetuned
@@ -357,23 +431,49 @@ def evaluate_contrastive_comparison(
     if any(item.task != "contrastive" for item in chosen):
         raise ValueError("All retrieval selections must use task='contrastive'")
     dataset = _data(data, provider, split)
-    lookup = lookup or AtlasFreeTextEmbeddingLookup.published()
+    cnn_lookup = lookup
     loaded, manifest = _load_runtimes(chosen, device)
     summary: list[Mapping[str, Any]] = _skipped(manifest)
     by_source: list[Mapping[str, Any]] = []
     by_sample: list[Mapping[str, Any]] = []
     curves: list[Mapping[str, Any]] = []
+    resolved_mlp_text_encoder = mlp_text_encoder
     for selection, runtime in loaded:
         selected_data = _DomainView(dataset, selection.evaluation_domain)
+        text_preprocessing = (
+            "specter2_adhoc_query_orthogonalized_then_l2"
+            if runtime.metadata.family == "mlp"
+            else "empty_string_centered_l2_unit_normalized"
+        )
         if not len(selected_data):
-            base = {**_base(selection, runtime), "comparison_space": _space(runtime)}
+            base = _comparison_base(
+                selection, runtime, text_preprocessing=text_preprocessing
+            )
             summary.append({**base, "status": "unsupported_dataset", "reason":
                             f"No samples for evaluation domain {selection.evaluation_domain!r}", "n": 0})
             continue
+        if runtime.metadata.family == "mlp":
+            if resolved_mlp_text_encoder is None:
+                resolved_mlp_text_encoder = _default_mlp_text_encoder(device)
+            runtime_lookup = _family_text_lookup(
+                selected_data,
+                resolved_mlp_text_encoder,
+                batch_size=batch_size,
+            )
+        else:
+            if cnn_lookup is None:
+                cnn_lookup = AtlasFreeTextEmbeddingLookup.published()
+            runtime_lookup = cnn_lookup
         result = evaluate_contrastive(
-            _RuntimeContrastive(runtime), selected_data, lookup=lookup, device=device, batch_size=batch_size
+            _RuntimeContrastive(runtime),
+            selected_data,
+            lookup=runtime_lookup,
+            device=device,
+            batch_size=batch_size,
         )
-        base = {**_base(selection, runtime), "comparison_space": _space(runtime)}
+        base = _comparison_base(
+            selection, runtime, text_preprocessing=text_preprocessing
+        )
         summary.append({**base, "n": result.n, **result.summary})
         by_source.extend({**base, **row} for row in result.by_source)
         curves.extend({**base, **row} for row in result.recall_curves)
@@ -394,13 +494,14 @@ def evaluate_text_to_brain_comparison(
     data: Dataset | None = None,
     provider: AtlasFreeCNNDataProvider | None = None,
     lookup: AtlasFreeTextEmbeddingLookup | None = None,
+    mlp_text_encoder: Callable[[Sequence[str]], Tensor] | None = None,
     split: str = "test",
     domains: Iterable[str] = ("pubmed", "nilearn", "neurovault"),
     device: str | torch.device = "cpu",
     batch_size: int = 64,
     include_finetuned: bool = False,
 ) -> ComparisonResult:
-    """Compare generated maps in native CNN or MLP-masker flat space."""
+    """Compare generated maps with paired rows and family-native text inputs."""
 
     chosen = tuple(selections or default_comparison_matrix(
         "text_to_brain", domains=domains, include_finetuned=include_finetuned
@@ -408,21 +509,41 @@ def evaluate_text_to_brain_comparison(
     if any(item.task != "text_to_brain" for item in chosen):
         raise ValueError("All generation selections must use task='text_to_brain'")
     dataset = _data(data, provider, split)
-    lookup = lookup or AtlasFreeTextEmbeddingLookup.published()
+    cnn_lookup = lookup
     loaded, manifest = _load_runtimes(chosen, device)
     summary: list[Mapping[str, Any]] = _skipped(manifest)
     by_source: list[Mapping[str, Any]] = []
     by_sample: list[Mapping[str, Any]] = []
+    resolved_mlp_text_encoder = mlp_text_encoder
     for selection, runtime in loaded:
         rows = []
         selected_data = _DomainView(dataset, selection.evaluation_domain)
+        text_preprocessing = (
+            "specter2_adhoc_query_orthogonalized_then_l2"
+            if runtime.metadata.family == "mlp"
+            else "empty_string_centered_l2_unit_normalized"
+        )
         if not len(selected_data):
-            base = {**_base(selection, runtime), "comparison_space": _space(runtime)}
+            base = _comparison_base(
+                selection, runtime, text_preprocessing=text_preprocessing
+            )
             summary.append({**base, "status": "unsupported_dataset", "reason":
                             f"No samples for evaluation domain {selection.evaluation_domain!r}", "n": 0})
             continue
+        if runtime.metadata.family == "mlp":
+            if resolved_mlp_text_encoder is None:
+                resolved_mlp_text_encoder = _default_mlp_text_encoder(device)
+            runtime_lookup = _family_text_lookup(
+                selected_data,
+                resolved_mlp_text_encoder,
+                batch_size=batch_size,
+            )
+        else:
+            if cnn_lookup is None:
+                cnn_lookup = AtlasFreeTextEmbeddingLookup.published()
+            runtime_lookup = cnn_lookup
         loader = DataLoader(selected_data, batch_size=batch_size, shuffle=False,
-                            collate_fn=AtlasFreeContrastiveCollator(lookup, (36, 45, 38)))
+                            collate_fn=AtlasFreeContrastiveCollator(runtime_lookup, (36, 45, 38)))
         for batch in loader:
             target = batch["volume"]
             if runtime.metadata.family == "mlp":
@@ -434,7 +555,9 @@ def evaluate_text_to_brain_comparison(
                 rows.append({"sample_id": str(batch["map_id"][index]),
                              "text_id": str(batch["text_id"][index]),
                              "source": str(batch["source"][index]), **metrics})
-        base = {**_base(selection, runtime), "comparison_space": _space(runtime)}
+        base = _comparison_base(
+            selection, runtime, text_preprocessing=text_preprocessing
+        )
         summary.append({**base, "n": len(rows), **_mean_rows(rows)})
         by_source.extend(_group(rows, base))
         by_sample.extend({**base, **row} for row in rows)

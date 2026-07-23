@@ -207,7 +207,15 @@ class Specter:
         disable_progress_bar()
 
         self.device = torch.device(device)
-        tokenizer = AutoTokenizer.from_pretrained(f'{model}_base')
+        # Prefer an existing Hugging Face cache without making a network HEAD
+        # request on every comparison run. Fall back to the normal download
+        # path when the tokenizer is not cached yet.
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                f'{model}_base', local_files_only=True
+            )
+        except Exception:
+            tokenizer = AutoTokenizer.from_pretrained(f'{model}_base')
         self.sep_token = tokenizer.sep_token
         self.tokenizer = lambda text : tokenizer(
             text,

@@ -102,6 +102,9 @@ ATLAS_FREE_CNN_SPLIT_FILENAMES = {
     "val": "val.jsonl",
     "test": "test.jsonl",
 }
+ATLAS_FREE_CNN_NORMALIZED_SPECTER2_FILENAME = (
+    "specter2_stage3_stage4_emptycentered_unitnorm.pt"
+)
 ATLAS_FREE_CNN_MODEL_REPO_ID = "neurovlm/3d_cnn"
 ALE_ONLY_CACHE_FILENAMES = {
     "atlas_free": "atlas_free_4mm_fwhm9_crop_float16.pt",
@@ -803,7 +806,7 @@ def _load_atlas_free_cnn_normalized_specter2_cache() -> dict:
 
     cache_path = _download_from_hf(
         ATLAS_FREE_CNN_DATASET_REPO,
-        "text_embeddings/specter2_stage3_stage4_emptycentered_unitnorm.pt",
+        ATLAS_FREE_CNN_NORMALIZED_SPECTER2_FILENAME,
     )
     payload = torch.load(cache_path, weights_only=False, map_location="cpu")
     if not isinstance(payload, dict) or not torch.is_tensor(payload.get("embeddings")):

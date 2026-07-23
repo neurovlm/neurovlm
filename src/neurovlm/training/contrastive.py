@@ -403,7 +403,7 @@ def train_contrastive(
         },
         resources={
             "dataset": "neurovlm/atlas_free_cnn_dataset",
-            "text_embeddings": "text_embeddings/specter2_stage3_stage4_emptycentered_unitnorm.pt",
+            "text_embeddings": "specter2_stage3_stage4_emptycentered_unitnorm.pt",
             "pretrained_text_projection": "proj_head_text_infonce",
         },
         initialization={

@@ -47,6 +47,8 @@ def _clear_resource_caches() -> None:
     rr._load_atlas_free_cnn_split_path.cache_clear()
     rr._load_atlas_free_cnn_split_rows.cache_clear()
     rr._load_atlas_free_cnn_volumes.cache_clear()
+    rr._load_atlas_free_cnn_normalized_specter2_cache.cache_clear()
+    rr._load_atlas_free_cnn_normalized_specter2_embeddings.cache_clear()
 
 
 def test_retrieval_resources_resolve_all_canonical_hf_split_paths(monkeypatch) -> None:
@@ -101,6 +103,39 @@ def test_default_dataset_uses_canonical_hf_resources_and_ignores_legacy_paths(
     assert torch.equal(item["volume"], payload["volumes"][1].float())
     assert item["metadata"]["tensor_path"].startswith("experiments/3dcnn/")
     assert item["positive_texts"] == dataset.positive_texts[0]
+
+
+def test_normalized_specter2_cache_uses_published_root_filename(
+    monkeypatch, tmp_path: Path
+) -> None:
+    cache_path = tmp_path / "specter2_stage3_stage4_emptycentered_unitnorm.pt"
+    embeddings = torch.zeros(2, 768)
+    embeddings[0, 0] = 1
+    embeddings[1, 1] = 1
+    torch.save(
+        {"embeddings": embeddings, "text_ids": ["text-a", "text-b"]},
+        cache_path,
+    )
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_download(repo_id: str, filename: str, repo_type: str = "dataset") -> str:
+        calls.append((repo_id, filename, repo_type))
+        return str(cache_path)
+
+    monkeypatch.setattr(rr, "_download_from_hf", fake_download)
+    _clear_resource_caches()
+
+    loaded, text_ids, _ = rr._load_atlas_free_cnn_normalized_specter2_embeddings()
+
+    assert calls == [
+        (
+            "neurovlm/atlas_free_cnn_dataset",
+            "specter2_stage3_stage4_emptycentered_unitnorm.pt",
+            "dataset",
+        )
+    ]
+    assert torch.equal(loaded, embeddings)
+    assert text_ids.tolist() == ["text-a", "text-b"]
 
 
 def test_provider_exposes_cached_split_views_and_deterministic_limit(monkeypatch) -> None:

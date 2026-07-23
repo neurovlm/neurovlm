@@ -525,7 +525,7 @@ def train_text_to_brain(
         },
         resources={
             "dataset": "neurovlm/atlas_free_cnn_dataset",
-            "text_embeddings": "text_embeddings/specter2_stage3_stage4_emptycentered_unitnorm.pt",
+            "text_embeddings": "specter2_stage3_stage4_emptycentered_unitnorm.pt",
         },
         initialization={"autoencoder": source, "projector": "fresh"},
         requested=recorded,

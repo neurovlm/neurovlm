@@ -19,13 +19,8 @@ import torch.nn.functional as F
 from .atlas_free_dataset import canonical_atlas_free_domain
 
 
-def primary_positive_text_id(item: Mapping[str, Any]) -> str:
-    """Return the stable ID of ``positive_texts[0]``.
-
-    Selecting by position is intentional: the published cache was built from
-    the first positive and downstream retrieval treats each map and that text
-    as one diagonal pair.
-    """
+def _primary_positive(item: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return the validated ``positive_texts[0]`` mapping."""
 
     positives = item.get("positive_texts") or []
     if not isinstance(positives, Sequence) or isinstance(positives, (str, bytes)):
@@ -35,10 +30,32 @@ def primary_positive_text_id(item: Mapping[str, Any]) -> str:
     primary = positives[0]
     if not isinstance(primary, Mapping):
         raise TypeError(f"Row {item.get('map_id', '')!r} first positive text must be a mapping")
+    return primary
+
+
+def primary_positive_text_id(item: Mapping[str, Any]) -> str:
+    """Return the stable ID of ``positive_texts[0]``.
+
+    Selecting by position is intentional: the published cache was built from
+    the first positive and downstream retrieval treats each map and that text
+    as one diagonal pair.
+    """
+
+    primary = _primary_positive(item)
     text_id = str(primary.get("text_id") or primary.get("id") or "").strip()
     if not text_id:
         raise ValueError(f"Row {item.get('map_id', '')!r} first positive text has no text_id")
     return text_id
+
+
+def primary_positive_text(item: Mapping[str, Any]) -> str:
+    """Return the raw text paired with a map for family-native re-encoding."""
+
+    primary = _primary_positive(item)
+    text = str(primary.get("text") or "").strip()
+    if not text:
+        raise ValueError(f"Row {item.get('map_id', '')!r} first positive text has no text")
+    return text
 
 
 @dataclass(frozen=True)
@@ -165,5 +182,6 @@ class AtlasFreeContrastiveCollator:
 __all__ = [
     "AtlasFreeContrastiveCollator",
     "AtlasFreeTextEmbeddingLookup",
+    "primary_positive_text",
     "primary_positive_text_id",
 ]
