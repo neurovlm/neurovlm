@@ -98,9 +98,9 @@ NEURO_QFORMER_REPO_ID = "neurovlm/NeuroQformer"
 NEURO_ADAPTER_REPO_ID = "neurovlm/NeuroAdapter"
 ATLAS_FREE_CNN_DATASET_REPO = "neurovlm/atlas_free_cnn_dataset"
 ATLAS_FREE_CNN_SPLIT_FILENAMES = {
-    "train": "splits/train.jsonl",
-    "val": "splits/val.jsonl",
-    "test": "splits/test.jsonl",
+    "train": "train.jsonl",
+    "val": "val.jsonl",
+    "test": "test.jsonl",
 }
 ATLAS_FREE_CNN_MODEL_REPO_ID = "neurovlm/3d_cnn"
 ALE_ONLY_CACHE_FILENAMES = {

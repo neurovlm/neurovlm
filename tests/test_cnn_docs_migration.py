@@ -27,10 +27,13 @@ def test_cnn_notebooks_are_valid_package_only_workflows():
         path = ROOT / relative
         notebook = json.loads(path.read_text(encoding="utf-8"))
         assert notebook["nbformat"] == 4
+        code_cells = [
+            cell for cell in notebook["cells"] if cell["cell_type"] == "code"
+        ]
+        assert all(not cell.get("outputs") for cell in code_cells)
         code = "\n".join(
             "".join(cell.get("source", ()))
-            for cell in notebook["cells"]
-            if cell["cell_type"] == "code"
+            for cell in code_cells
         )
         compile(code, str(path), "exec")
         assert not any(token in code for token in forbidden)

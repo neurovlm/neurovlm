@@ -54,7 +54,7 @@ provider = AtlasFreeCNNDataProvider(domain="pubmed")
 train, validation, test = provider.train, provider.val, provider.test
 ```
 
-With no local overrides, the provider retrieves `splits/train.jsonl`, `splits/val.jsonl`, `splits/test.jsonl`, and the shared `atlas_free_cnn_volumes.pt` resource from Hugging Face. It indexes the shared tensor by `tensor_index`; legacy `tensor_path` and NIfTI path fields in JSONL rows are deliberately ignored. `split_dir=` and `volume_path=` are explicit reproducibility overrides, not defaults.
+With no local overrides, the provider retrieves the repository-root `train.jsonl`, `val.jsonl`, `test.jsonl`, and the shared `atlas_free_cnn_volumes.pt` resource from Hugging Face. It indexes the shared tensor by `tensor_index`; legacy `tensor_path` and NIfTI path fields in JSONL rows are deliberately ignored. `split_dir=` and `volume_path=` are explicit reproducibility overrides, not defaults.
 
 ## Training
 

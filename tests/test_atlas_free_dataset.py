@@ -62,14 +62,14 @@ def test_retrieval_resources_resolve_all_canonical_hf_split_paths(monkeypatch) -
     paths = [rr._load_atlas_free_cnn_split_path(split) for split in ("train", "val", "test")]
 
     assert paths == [
-        "/hf-cache/splits/train.jsonl",
-        "/hf-cache/splits/val.jsonl",
-        "/hf-cache/splits/test.jsonl",
+        "/hf-cache/train.jsonl",
+        "/hf-cache/val.jsonl",
+        "/hf-cache/test.jsonl",
     ]
     assert calls == [
-        ("neurovlm/atlas_free_cnn_dataset", "splits/train.jsonl", "dataset"),
-        ("neurovlm/atlas_free_cnn_dataset", "splits/val.jsonl", "dataset"),
-        ("neurovlm/atlas_free_cnn_dataset", "splits/test.jsonl", "dataset"),
+        ("neurovlm/atlas_free_cnn_dataset", "train.jsonl", "dataset"),
+        ("neurovlm/atlas_free_cnn_dataset", "val.jsonl", "dataset"),
+        ("neurovlm/atlas_free_cnn_dataset", "test.jsonl", "dataset"),
     ]
 
 
@@ -84,7 +84,7 @@ def test_default_dataset_uses_canonical_hf_resources_and_ignores_legacy_paths(
 
     def fake_download(repo_id: str, filename: str, repo_type: str = "dataset") -> str:
         calls.append((repo_id, filename, repo_type))
-        return str(split_path if filename == "splits/test.jsonl" else volume_path)
+        return str(split_path if filename == "test.jsonl" else volume_path)
 
     monkeypatch.setattr(rr, "_download_from_hf", fake_download)
     _clear_resource_caches()
@@ -93,7 +93,7 @@ def test_default_dataset_uses_canonical_hf_resources_and_ignores_legacy_paths(
     item = dataset[0]
 
     assert calls == [
-        ("neurovlm/atlas_free_cnn_dataset", "splits/test.jsonl", "dataset"),
+        ("neurovlm/atlas_free_cnn_dataset", "test.jsonl", "dataset"),
         ("neurovlm/atlas_free_cnn_dataset", "atlas_free_cnn_volumes.pt", "dataset"),
     ]
     assert item["map_id"] == "map-b"
