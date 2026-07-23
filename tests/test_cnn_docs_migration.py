@@ -62,20 +62,50 @@ def test_mixed_baseline_decision_is_documented_without_external_artifacts():
     assert "artifacts/contrastive_retrieval" not in decision_record
 
 
-def test_comparison_notebooks_default_to_complete_domain_test_splits():
-    for name in (
-        "autoencoder_comparison.ipynb",
-        "contrastive_comparison.ipynb",
-        "text_to_brain_comparison.ipynb",
-    ):
+def _notebook_code(name):
+    notebook = json.loads((ROOT / "docs/cnn/evaluation" / name).read_text())
+    return "\n".join(
+        "".join(cell.get("source", ()))
+        for cell in notebook["cells"]
+        if cell["cell_type"] == "code"
+    )
+
+
+def test_comparison_notebooks_use_documented_full_or_runtime_conscious_splits():
+    contrastive = _notebook_code("contrastive_comparison.ipynb")
+    assert "LIMIT_PER_DOMAIN = None" in contrastive
+
+    for name in ("autoencoder_comparison.ipynb", "text_to_brain_comparison.ipynb"):
         notebook = json.loads((ROOT / "docs/cnn/evaluation" / name).read_text())
-        code = "\n".join(
+        code = _notebook_code(name)
+        markdown = "\n".join(
             "".join(cell.get("source", ()))
             for cell in notebook["cells"]
-            if cell["cell_type"] == "code"
+            if cell["cell_type"] == "markdown"
         )
-        assert "LIMIT_PER_DOMAIN = None" in code
-        assert "LIMIT_PER_DOMAIN = 32" not in code
+        assert '"pubmed": 200' in code
+        assert '"nilearn": None' in code
+        assert '"neurovault": None' in code
+        assert "DOMAIN_LIMITS[domain]" in code
+        assert "3,066 PubMed" in markdown
+        assert 'DOMAIN_LIMITS["pubmed"] = None' in markdown
+
+
+def test_cnn_tutorial_visualizes_reconstruction_and_top_five_image_to_text_results():
+    notebook = json.loads(
+        (ROOT / "docs/tutorials/06_atlas_free_cnn.ipynb").read_text()
+    )
+    code = "\n".join(
+        "".join(cell.get("source", ()))
+        for cell in notebook["cells"]
+        if cell["cell_type"] == "code"
+    )
+    assert "TOP_K = 5" in code
+    assert "candidate_rows = test_data.rows" in code
+    assert "query_scores.topk" in code
+    assert '"is_known_pair"' in code
+    assert 'set_title("Original")' in code
+    assert 'set_title("Reconstructed")' in code
 
 
 def test_historical_cnn_notebooks_were_moved_out_of_experiments():
