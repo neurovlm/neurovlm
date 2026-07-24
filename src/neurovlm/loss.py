@@ -1,4 +1,5 @@
 """Non-standard torch loss functions."""
+import math
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -63,9 +64,32 @@ class FocalWithLogitsLoss(nn.Module):
 
 class InfoNCELoss(torch.nn.Module):
     """Compute InfoNCE loss between image and text embeddings."""
-    def __init__(self,  temperature=0.07):
+    def __init__(
+        self,
+        temperature: float = 0.07,
+        learnable_temperature: bool = False,
+        max_scale_logit: float = 100.0,
+    ):
         super().__init__()
+
         self.temperature = temperature
+        self.learnable_temperature = learnable_temperature
+        self.max_scale_logit = max_scale_logit
+
+        if self.learnable_temperature:
+            if temperature <= 0:
+                raise ValueError("temperature must be positive")
+            if max_scale_logit <= 0:
+                raise ValueError("max_scale_logit must be positive")
+            self.logit_scale = nn.Parameter(
+                torch.tensor(math.log(1.0 / temperature), dtype=torch.float32)
+            )
+
+    @torch.no_grad()
+    def clamp_logit_scale_(self):
+        """Clip the learnable logit scale to prevent unstable large logits."""
+        if self.learnable_temperature:
+            self.logit_scale.clamp_(max=math.log(self.max_scale_logit))
 
     def forward(self, image, text):
         # Normalize embeddings
@@ -73,7 +97,12 @@ class InfoNCELoss(torch.nn.Module):
         text = F.normalize(text, dim=1)
 
         # Compute similarity matrix: (batch_size, batch_size)
-        logits = torch.matmul(image, text.T) / self.temperature
+        logits = torch.matmul(image, text.T)
+        if self.learnable_temperature:
+            self.clamp_logit_scale_()
+            logits = logits * self.logit_scale.exp()
+        else:
+            logits = logits / self.temperature
 
         # Labels are indices of the correct pairs
         batch_size = image.size(0)
