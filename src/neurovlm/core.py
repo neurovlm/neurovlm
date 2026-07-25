@@ -686,11 +686,21 @@ class _QueryBuilder:
         self,
         head: Literal["mse", "infonce"] = "infonce",
         datasets: Optional[Sequence[str]] = None,
-    ) -> TextSearchResult:
+        method: Literal["generative", "contrastive"] = "generative",
+        **generate_kwargs: Any,
+    ) -> Union[TextSearchResult, str, list[str]]:
         """Run text/brain query against the text target space."""
+        if method == "generative":
+            if self.source != "brain":
+                raise ValueError("to_text(method='generative') is only available for brain(...) queries.")
+            if datasets is not None:
+                raise ValueError("datasets only applies to to_text(method='contrastive').")
+            return self.parent.generate_text(self.payload, **generate_kwargs)
+        if method != "contrastive":
+            raise ValueError("method must be 'generative' or 'contrastive'.")
         if head != "infonce":
             raise ValueError("to_text only supports head='infonce'.")
-        return self.parent.to_text(self.payload, datasets=datasets, project=True)
+        return self.parent.to_text(self.payload, datasets=datasets, project=True, method="contrastive")
 
     def retrieve_text(self, datasets: Optional[Sequence[str]] = None) -> TextSearchResult:
         """Retrieve text with the contrastive InfoNCE path."""
@@ -817,10 +827,12 @@ class NeuroVLM:
     def to_text(
         self,
         X: Any,
+        method: Literal["generative", "contrastive"] = "generative",
         datasets: Optional[Sequence[str]] = None,
         project: bool = True,
-    ) -> TextSearchResult:
-        """Retrieve text results for one or many queries.
+        **generate_kwargs: Any,
+    ) -> Union[TextSearchResult, str, list[str]]:
+        """Generate or retrieve text results for one or many queries.
 
         Parameters
         ----------
@@ -831,16 +843,30 @@ class NeuroVLM:
             - Brain latent embeddings of shape ``(384,)`` or ``(N, 384)``
             - Flattened brain vectors of shape ``(28542,)`` or ``(N, 28542)``
             - ``nibabel.Nifti1Image``
+        method : {"generative", "contrastive"}, optional
+                    ``"generative"`` uses the QFormer/Qwen path. ``"contrastive"``
+                    uses the InfoNCE retrieval path.
         datasets : sequence of str, optional
             Optional subset of initialized text datasets.
+            Only used for method="contrastive".
         project : bool, optional
             Whether to use projection heads. Required for brain-to-text retrieval.
+            Only used for method="contrastive".
+
 
         Returns
         -------
-        TextSearchResult
-            Retrieval object exposing ``top_k``/``print``.
+        str, list[str], or TextSearchResult
+            Generated text for ``method="generative"``; retrieval object exposing
+            ``top_k``/``print`` for ``method="contrastive"``.
         """
+        if method == "generative":
+            if datasets is not None:
+                raise ValueError("datasets only applies to to_text(method='contrastive').")
+            return self.generate_text(X, **generate_kwargs)
+        if method != "contrastive":
+            raise ValueError("method must be 'generative' or 'contrastive'.")
+
         query, retrieval_space = self._prepare_text_query(X, project=project)
         dataset_names = self._resolve_active_datasets(datasets)
         self._ensure_text_indices(dataset_names, require_shared=(retrieval_space == "shared"))
@@ -870,7 +896,7 @@ class NeuroVLM:
         project: bool = True,
     ) -> TextSearchResult:
         """Alias for contrastive text retrieval. Keeps ``to_text`` semantics explicit."""
-        return self.to_text(X, datasets=datasets, project=project)
+        return self.to_text(X, datasets=datasets, project=project, method="contrastive")
 
     def generate_text(
         self,
@@ -892,8 +918,7 @@ class NeuroVLM:
     ) -> str | list[str]:
         """Generate text for one or more brain maps with NeuroQFormer + NeuroQwen3.
 
-        This is intentionally separate from ``to_text``, which remains the
-        contrastive retrieval API.
+        This path is also exposed through ``to_text(method="generative")``.
         """
         return self._generate_brain_text(
             X,
@@ -2234,7 +2259,7 @@ class NeuroVLM:
     ) -> str:
         """Generate an LLM summary using the last retrieval result as context.
 
-        Call this after ``brain(...).to_text()`` (brain-to-text mode) or
+        Call this after ``brain(...).to_text(method="contrastive")`` (brain-to-text mode) or
         ``text(...).to_brain()`` (text-to-brain mode).
 
         Parameters
@@ -2259,7 +2284,7 @@ class NeuroVLM:
             Pass the output of ``result.top_k(...).query(...)`` (or any filtered
             slice of it) to control precisely which rows the LLM sees::
 
-                result = nvlm.brain(img).to_text()
+                result = nvlm.brain(img).to_text(method="contrastive")
                 filtered = result.top_k(5).query("cosine_similarity > 0.4")
                 nvlm.generate_llm_response(..., table=filtered)
 
@@ -2284,7 +2309,7 @@ class NeuroVLM:
 
         Notes
         -----
-        **Brain-to-text mode** (after ``brain(...).to_text()``):
+        **Brain-to-text mode** (after ``brain(...).to_text(method="contrastive")``):
             The LLM receives the top-k text matches (publications,
             NeuroWiki concepts, CogAtlas terms) that were most similar to the
             input brain image and defines/explains them in that neuroimaging
@@ -2300,7 +2325,7 @@ class NeuroVLM:
         --------
         Brain-to-text with filtered table::
 
-            result = nvlm.brain(nifti_img).to_text()
+            result = nvlm.brain(nifti_img).to_text(method="contrastive")
             filtered = result.top_k(5).query("cosine_similarity > 0.4")
             response = nvlm.generate_llm_response(
                 backend="ollama",
@@ -2318,7 +2343,7 @@ class NeuroVLM:
         """
         if self._last_result is None:
             raise ValueError(
-                "No results available. Run brain(...).to_text() or "
+                "No results available. Run brain(...).to_text(method='contrastive') or "
                 "text(...).to_brain() first."
             )
 
@@ -2451,7 +2476,7 @@ class NeuroVLM:
             saved_last_result = self._last_result
             saved_last_text_result = self.last_text_result
             try:
-                text_result = self.to_text(self._last_text_query, datasets=["wiki", "cogatlas", "ngrams"])
+                text_result = self.to_text(self._last_text_query, method="contrastive")
                 _table = text_result.top_k(k=k)
                 papers_ctx, wiki_ctx, cogatlas_ctx = self._format_table_as_context(_table)
             finally:
