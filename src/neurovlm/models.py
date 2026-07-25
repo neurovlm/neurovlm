@@ -392,6 +392,9 @@ def load_model(name: str):
         case "neuro_qformer":
             from neurovlm.retrieval_resources import _load_neuro_qformer
             return _load_neuro_qformer()
+        case "neuro_qformer_pubmed":
+            from neurovlm.retrieval_resources import _load_neuro_qformer
+            return _load_neuro_qformer(qformer_variant="pubmed")
         case "neuro_adapter":
             from neurovlm.retrieval_resources import _load_neuro_adapter
             return _load_neuro_adapter()
@@ -403,6 +406,7 @@ def load_model(name: str):
                 "autoencoder",
                 "specter",
                 "neuro_qformer",
+                "neuro_qformer_pubmed",
                 "neuro_adapter",
             ]
             raise ValueError(f"{name} not in {valid_names}")

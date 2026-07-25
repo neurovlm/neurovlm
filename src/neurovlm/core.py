@@ -719,7 +719,8 @@ class _QueryBuilder:
         top_p: float | None = None,
         seed: int | None = 12345,
         projection_temp: float | None = 0.05,
-        use_canonical_projection: bool | None = True,
+        use_canonical_projection: bool | None = None,
+        qformer_variant: str | None = "canonical",
         repetition_penalty: float = 1.18,
         no_repeat_ngram_size: int = 4,
     ) -> str | list[str]:
@@ -739,6 +740,7 @@ class _QueryBuilder:
             seed=seed,
             projection_temp=projection_temp,
             use_canonical_projection=use_canonical_projection,
+            qformer_variant=qformer_variant,
             repetition_penalty=repetition_penalty,
             no_repeat_ngram_size=no_repeat_ngram_size,
         )
@@ -771,6 +773,7 @@ class NeuroVLM:
         self._autoencoder = None
         self._masker = None
         self._neuro_qformer = None
+        self._neuro_qformer_variant: Optional[str] = None
         self._neuro_qwen_model = None
         self._neuro_qwen_tokenizer = None
         self._neuro_qwen_token_norm: Optional[float] = None
@@ -912,7 +915,8 @@ class NeuroVLM:
         top_p: float | None = None,
         seed: int | None = 12345,
         projection_temp: float | None = 0.05,
-        use_canonical_projection: bool | None = True,
+        use_canonical_projection: bool | None = None,
+        qformer_variant: str | None = "canonical",
         repetition_penalty: float = 1.18,
         no_repeat_ngram_size: int = 4,
     ) -> str | list[str]:
@@ -933,6 +937,7 @@ class NeuroVLM:
             seed=seed,
             projection_temp=projection_temp,
             use_canonical_projection=use_canonical_projection,
+            qformer_variant=qformer_variant,
             repetition_penalty=repetition_penalty,
             no_repeat_ngram_size=no_repeat_ngram_size,
         )
@@ -1901,19 +1906,22 @@ class NeuroVLM:
         *,
         projection_temp: float | None = 0.05,
         canonical_basis: str | None = "network",
-        use_canonical_projection: bool | None = True,
+        use_canonical_projection: bool | None = None,
+        qformer_variant: str | None = "canonical",
     ) -> None:
         """Lazy-load NeuroQFormer and NeuroQwen for brain-to-text generation."""
         from transformers import AutoModelForCausalLM, AutoTokenizer
         from neurovlm.retrieval_resources import NEURO_QWEN_REPO_ID, _load_neuro_qformer
 
-        if self._neuro_qformer is None:
+        if self._neuro_qformer is None or self._neuro_qformer_variant != qformer_variant:
             self._neuro_qformer = _load_neuro_qformer(
                 device=self.device,
                 projection_temp=projection_temp,
                 canonical_basis=canonical_basis,
                 use_canonical_projection=use_canonical_projection,
+                qformer_variant=qformer_variant,
             ).eval()
+            self._neuro_qformer_variant = qformer_variant
         else:
             self._neuro_qformer.projection_temp = projection_temp
             self._neuro_qformer.canonical_basis = canonical_basis
@@ -1971,6 +1979,13 @@ class NeuroVLM:
             "function": "[FUNCTION]",
         }.get(key)
 
+    @staticmethod
+    def _normalize_qformer_variant(qformer_variant: str | None) -> str:
+        key = "canonical" if qformer_variant is None else str(qformer_variant).lower()
+        if key not in {"canonical", "pubmed"}:
+            raise ValueError("qformer_variant must be 'canonical' or 'pubmed'.")
+        return key
+
     def _prepare_brain_latent_for_generation(self, X: Any) -> torch.Tensor:
         """Prepare NIfTI, mask-space vectors, or latent vectors for QFormer generation."""
         if self._is_text_payload(X):
@@ -2010,19 +2025,23 @@ class NeuroVLM:
         top_p: float | None = None,
         seed: int | None = 12345,
         projection_temp: float | None = 0.05,
-        use_canonical_projection: bool | None = True,
+        use_canonical_projection: bool | None = None,
+        qformer_variant: str | None = "canonical",
         repetition_penalty: float = 1.18,
         no_repeat_ngram_size: int = 4,
     ) -> str | list[str]:
         """Internal QFormer/Qwen generation path for brain inputs."""
+        qformer_variant = self._normalize_qformer_variant(qformer_variant)
         canonical_basis = basis if canonical_basis is None else canonical_basis
         self._ensure_generative_text_model(
             projection_temp=projection_temp,
             canonical_basis=canonical_basis,
             use_canonical_projection=use_canonical_projection,
+            qformer_variant=qformer_variant,
         )
         raw_latent = self._prepare_brain_latent_for_generation(X)
-        prefix_text = self._generation_prefix_for_basis(basis) if prefix_text is None else prefix_text
+        if prefix_text is None:
+            prefix_text = "" if qformer_variant == "pubmed" else self._generation_prefix_for_basis(basis)
 
         assert self._neuro_qformer is not None
         assert self._neuro_qwen_model is not None
