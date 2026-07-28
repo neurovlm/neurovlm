@@ -218,7 +218,16 @@ class CNNTextToBrainModel(nn.Module):
     def __init__(self, text_projection: nn.Module, autoencoder: ALE3DCNNAutoEncoder) -> None:
         super().__init__()
         self.text_projection = text_projection
-        self.autoencoder = autoencoder
+        self.autoencoder = _freeze(autoencoder)
+
+    def train(self, mode: bool = True) -> "CNNTextToBrainModel":
+        """Train only the projector while keeping the frozen AE deterministic."""
+
+        super().train(mode)
+        self.autoencoder.eval()
+        for parameter in self.autoencoder.parameters():
+            parameter.requires_grad_(False)
+        return self
 
     def forward(self, text_embedding: torch.Tensor) -> torch.Tensor:
         text_embedding = _as_batch(text_embedding, expected_ndim=2)

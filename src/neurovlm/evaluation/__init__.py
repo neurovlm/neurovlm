@@ -18,6 +18,19 @@ from .mlp import (
 )
 from .spatial import reconstruction_metrics, voxel_auroc
 from .text_to_brain import TextToBrainEvaluation, evaluate_text_to_brain
+from .text_to_brain_audit import (
+    ae_ceiling_bypass,
+    audit_pairings,
+    audit_raw_latent_path,
+    audit_text_preprocessing,
+    autoencoder_identity,
+    frozen_ae_determinism,
+    latent_diagnostics,
+    loss_gradient_diagnostics,
+    tensor_sha256,
+    tiny_overfit_projector,
+    volume_scale_diagnostics,
+)
 from .comparison import (
     ComparisonResult,
     ComparisonSelection,
@@ -46,6 +59,17 @@ __all__ = [
     "reconstruction_metrics",
     "TextToBrainEvaluation",
     "evaluate_text_to_brain",
+    "ae_ceiling_bypass",
+    "audit_pairings",
+    "audit_raw_latent_path",
+    "audit_text_preprocessing",
+    "autoencoder_identity",
+    "frozen_ae_determinism",
+    "latent_diagnostics",
+    "loss_gradient_diagnostics",
+    "tensor_sha256",
+    "tiny_overfit_projector",
+    "volume_scale_diagnostics",
     "voxel_auroc",
     "ComparisonResult",
     "ComparisonSelection",

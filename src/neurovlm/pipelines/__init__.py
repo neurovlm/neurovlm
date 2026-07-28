@@ -10,6 +10,7 @@ from .provenance import (
     fingerprint_references,
     git_provenance,
     sha256_file,
+    sha256_state_dict,
     sha256_value,
 )
 from .serialization import (
@@ -40,6 +41,7 @@ __all__ = [
     "json_safe",
     "metric_row",
     "sha256_file",
+    "sha256_state_dict",
     "sha256_value",
     "summary_rows",
     "union_fieldnames",

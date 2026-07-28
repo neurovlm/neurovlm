@@ -26,6 +26,7 @@ from neurovlm.pipelines import (
     fingerprint_path,
     json_safe,
     sha256_file,
+    sha256_state_dict,
 )
 
 
@@ -262,3 +263,17 @@ def test_fingerprint_path_is_content_sensitive_and_relative_within_tree(tmp_path
     second = fingerprint_path(folder)
     assert first["sha256"] != second["sha256"]
     assert second["files"][0]["path"] == "x.txt"
+
+
+def test_state_dict_checksum_is_stable_content_sensitive_and_prefix_selective() -> None:
+    model = torch.nn.Sequential(torch.nn.Linear(2, 3), torch.nn.Linear(3, 1))
+    first = sha256_state_dict(model)
+    assert first == sha256_state_dict(model.state_dict())
+    branch = sha256_state_dict(model, prefix="0.")
+    assert branch == sha256_state_dict(
+        {name: value for name, value in model.state_dict().items() if name.startswith("0.")}
+    )
+    with torch.no_grad():
+        model[1].bias.add_(1)
+    assert sha256_state_dict(model) != first
+    assert sha256_state_dict(model, prefix="0.") == branch
