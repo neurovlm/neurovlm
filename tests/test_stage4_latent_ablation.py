@@ -20,6 +20,7 @@ from neurovlm.experiments.stage4_latent_ablation import (
     train_stage4_ablation,
     validate_checkpoint_binding,
 )
+from neurovlm.pipelines import sha256_file
 
 
 def _latents(n: int = 64, d: int = 8) -> torch.Tensor:
@@ -211,6 +212,54 @@ def test_checkpoint_manager_binds_and_resumes_exact_state(tmp_path: Path) -> Non
         )
     with pytest.raises(ValueError, match="provenance binding mismatch"):
         validate_checkpoint_binding({"a": 1}, {"a": 2})
+
+
+def test_checkpoint_metadata_is_weights_only_safe_and_legacy_torch_version_loads(
+    tmp_path: Path,
+) -> None:
+    binding = {
+        "text_cache": {
+            "metadata": {"torch_version": torch.__version__},
+            "state_sha256": "text",
+        }
+    }
+    architecture = {"projector": [4, 3]}
+    config = {"variant": "baseline_raw"}
+    projector = nn.Linear(4, 3)
+    optimizer = torch.optim.AdamW(projector.parameters(), lr=1e-3)
+    manager = AblationCheckpointManager(
+        tmp_path,
+        binding=binding,
+        architecture=architecture,
+        config=config,
+    )
+    path = manager.save_last(
+        projector,
+        optimizer,
+        epoch=1,
+        metrics={"val_top5_dice": 0.2},
+    )
+
+    # Newly written metadata contains an exact built-in str and loads with the
+    # restricted unpickler without an allowlist.
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    recorded_version = payload["binding"]["text_cache"]["metadata"]["torch_version"]
+    assert type(recorded_version) is str
+
+    # Recreate the legacy Colab condition while keeping the logical binding
+    # hash unchanged, then exercise the manager's narrow compatibility path.
+    payload["binding"]["text_cache"]["metadata"]["torch_version"] = torch.__version__
+    torch.save(payload, path)
+    manifest_path = tmp_path / "checkpoint_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["checkpoints"]["last"]["sha256"] = sha256_file(path)
+    manifest["checkpoints"]["last"]["size"] = path.stat().st_size
+    manifest_path.write_text(json.dumps(manifest))
+    resumed = manager.resume(projector, optimizer, path=path)
+    assert resumed is not None
+    assert str(
+        resumed["binding"]["text_cache"]["metadata"]["torch_version"]
+    ) == str(torch.__version__)
 
 
 class _TinyDecoder(nn.Module):

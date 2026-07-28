@@ -27,8 +27,19 @@ def json_safe(value: Any) -> Any:
         return json_safe(value.value)
     if isinstance(value, Path):
         return str(value)
-    if value is None or isinstance(value, (str, bool, int)):
-        return value
+    if value is None:
+        return None
+    # Convert subclasses to exact built-in primitives. In particular,
+    # ``torch.__version__`` is a ``torch.torch_version.TorchVersion`` string
+    # subclass in recent PyTorch releases. Leaving it unchanged makes an
+    # otherwise tensor/JSON checkpoint fail under
+    # ``torch.load(..., weights_only=True)``.
+    if isinstance(value, str):
+        return str(value)
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, int):
+        return int(value)
     if isinstance(value, float):
         return value if math.isfinite(value) else None
     if isinstance(value, Mapping):

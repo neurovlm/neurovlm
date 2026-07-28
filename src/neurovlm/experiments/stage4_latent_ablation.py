@@ -13,6 +13,7 @@ import csv
 import json
 import math
 import os
+import pickle
 import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -35,6 +36,7 @@ from neurovlm.evaluation.text_to_brain_audit import tensor_sha256
 from neurovlm.pipelines import (
     atomic_write_csv,
     atomic_write_json,
+    json_safe,
     sha256_file,
     sha256_state_dict,
     sha256_value,
@@ -1166,9 +1168,13 @@ class AblationCheckpointManager:
         self.checkpoint_dir = self.run_dir / "checkpoints"
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.manifest_path = self.run_dir / "checkpoint_manifest.json"
-        self.binding = dict(binding)
-        self.architecture = dict(architecture)
-        self.config_sha256 = sha256_value(config)
+        # Checkpoint metadata must contain exact built-in JSON primitives.
+        # Recent PyTorch exposes ``torch.__version__`` as a TorchVersion
+        # subclass, which the restricted weights-only unpickler rejects unless
+        # it is canonicalized first.
+        self.binding = json_safe(binding)
+        self.architecture = json_safe(architecture)
+        self.config_sha256 = sha256_value(json_safe(config))
         if self.manifest_path.exists():
             manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
             validate_checkpoint_binding(
@@ -1211,12 +1217,12 @@ class AblationCheckpointManager:
             "epoch": int(epoch),
             "model_state_dict": projector.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
-            "metrics": dict(metrics),
+            "metrics": json_safe(metrics),
             "binding": self.binding,
             "binding_sha256": sha256_value(self.binding),
             "architecture": self.architecture,
             "config_sha256": self.config_sha256,
-            "early_stopping": dict(early_stopping),
+            "early_stopping": json_safe(early_stopping),
         }
         if scheduler is not None:
             payload["scheduler_state_dict"] = scheduler.state_dict()
@@ -1343,7 +1349,32 @@ class AblationCheckpointManager:
         )
         if record and record.get("sha256") != sha256_file(resolved):
             raise ValueError(f"Checkpoint file SHA256 mismatch: {relative}")
-        payload = torch.load(resolved, map_location=map_location, weights_only=True)
+        try:
+            payload = torch.load(
+                resolved,
+                map_location=map_location,
+                weights_only=True,
+            )
+        except pickle.UnpicklingError as error:
+            # Compatibility for checkpoints created by this experiment before
+            # metadata canonicalization. Their manifest checksum has already
+            # been verified above. Keep the restricted loader enabled and
+            # allowlist only PyTorch's inert string-like version class; never
+            # fall back to arbitrary pickle execution.
+            torch_version_type = type(torch.__version__)
+            legacy_global = "torch.torch_version.TorchVersion"
+            if (
+                legacy_global not in str(error)
+                or torch_version_type.__module__ != "torch.torch_version"
+                or torch_version_type.__name__ != "TorchVersion"
+            ):
+                raise
+            with torch.serialization.safe_globals([torch_version_type]):
+                payload = torch.load(
+                    resolved,
+                    map_location=map_location,
+                    weights_only=True,
+                )
         if not isinstance(payload, Mapping):
             raise TypeError("Ablation checkpoint payload must be a mapping")
         validate_checkpoint_binding(

@@ -211,9 +211,10 @@ commit.
 | `src/neurovlm/evaluation/__init__.py` | Exports the untracked text-to-brain audit helpers. |
 | `src/neurovlm/pipelines/__init__.py` | Exports `sha256_state_dict`. |
 | `src/neurovlm/pipelines/provenance.py` | Adds deterministic tensor-state SHA256 hashing. |
+| `src/neurovlm/pipelines/serialization.py` | Canonicalizes string/int/bool subclasses to exact JSON primitives so PyTorch 2.6+ weights-only checkpoint loading does not reject `TorchVersion` metadata. |
 | `src/neurovlm/training/text_to_brain.py` | Adds strict AE/text-cache provenance, checkpoint validation, loss-component logging, projector gradient diagnostics, and stronger AE freezing. |
 | `tests/test_cnn_text_to_brain_training.py` | Tests the new audit, provenance, freezing, gradient, checkpoint, and resume behavior. |
-| `tests/test_pipelines.py` | Tests deterministic state-dict checksums. |
+| `tests/test_pipelines.py` | Tests deterministic state-dict checksums and exact built-in-string canonicalization for PyTorch version metadata. |
 
 Tracked deletion requiring a separate decision:
 
@@ -283,6 +284,7 @@ git diff -- \
   src/neurovlm/evaluation/__init__.py \
   src/neurovlm/pipelines/__init__.py \
   src/neurovlm/pipelines/provenance.py \
+  src/neurovlm/pipelines/serialization.py \
   src/neurovlm/training/text_to_brain.py \
   tests/test_cnn_text_to_brain_training.py \
   tests/test_pipelines.py
@@ -299,6 +301,7 @@ git restore --source=4b7cb7278e0fe75fd6bdd88b5317ff1a52b97078 -- \
   src/neurovlm/evaluation/__init__.py \
   src/neurovlm/pipelines/__init__.py \
   src/neurovlm/pipelines/provenance.py \
+  src/neurovlm/pipelines/serialization.py \
   src/neurovlm/training/text_to_brain.py \
   tests/test_cnn_text_to_brain_training.py \
   tests/test_pipelines.py

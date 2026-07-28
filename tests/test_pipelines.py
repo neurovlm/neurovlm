@@ -277,3 +277,9 @@ def test_state_dict_checksum_is_stable_content_sensitive_and_prefix_selective() 
         model[1].bias.add_(1)
     assert sha256_state_dict(model) != first
     assert sha256_state_dict(model, prefix="0.") == branch
+
+
+def test_json_safe_canonicalizes_torch_version_string_subclass() -> None:
+    converted = json_safe({"torch_version": torch.__version__})
+    assert converted["torch_version"] == str(torch.__version__)
+    assert type(converted["torch_version"]) is str
