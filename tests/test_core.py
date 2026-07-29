@@ -1,5 +1,7 @@
 """Tests for core module."""
 
+import inspect
+
 import pytest
 import torch
 import numpy as np
@@ -11,12 +13,68 @@ from neurovlm.core import (
     TextSearchResult,
     BrainSearchResult,
     BrainTopKResult,
+    NeuroVLM,
+    _QueryBuilder,
     DATASET_ALIASES,
     DATASET_ID_COLUMNS,
     TEXT_EMBED_DIM,
     LATENT_DIM,
     BRAIN_FLAT_DIM,
 )
+
+
+class TestBrainApi:
+    """Tests for the public brain-target API."""
+
+    @pytest.mark.parametrize(
+        "method",
+        (
+            NeuroVLM.to_brain,
+            NeuroVLM.generate_brain,
+            NeuroVLM.retrieve_brain,
+            _QueryBuilder.to_brain,
+            _QueryBuilder.generate_brain,
+            _QueryBuilder.retrieve_brain,
+        ),
+    )
+    def test_brain_methods_do_not_expose_project(self, method):
+        assert "project" not in inspect.signature(method).parameters
+
+
+class TestTextApi:
+    """Tests for the public text-target API."""
+
+    @pytest.mark.parametrize("method", (NeuroVLM.to_text, _QueryBuilder.to_text))
+    def test_to_text_uses_head_instead_of_method(self, method):
+        parameters = inspect.signature(method).parameters
+        assert "method" not in parameters
+        assert parameters["head"].default == "qformer"
+
+    def test_query_builder_forwards_infonce_head(self):
+        parent = Mock()
+        expected = Mock()
+        parent.to_text.return_value = expected
+        query = _QueryBuilder(parent=parent, payload=torch.randn(LATENT_DIM), source="brain")
+
+        result = query.to_text(head="infonce", datasets=["networks"])
+
+        assert result is expected
+        parent.to_text.assert_called_once_with(
+            query.payload,
+            head="infonce",
+            datasets=["networks"],
+            project=True,
+        )
+
+    def test_infonce_rejects_qformer_generation_kwargs(self):
+        nvlm = object.__new__(NeuroVLM)
+        with pytest.raises(TypeError, match="only apply to head='qformer'"):
+            nvlm.to_text(torch.randn(LATENT_DIM), head="infonce", basis="network")
+
+    def test_removed_method_kwarg_is_rejected(self):
+        nvlm = object.__new__(NeuroVLM)
+        with pytest.raises(TypeError, match="unexpected keyword argument 'method'"):
+            nvlm.to_text(torch.randn(LATENT_DIM), method="contrastive")
 
 
 class TestL2Normalize:
