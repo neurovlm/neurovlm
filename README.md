@@ -9,7 +9,7 @@ NeuroVLM maps between neuroimaging activation maps and neuroscience text.
 
 - python >=3.10, <3.14
 - ubuntu-latest, macos-latest
-- NVIDIA GPU (recommneded) or CPU
+- GPU (NVIDIA or Apple MPS) or CPU
 
 
 ## Installation
