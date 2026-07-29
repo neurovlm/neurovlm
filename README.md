@@ -31,6 +31,8 @@ Installation take a couple minutes. After installation, calling `neurovlm.data.f
 
 ## Demo
 
+See [here](https://github.com/neurovlm/neurovlm/blob/main/docs/tutorials/00_quickstart.ipynb) for the introductory notebook that walks through using all NeuroVLM models. In short:
+
 Fetch NeuroVLM's datasets and models:
 
 ```python
