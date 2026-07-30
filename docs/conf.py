@@ -35,6 +35,8 @@ include_patterns = [
     "tutorials/03_generative_text-to-brain.ipynb",
     "tutorials/04_generative_brain-to-text.ipynb",
     "tutorials/05_custom_corpus.ipynb",
+    "tutorials/06_atlas_free_cnn.ipynb",
+    "cnn/**",
     "generated/**",
 ]
 

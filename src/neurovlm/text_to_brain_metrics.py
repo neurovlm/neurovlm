@@ -13,10 +13,12 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from scipy.stats import rankdata, spearmanr
-from tqdm.notebook import tqdm
 
 from neurovlm.metric_utils import as_latent_batch
+from neurovlm.progress import select_tqdm
 from neurovlm.retrieval_metrics import normalized_k_values, normalized_recall_curve_auc
+
+tqdm = select_tqdm()
 
 
 def pearson_correlation(

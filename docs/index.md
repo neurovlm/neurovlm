@@ -23,6 +23,12 @@ Step-by-step notebooks to learn the workflow.
 Function and class reference for the public package API.
 :::
 
+:::{grid-item-card} Atlas-free CNN
+:link: cnn/index
+:link-type: doc
+Inference, training, comparison, and reproducibility workflows.
+:::
+
 ::::
 
 ## Preprint
@@ -37,6 +43,7 @@ R. P. Hammonds, J. Aguirre-Chavez, B. Omoma-Edosa, and B. Voytek, “NeuroVLM: A
 
 installation
 tutorials/index
+cnn/index
 api
 ```
 

@@ -2,6 +2,12 @@
 *.pt
 *.parquet
 *.pkl.gz
-*.pt
-*.parquet
-*.pkl.gz
+*.csv
+*.nii.gz
+*.json
+*.jsonl
+*.xml
+*.pyc
+__pycache__/
+experiments/data/mesh_kg/desc2026.xml
+experiments/3dcnn/atlas_free_cnn/cache/

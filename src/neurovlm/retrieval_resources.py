@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Tuple
 import gzip, json, pickle
 
 import numpy as np
@@ -64,6 +64,16 @@ __all__ = [
     "_load_latent_neurovault_text",
     "_load_neurovault_images",
     "_load_pubmed_images",
+    "_load_atlas_free_cnn_dataset",
+    "_load_atlas_free_cnn_split_path",
+    "_load_atlas_free_cnn_split_rows",
+    "_load_atlas_free_cnn_volumes",
+    "_load_atlas_free_cnn_rows",
+    "_load_atlas_free_cnn_text_pairs",
+    "_load_ale_only_cache_path",
+    "_load_ale_only_cache",
+    "_load_atlas_free_cnn_normalized_specter2_cache",
+    "_load_atlas_free_cnn_normalized_specter2_embeddings",
     "_load_latent_ngram",
     "_load_ngram",
     "_load_kg_mesh_dataset",
@@ -74,6 +84,11 @@ __all__ = [
     "_load_latent_kg_mesh_brain_rankable",
     "_load_llm_neuro_terms_dataset",
     "_load_latent_llm_neuro_terms",
+    "_load_cnn_contrastive_checkpoint_path",
+    "_load_cnn_t2b_checkpoint_path",
+    "_load_cnn_autoencoder",
+    "_load_cnn_contrastive",
+    "_load_cnn_text_to_brain",
 ]
 
 NEURO_QWEN_REPO_ID = "neurovlm/NeuroQwen3-0.6B"
@@ -82,6 +97,42 @@ PROJECTION_HEADS_REPO_ID = "neurovlm/ProjectionHeads"
 NEURO_QFORMER_REPO_ID = "neurovlm/NeuroQformer"
 NEURO_QFORMER_PUBMED_REPO_ID = "neurovlm/NeuroQformer-PubMed"
 NEURO_ADAPTER_REPO_ID = "neurovlm/NeuroAdapter"
+ATLAS_FREE_CNN_DATASET_REPO = "neurovlm/atlas_free_cnn_dataset"
+ATLAS_FREE_CNN_SPLIT_FILENAMES = {
+    "train": "train.jsonl",
+    "val": "val.jsonl",
+    "test": "test.jsonl",
+}
+ATLAS_FREE_CNN_NORMALIZED_SPECTER2_FILENAME = (
+    "specter2_stage3_stage4_emptycentered_unitnorm.pt"
+)
+ATLAS_FREE_CNN_MODEL_REPO_ID = "neurovlm/3d_cnn"
+ALE_ONLY_CACHE_FILENAMES = {
+    "atlas_free": "atlas_free_4mm_fwhm9_crop_float16.pt",
+    "difumo_compatible": "difumo_compatible_4mm_fwhm9_crop_float16.pt",
+}
+CNN_AUTOENCODER_FILENAMES = {
+    "mixed": "mixed_ae.pt",
+    "pubmed": "pubmed_finetuned_ae_top5_dice.pt",
+    "nilearn": "nilearn_finetuned_ae_spatial_corr.pt",
+    "neurovault": "neurovault_finetuned_ae_spatial_corr.pt",
+}
+CNN_CONTRASTIVE_FILENAMES = {
+    "mixed_to_pubmed": "cnn_contrastive_mixed_to_pubmed.pt",
+    "mixed_to_nilearn": "cnn_contrastive_mixed_to_nilearn.pt",
+    "mixed_to_neurovault": "cnn_contrastive_mixed_to_neurovault.pt",
+    "pubmed": "cnn_contrastive_pubmed.pt",
+    "nilearn": "cnn_contrastive_nilearn.pt",
+    "neurovault": "cnn_contrastive_neurovault.pt",
+}
+CNN_T2B_FILENAMES = {
+    "mixed_to_pubmed": "cnn_t2b_mixed_to_pubmed.pt",
+    "mixed_to_nilearn": "cnn_t2b_mixed_to_nilearn.pt",
+    "mixed_to_neurovault": "cnn_t2b_mixed_to_neurovault.pt",
+    "pubmed": "cnn_t2b_pubmed.pt",
+    "nilearn": "cnn_t2b_nilearn.pt",
+    "neurovault": "cnn_t2b_neurovault.pt",
+}
 
 
 def _neuro_qformer_repo_id(qformer_variant: str | None = "canonical") -> str:
@@ -610,6 +661,203 @@ def _load_pubmed_images() -> torch.Tensor:
     ).values()
     return images, pmids
 
+
+def _ale_only_cache_filename(
+    mode: str = "atlas_free",
+    *,
+    resolution_mm: int | float = 4,
+    kernel_fwhm_mm: int | float = 9,
+    crop_to_brain: bool = True,
+    cache_dtype: str = "float16",
+) -> str:
+    """Return the uploaded ALE-only cache filename for legacy notebooks."""
+
+    mode = str(mode)
+    if mode not in ALE_ONLY_CACHE_FILENAMES:
+        raise ValueError(f"Unknown ALE-only cache mode {mode!r}; expected one of {sorted(ALE_ONLY_CACHE_FILENAMES)}")
+    if int(float(resolution_mm)) != 4 or float(kernel_fwhm_mm) != 9.0 or not bool(crop_to_brain) or str(cache_dtype) != "float16":
+        raise ValueError(
+            "Only the uploaded 4 mm, FWHM 9, cropped, float16 ALE-only caches are available on Hugging Face."
+        )
+    return ALE_ONLY_CACHE_FILENAMES[mode]
+
+
+@lru_cache(maxsize=8)
+def _load_ale_only_cache_path(
+    mode: str = "atlas_free",
+    *,
+    resolution_mm: int | float = 4,
+    kernel_fwhm_mm: int | float = 9,
+    crop_to_brain: bool = True,
+    cache_dtype: str = "float16",
+) -> str:
+    """Resolve an ALE-only cache from NeuroVLM's trusted dataset repo."""
+
+    filename = _ale_only_cache_filename(
+        mode,
+        resolution_mm=resolution_mm,
+        kernel_fwhm_mm=kernel_fwhm_mm,
+        crop_to_brain=crop_to_brain,
+        cache_dtype=cache_dtype,
+    )
+    return _download_from_hf(ATLAS_FREE_CNN_DATASET_REPO, filename, repo_type="dataset")
+
+
+@lru_cache(maxsize=8)
+def _load_ale_only_cache(
+    mode: str = "atlas_free",
+    *,
+    resolution_mm: int | float = 4,
+    kernel_fwhm_mm: int | float = 9,
+    crop_to_brain: bool = True,
+    cache_dtype: str = "float16",
+) -> dict:
+    """Load an ALE-only cache from NeuroVLM's trusted dataset repo."""
+
+    path = _load_ale_only_cache_path(
+        mode,
+        resolution_mm=resolution_mm,
+        kernel_fwhm_mm=kernel_fwhm_mm,
+        crop_to_brain=crop_to_brain,
+        cache_dtype=cache_dtype,
+    )
+    # This legacy payload contains NumPy metadata that the restricted
+    # unpickler cannot decode. The path is safe-by-default because callers
+    # cannot override the fixed NeuroVLM repository above.
+    payload = torch.load(path, weights_only=False, map_location="cpu")
+    if not isinstance(payload, dict):
+        raise TypeError(f"Expected {path} to contain a dict payload.")
+    return payload
+
+
+@lru_cache(maxsize=1)
+def _load_atlas_free_cnn_volumes() -> dict:
+    """Load packed atlas-free CNN volumes from HuggingFace."""
+
+    volume_path = _download_from_hf(
+        ATLAS_FREE_CNN_DATASET_REPO,
+        "atlas_free_cnn_volumes.pt",
+    )
+    payload = torch.load(volume_path, weights_only=False, map_location="cpu")
+    if not isinstance(payload, dict) or "volumes" not in payload:
+        raise TypeError("Expected atlas_free_cnn_volumes.pt to contain a dict with a 'volumes' tensor.")
+    payload["volumes"] = torch.as_tensor(payload["volumes"]).cpu()
+    return payload
+
+
+@lru_cache(maxsize=3)
+def _load_atlas_free_cnn_split_path(split: str) -> str:
+    """Resolve a published atlas-free CNN split through the HF cache."""
+
+    split = str(split).lower()
+    if split not in ATLAS_FREE_CNN_SPLIT_FILENAMES:
+        expected = ", ".join(ATLAS_FREE_CNN_SPLIT_FILENAMES)
+        raise ValueError(f"Unknown atlas-free CNN split {split!r}; expected one of: {expected}.")
+    return _download_from_hf(
+        ATLAS_FREE_CNN_DATASET_REPO,
+        ATLAS_FREE_CNN_SPLIT_FILENAMES[split],
+        repo_type="dataset",
+    )
+
+
+@lru_cache(maxsize=3)
+def _load_atlas_free_cnn_split_rows(split: str) -> tuple[dict[str, Any], ...]:
+    """Load a published atlas-free CNN JSONL split from Hugging Face."""
+
+    path = Path(_load_atlas_free_cnn_split_path(split))
+    rows: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid JSON in {path} at line {line_number}.") from exc
+            if not isinstance(row, dict):
+                raise TypeError(f"Expected an object in {path} at line {line_number}.")
+            rows.append(row)
+    return tuple(rows)
+
+
+@lru_cache(maxsize=1)
+def _load_atlas_free_cnn_rows() -> pd.DataFrame:
+    """Load map-level atlas-free CNN metadata from HuggingFace."""
+
+    rows_path = _download_from_hf(
+        ATLAS_FREE_CNN_DATASET_REPO,
+        "atlas_free_cnn_rows.parquet",
+    )
+    try:
+        return pd.read_parquet(rows_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(rows_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_atlas_free_cnn_text_pairs() -> pd.DataFrame:
+    """Load text-pair table for the packed atlas-free CNN dataset."""
+
+    pairs_path = _download_from_hf(
+        ATLAS_FREE_CNN_DATASET_REPO,
+        "atlas_free_cnn_text_pairs.parquet",
+    )
+    try:
+        return pd.read_parquet(pairs_path, engine="pyarrow")
+    except Exception as exc:  # pragma: no cover
+        print(f"pyarrow failed: {exc}, trying fastparquet...")
+        return pd.read_parquet(pairs_path, engine="fastparquet")
+
+
+@lru_cache(maxsize=1)
+def _load_atlas_free_cnn_normalized_specter2_cache() -> dict:
+    """Load the normalized SPECTER2 atlas-free CNN text cache."""
+
+    cache_path = _download_from_hf(
+        ATLAS_FREE_CNN_DATASET_REPO,
+        ATLAS_FREE_CNN_NORMALIZED_SPECTER2_FILENAME,
+    )
+    payload = torch.load(cache_path, weights_only=False, map_location="cpu")
+    if not isinstance(payload, dict) or not torch.is_tensor(payload.get("embeddings")):
+        raise TypeError("Expected normalized SPECTER2 cache to contain an 'embeddings' tensor.")
+    embeddings = payload["embeddings"].float().cpu()
+    if embeddings.ndim != 2 or embeddings.shape[1] != 768:
+        raise ValueError(f"Expected normalized SPECTER2 embeddings with shape N x 768, got {tuple(embeddings.shape)}")
+    if not torch.isfinite(embeddings).all():
+        raise ValueError("Normalized SPECTER2 cache contains NaNs or infinities.")
+    norms = embeddings.norm(dim=1)
+    if float((norms.sub(1).abs() <= 1e-3).float().mean()) < 0.999:
+        raise ValueError("Normalized SPECTER2 cache is not approximately unit-normalized.")
+    payload["embeddings"] = embeddings
+    return payload
+
+
+@lru_cache(maxsize=1)
+def _load_atlas_free_cnn_normalized_specter2_embeddings() -> Tuple[torch.Tensor, np.ndarray, dict]:
+    """Return normalized SPECTER2 embeddings, text IDs, and metadata."""
+
+    payload = _load_atlas_free_cnn_normalized_specter2_cache()
+    text_ids = np.asarray(payload.get("text_ids", []))
+    if len(text_ids) != int(payload["embeddings"].shape[0]):
+        raise ValueError("Normalized SPECTER2 cache text_ids length does not match embeddings.")
+    return payload["embeddings"], text_ids, payload.get("metadata", {})
+
+
+@lru_cache(maxsize=1)
+def _load_atlas_free_cnn_dataset() -> dict:
+    """Load packed atlas-free CNN volumes plus rows and text pairs."""
+
+    volume_payload = _load_atlas_free_cnn_volumes()
+    rows = _load_atlas_free_cnn_rows()
+    text_pairs = _load_atlas_free_cnn_text_pairs()
+    return {
+        **volume_payload,
+        "rows": rows,
+        "text_pairs": text_pairs,
+    }
+
+
 def _load_latent_networks_canonical_text() -> dict:
     """Load latent network atlases."""
     latent_path = _download_from_hf(
@@ -962,3 +1210,96 @@ def _load_latent_llm_neuro_terms() -> Tuple[torch.Tensor, np.ndarray]:
     latent = latent_payload["latent"]
     terms = np.asarray(latent_payload["term"])
     return latent, terms
+
+
+@lru_cache(maxsize=8)
+def _load_cnn_contrastive_checkpoint_path(variant: str) -> str:
+    """Resolve a Stage 3 CNN contrastive checkpoint (brain encoder + text proj) from HuggingFace.
+
+    ``variant`` is one of the three ``mixed_to_{domain}`` baseline branches
+    (mixed AE encoder evaluated on that domain) or one of the three
+    domain-specialized branches (``pubmed``, ``nilearn``, ``neurovault``).
+    All six variants are uploaded to the ``neurovlm/3d_cnn`` model repo;
+    callers should still handle a missing/renamed file gracefully in case a
+    variant is later pulled or renamed upstream.
+    """
+    if variant not in CNN_CONTRASTIVE_FILENAMES:
+        raise ValueError(
+            f"Unknown CNN contrastive variant {variant!r}; expected one of {sorted(CNN_CONTRASTIVE_FILENAMES)}"
+        )
+    return _download_from_hf(ATLAS_FREE_CNN_MODEL_REPO_ID, CNN_CONTRASTIVE_FILENAMES[variant], repo_type="model")
+
+
+@lru_cache(maxsize=8)
+def _load_cnn_t2b_checkpoint_path(variant: str) -> str:
+    """Resolve a Stage 4 CNN text-to-brain projector checkpoint from HuggingFace.
+
+    ``variant`` is one of the three ``mixed_to_{domain}`` baseline branches
+    (mixed AE decoder paired with a projector trained for that domain) or one
+    of the three domain-specialized branches (``pubmed``, ``nilearn``,
+    ``neurovault``). All six variants are uploaded to the ``neurovlm/3d_cnn``
+    model repo; callers should still handle a missing/renamed file gracefully
+    in case a variant is later pulled or renamed upstream.
+    """
+    if variant not in CNN_T2B_FILENAMES:
+        raise ValueError(
+            f"Unknown CNN text-to-brain variant {variant!r}; expected one of {sorted(CNN_T2B_FILENAMES)}"
+        )
+    return _download_from_hf(ATLAS_FREE_CNN_MODEL_REPO_ID, CNN_T2B_FILENAMES[variant], repo_type="model")
+
+
+def _load_trusted_cnn_checkpoint(filename: str) -> dict[str, Any]:
+    """Load tensor weights and primitive metadata from NeuroVLM's model repo.
+
+    The repository is intentionally fixed here. ``weights_only=True`` keeps
+    PyTorch's restricted unpickler enabled for these public checkpoints.
+    """
+
+    path = _download_from_hf(ATLAS_FREE_CNN_MODEL_REPO_ID, filename, repo_type="model")
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(payload, dict):
+        raise TypeError(f"Expected {filename} to contain a checkpoint dictionary")
+    return payload
+
+
+def _load_cnn_autoencoder(variant: str = "mixed") -> torch.nn.Module:
+    """Load a fresh pretrained atlas-free CNN autoencoder by domain variant.
+
+    Hugging Face caches the immutable checkpoint file.  The trainable module
+    itself is intentionally not cached so callers cannot mutate shared model
+    state across inference or fine-tuning runs.
+    """
+
+    if variant not in CNN_AUTOENCODER_FILENAMES:
+        raise ValueError(
+            f"Unknown CNN autoencoder variant {variant!r}; expected one of {sorted(CNN_AUTOENCODER_FILENAMES)}"
+        )
+    from neurovlm.cnn import autoencoder_from_payload
+
+    return autoencoder_from_payload(_load_trusted_cnn_checkpoint(CNN_AUTOENCODER_FILENAMES[variant]))
+
+
+def _load_cnn_contrastive(variant: str = "pubmed") -> torch.nn.Module:
+    """Load a fresh pretrained Stage 3 CNN brain/text contrastive model."""
+
+    if variant not in CNN_CONTRASTIVE_FILENAMES:
+        raise ValueError(
+            f"Unknown CNN contrastive variant {variant!r}; expected one of {sorted(CNN_CONTRASTIVE_FILENAMES)}"
+        )
+    from neurovlm.cnn import contrastive_from_payload
+
+    return contrastive_from_payload(_load_trusted_cnn_checkpoint(CNN_CONTRASTIVE_FILENAMES[variant]))
+
+
+def _load_cnn_text_to_brain(variant: str = "pubmed") -> torch.nn.Module:
+    """Load a fresh pretrained Stage 4 CNN text-to-brain generator."""
+
+    if variant not in CNN_T2B_FILENAMES:
+        raise ValueError(
+            f"Unknown CNN text-to-brain variant {variant!r}; expected one of {sorted(CNN_T2B_FILENAMES)}"
+        )
+    from neurovlm.cnn import text_to_brain_from_payload
+
+    autoencoder_variant = "mixed" if variant.startswith("mixed_to_") else variant
+    payload = _load_trusted_cnn_checkpoint(CNN_T2B_FILENAMES[variant])
+    return text_to_brain_from_payload(payload, _load_cnn_autoencoder(autoencoder_variant))

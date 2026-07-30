@@ -19,7 +19,14 @@ class QFormer(nn.Module):
         dropout=0.05
     ):
         super().__init__()
+        self.image_dim = int(image_dim)
+        self.semantic_dim = int(semantic_dim)
+        self.lm_dim = int(lm_dim)
         self.num_queries = num_queries
+        self.hidden_dim = int(hidden_dim)
+        self.num_heads = int(num_heads)
+        self.num_layers = int(num_layers)
+        self.dropout = float(dropout)
         self.raw_proj = nn.Sequential(
             nn.LayerNorm(image_dim),
             nn.Linear(image_dim, hidden_dim),
@@ -282,6 +289,26 @@ class NeuroQFormer(nn.Module):
             return tokens, semantic_images
         return tokens
 
+    def architecture_config(self) -> dict[str, int | float | str | bool | None]:
+        """Return the constructor values needed for a standalone reload."""
+
+        qformer = self.qformer
+        return {
+            "architecture": "NeuroQFormer",
+            "image_dim": int(qformer.image_dim),
+            "semantic_dim": int(qformer.semantic_dim),
+            "lm_dim": int(qformer.lm_dim),
+            "num_queries": int(qformer.num_queries),
+            "hidden_dim": int(qformer.hidden_dim),
+            "num_heads": int(qformer.num_heads),
+            "num_layers": int(qformer.num_layers),
+            "dropout": float(qformer.dropout),
+            "projection_temp": self.projection_temp,
+            "canonical_basis": self.canonical_basis,
+            "use_canonical_projection": self.use_canonical_projection,
+            "projection_type": type(self.proj_head_image).__name__,
+        }
+
     @classmethod
     def from_state_dict_payload(
         cls,
@@ -290,18 +317,27 @@ class NeuroQFormer(nn.Module):
         map_location: str | torch.device = "cpu",
     ) -> "NeuroQFormer":
         """Instantiate from a saved payload or raw state dict."""
-        state = payload.get("state_dict", payload)
-        config = payload.get("config", {})
+        state = payload.get("model_state_dict", payload.get("state_dict", payload))
+        config = payload.get("config", payload.get("architecture", {}))
 
         def _bank(name: str) -> torch.Tensor:
             key = f"canonical_projection.{name}_bank"
             return state.get(key, torch.empty(0, config.get("semantic_dim", 384)))
 
         proj_head_image = None
-        if any(str(key).startswith("proj_head_image.") for key in state):
+        projection_keys = [str(key) for key in state if str(key).startswith("proj_head_image.")]
+        if projection_keys:
             from neurovlm.models import ProjHead
 
-            proj_head_image = ProjHead(384, 384, 384)
+            first = state.get("proj_head_image.aligner.0.weight")
+            last = state.get("proj_head_image.aligner.2.weight")
+            if first is None or last is None:
+                raise ValueError(
+                    "Unsupported proj_head_image state; expected the retained ProjHead layout"
+                )
+            proj_head_image = ProjHead(
+                int(first.shape[1]), int(first.shape[0]), int(last.shape[0])
+            )
 
         canonical_banks = {name: _bank(name) for name in CanonicalProjection.bank_names}
         model = cls(

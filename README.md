@@ -66,6 +66,43 @@ text_matches = nvlm.brain(auditory).to_text(head="infonce")
 df_brain_to_text = text_matches.top_k(3)
 ```
 
+Select either model family with the structured inference API. CNN autoencoders
+always default to the mixed-source baseline; domain-specific contrastive and
+text-to-brain heads use the mixed baseline unless `variant="finetuned"` is
+requested explicitly:
+
+```python
+from neurovlm.runtime import load_pipeline
+
+autoencoder = load_pipeline(family="cnn", task="autoencoder")
+contrastive = load_pipeline(
+    family="cnn", task="contrastive", domain="pubmed"
+)
+text_to_brain = load_pipeline(
+    family="cnn", task="text_to_brain", domain="nilearn"
+)
+
+# The same task-level surface loads a standardized local training run.
+local = load_pipeline(
+    family="cnn", task="contrastive", domain="pubmed",
+    from_run="runs/<run-id>",
+)
+```
+
+Training uses typed configs and automatically writes reproducible config,
+provenance, best/last checkpoints, metric CSVs, plots, and logs:
+
+```python
+from neurovlm.training import ContrastiveTrainConfig, train_contrastive
+
+result = train_contrastive(ContrastiveTrainConfig(domain="neurovault"))
+print(result.run_dir / "metrics/history.csv")
+```
+
+See the atlas-free CNN tutorial and technical guide for all PubMed, Nilearn,
+and NeuroVault switches; MLP/CNN reconstruction, retrieval, and generation;
+resume; and explicit local-run chaining.
+
 ## Documentation
 
 See the [docs](https://neurovlm.github.io/neurovlm/) for the [API](https://neurovlm.github.io/neurovlm/api.html) and [tutorials](https://neurovlm.github.io/neurovlm/tutorials/index.html).

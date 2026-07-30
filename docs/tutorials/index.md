@@ -11,6 +11,6 @@ The tutorial content is notebook-based.
 03_generative_text-to-brain
 04_generative_brain-to-text
 05_custom_corpus
+06_atlas_free_cnn
 cogatlas_concepts
 ```
-

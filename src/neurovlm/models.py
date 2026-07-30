@@ -5,6 +5,16 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from neurovlm.model_registry import (
+    ModelDomain,
+    ModelFamily,
+    ModelLoader,
+    ModelSpec,
+    ModelTask,
+    ModelVariant,
+    resolve_model_spec,
+)
+
 class NormalizeLayer(nn.Module):
     def forward(self, x):
         return F.normalize(x, dim=1)
@@ -197,7 +207,15 @@ class Specter:
         disable_progress_bar()
 
         self.device = torch.device(device)
-        tokenizer = AutoTokenizer.from_pretrained(f'{model}_base')
+        # Prefer an existing Hugging Face cache without making a network HEAD
+        # request on every comparison run. Fall back to the normal download
+        # path when the tokenizer is not cached yet.
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                f'{model}_base', local_files_only=True
+            )
+        except Exception:
+            tokenizer = AutoTokenizer.from_pretrained(f'{model}_base')
         self.sep_token = tokenizer.sep_token
         self.tokenizer = lambda text : tokenizer(
             text,
@@ -365,48 +383,90 @@ class ConceptClf(nn.Module):
         raise NotImplementedError
 
 
-# Unified interface for all datasets
-def load_model(name: str):
-    """Alias to .from_pretrained methods in model classes.
+# Unified interface for all packaged models
+def _load_resolved_model(spec: ModelSpec):
+    """Dispatch a resolved model specification to its resource loader."""
+
+    if spec.loader is ModelLoader.CNN_AUTOENCODER:
+        from neurovlm.retrieval_resources import _load_cnn_autoencoder
+
+        return _load_cnn_autoencoder(spec.loader_variant)
+    if spec.loader is ModelLoader.CNN_CONTRASTIVE:
+        from neurovlm.retrieval_resources import _load_cnn_contrastive
+
+        return _load_cnn_contrastive(spec.loader_variant)
+    if spec.loader is ModelLoader.CNN_TEXT_TO_BRAIN:
+        from neurovlm.retrieval_resources import _load_cnn_text_to_brain
+
+        return _load_cnn_text_to_brain(spec.loader_variant)
+    if spec.loader is ModelLoader.MLP_TEXT_INFONCE:
+        return ProjHead().from_pretrained("text_infonce")
+    if spec.loader is ModelLoader.MLP_IMAGE_INFONCE:
+        return ProjHead().from_pretrained("image_infonce")
+    if spec.loader is ModelLoader.MLP_TEXT_MSE:
+        return ProjHead().from_pretrained("text_mse")
+    if spec.loader is ModelLoader.MLP_AUTOENCODER:
+        return NeuroAutoEncoder.from_pretrained()
+    if spec.loader is ModelLoader.MLP_SPECTER:
+        return Specter()
+    if spec.loader is ModelLoader.MLP_NEURO_QFORMER:
+        from neurovlm.retrieval_resources import _load_neuro_qformer
+
+        if spec.loader_variant is not None:
+            return _load_neuro_qformer(qformer_variant=spec.loader_variant)
+        return _load_neuro_qformer()
+    if spec.loader is ModelLoader.MLP_NEURO_ADAPTER:
+        from neurovlm.retrieval_resources import _load_neuro_adapter
+
+        return _load_neuro_adapter()
+    raise RuntimeError(f"Model registry contains unsupported loader {spec.loader!r}")
+
+
+def load_model(
+    name: str | None = None,
+    *,
+    family: ModelFamily | str = ModelFamily.MLP,
+    task: ModelTask | str | None = None,
+    domain: ModelDomain | str | None = None,
+    variant: ModelVariant | str | None = None,
+):
+    """Load a packaged model by legacy name or structured fields.
 
     Parameters
     ----------
-    name: str, {"proj_head_text_infonce", "proj_head_image_infonce", "proj_head_text_mse", "autoencoder", "specter"}
-        Name of model.
+    name : str, optional
+        Existing packaged-model name.  Every name supported before the
+        structured API remains an alias to the same checkpoint.
+    family : {"mlp", "cnn"}, default: "mlp"
+        Architecture family.  MLP remains the global default.
+    task : str, optional
+        Structured task identifier. Required when ``name`` is omitted.
+    domain : {"pubmed", "nilearn", "neurovault"}, optional
+        Required for CNN contrastive/text-to-brain models and for fine-tuned
+        CNN autoencoders.
+    variant : str, optional
+        CNN models default to ``mixed_baseline``. Domain-specialized CNN
+        checkpoints require the explicit value ``finetuned``.
 
     Returns
     -------
     model
+
+    Examples
+    --------
+    Existing calls continue to work:
+
+    >>> model = load_model("autoencoder")
+
+    Structured CNN selection defaults to the mixed baseline:
+
+    >>> model = load_model(family="cnn", task="contrastive", domain="nilearn")
     """
-    match name:
-        case "proj_head_text_infonce":
-            return ProjHead().from_pretrained("text_infonce")
-        case "proj_head_image_infonce":
-            return ProjHead().from_pretrained("image_infonce")
-        case "proj_head_text_mse":
-            return ProjHead().from_pretrained("text_mse")
-        case "autoencoder":
-            return NeuroAutoEncoder.from_pretrained()
-        case "specter":
-            return Specter()
-        case "neuro_qformer":
-            from neurovlm.retrieval_resources import _load_neuro_qformer
-            return _load_neuro_qformer()
-        case "neuro_qformer_pubmed":
-            from neurovlm.retrieval_resources import _load_neuro_qformer
-            return _load_neuro_qformer(qformer_variant="pubmed")
-        case "neuro_adapter":
-            from neurovlm.retrieval_resources import _load_neuro_adapter
-            return _load_neuro_adapter()
-        case _:
-            valid_names = [
-                "proj_head_text_infonce",
-                "proj_head_image_infonce",
-                "proj_head_text_mse",
-                "autoencoder",
-                "specter",
-                "neuro_qformer",
-                "neuro_qformer_pubmed",
-                "neuro_adapter",
-            ]
-            raise ValueError(f"{name} not in {valid_names}")
+    spec = resolve_model_spec(
+        name,
+        family=family,
+        task=task,
+        domain=domain,
+        variant=variant,
+    )
+    return _load_resolved_model(spec)

@@ -41,6 +41,10 @@ metrics = [
   "scikit-learn",
   "scikit-image",
 ]
+nct = [
+  "neuromaps",
+  "brainspace",
+]
 coords = [
   "nimare",
 ]
@@ -87,7 +91,9 @@ full = [
   "seaborn",
   "ipython",
   "ollama",
-  "accelerate"
+  "accelerate",
+  "neuromaps",
+  "brainspace"
 ]
 
 [tool.hatch.build.targets.wheel]
