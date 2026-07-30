@@ -7,7 +7,7 @@ NeuroVLM now exposes the atlas-free 3D CNN through the same package-level model 
 The mixed-source CNN autoencoder is always the CNN default. For contrastive and text-to-brain tasks, `domain` selects the PubMed, Nilearn, or NeuroVault head while the underlying default remains the mixed baseline. Fine-tuned autoencoders and heads are loaded only when `variant="finetuned"` is stated explicitly.
 
 ```python
-from neurovlm.runtime import load_pipeline
+from neurovlm import load_pipeline
 
 ae = load_pipeline(family="cnn", task="autoencoder")
 

@@ -72,7 +72,7 @@ text-to-brain heads use the mixed baseline unless `variant="finetuned"` is
 requested explicitly:
 
 ```python
-from neurovlm.runtime import load_pipeline
+from neurovlm import load_pipeline
 
 autoencoder = load_pipeline(family="cnn", task="autoencoder")
 contrastive = load_pipeline(
