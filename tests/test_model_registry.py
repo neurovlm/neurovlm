@@ -82,10 +82,15 @@ def test_cnn_autoencoder_finetuning_is_explicit(domain) -> None:
 def test_separate_brain_to_text_tasks_are_canonical_registry_entries() -> None:
     retrieval = resolve_model_spec(task="brain_to_text_retrieval")
     generation = resolve_model_spec(task="brain_to_text_generation")
+    pubmed_generation = resolve_model_spec("neuro_qformer_pubmed")
     assert retrieval.task is ModelTask.BRAIN_TO_TEXT_RETRIEVAL
     assert retrieval.loader is ModelLoader.MLP_IMAGE_INFONCE
     assert generation.task is ModelTask.BRAIN_TO_TEXT_GENERATION
     assert generation.loader is ModelLoader.MLP_NEURO_QFORMER
+    assert pubmed_generation.task is ModelTask.BRAIN_TO_TEXT_GENERATION
+    assert pubmed_generation.variant is ModelVariant.PUBMED
+    assert pubmed_generation.loader is ModelLoader.MLP_NEURO_QFORMER
+    assert pubmed_generation.loader_variant == "pubmed"
 
 
 @pytest.mark.parametrize("alias", sorted(MODEL_ALIASES))
@@ -189,11 +194,23 @@ def test_legacy_mlp_names_keep_exact_loader_dispatch(monkeypatch) -> None:
 
 def test_structured_special_mlp_tasks_dispatch_existing_resources(monkeypatch) -> None:
     qformer = object()
+    pubmed_qformer = object()
     adapter = object()
-    monkeypatch.setattr(resources, "_load_neuro_qformer", lambda: qformer)
+
+    def load_qformer(*, qformer_variant=None):
+        if qformer_variant == "pubmed":
+            return pubmed_qformer
+        return qformer
+
+    monkeypatch.setattr(resources, "_load_neuro_qformer", load_qformer)
     monkeypatch.setattr(resources, "_load_neuro_adapter", lambda: adapter)
 
     assert models.load_model(task="brain_to_text_generation") is qformer
+    assert models.load_model("neuro_qformer_pubmed") is pubmed_qformer
+    assert (
+        models.load_model(task="brain_to_text_generation", variant="pubmed")
+        is pubmed_qformer
+    )
     assert models.load_model(task="text_to_brain", variant="adapter") is adapter
 
 

@@ -21,7 +21,7 @@ TEXT_EMBED_DIM = 768
 LATENT_DIM = 384
 BRAIN_FLAT_DIM = 28542
 
-DEFAULT_TEXT_DATASETS = ("wiki", "cogatlas", "ngrams", "pubmed_mesh", "llm_neuro_terms")
+DEFAULT_TEXT_DATASETS = ("pubmed", "wiki", "cogatlas", "ngrams", "pubmed_mesh", "llm_neuro_terms")
 DATASET_ALIASES = {
     "publications": "pubmed",
     "summaries": "pubmed_summaries",
@@ -651,7 +651,6 @@ class _QueryBuilder:
     def to_brain(
         self,
         head: Literal["mse", "infonce"] = "mse",
-        project: bool = True,
         dataset: Optional[Union[str, Sequence[str]]] = None,
         adapter: bool = False,
     ) -> BrainSearchResult:
@@ -659,38 +658,42 @@ class _QueryBuilder:
         return self.parent.to_brain(
             self.payload,
             head=head,
-            project=project,
             dataset=dataset,
             adapter=adapter,
         )
 
     def generate_brain(
         self,
-        project: bool = True,
         adapter: bool = False,
     ) -> BrainSearchResult:
         """Generate brain maps from text with the MSE decoder path."""
         if self.source != "text":
             raise ValueError("generate_brain is only available for text(...) queries.")
-        return self.parent.generate_brain(self.payload, project=project, adapter=adapter)
+        return self.parent.generate_brain(self.payload, adapter=adapter)
 
     def retrieve_brain(
         self,
-        project: bool = True,
         dataset: Optional[Union[str, Sequence[str]]] = None,
     ) -> BrainSearchResult:
         """Retrieve brain maps with the contrastive InfoNCE path."""
-        return self.parent.retrieve_brain(self.payload, project=project, dataset=dataset)
+        return self.parent.retrieve_brain(self.payload, dataset=dataset)
 
     def to_text(
         self,
-        head: Literal["mse", "infonce"] = "infonce",
+        head: Literal["qformer", "infonce"] = "qformer",
         datasets: Optional[Sequence[str]] = None,
-    ) -> TextSearchResult:
+        **generate_kwargs: Any,
+    ) -> Union[TextSearchResult, str, list[str]]:
         """Run text/brain query against the text target space."""
-        if head != "infonce":
-            raise ValueError("to_text only supports head='infonce'.")
-        return self.parent.to_text(self.payload, datasets=datasets, project=True)
+        if head == "qformer" and self.source != "brain":
+            raise ValueError("to_text(head='qformer') is only available for brain(...) queries.")
+        return self.parent.to_text(
+            self.payload,
+            head=head,
+            datasets=datasets,
+            project=True,
+            **generate_kwargs,
+        )
 
     def retrieve_text(self, datasets: Optional[Sequence[str]] = None) -> TextSearchResult:
         """Retrieve text with the contrastive InfoNCE path."""
@@ -709,7 +712,8 @@ class _QueryBuilder:
         top_p: float | None = None,
         seed: int | None = 12345,
         projection_temp: float | None = 0.05,
-        use_canonical_projection: bool | None = True,
+        use_canonical_projection: bool | None = None,
+        qformer_variant: str | None = "canonical",
         repetition_penalty: float = 1.18,
         no_repeat_ngram_size: int = 4,
     ) -> str | list[str]:
@@ -729,6 +733,7 @@ class _QueryBuilder:
             seed=seed,
             projection_temp=projection_temp,
             use_canonical_projection=use_canonical_projection,
+            qformer_variant=qformer_variant,
             repetition_penalty=repetition_penalty,
             no_repeat_ngram_size=no_repeat_ngram_size,
         )
@@ -761,6 +766,7 @@ class NeuroVLM:
         self._autoencoder = None
         self._masker = None
         self._neuro_qformer = None
+        self._neuro_qformer_variant: Optional[str] = None
         self._neuro_qwen_model = None
         self._neuro_qwen_tokenizer = None
         self._neuro_qwen_token_norm: Optional[float] = None
@@ -817,10 +823,12 @@ class NeuroVLM:
     def to_text(
         self,
         X: Any,
+        head: Literal["qformer", "infonce"] = "qformer",
         datasets: Optional[Sequence[str]] = None,
         project: bool = True,
-    ) -> TextSearchResult:
-        """Retrieve text results for one or many queries.
+        **generate_kwargs: Any,
+    ) -> Union[TextSearchResult, str, list[str]]:
+        """Generate or retrieve text results for one or many queries.
 
         Parameters
         ----------
@@ -831,16 +839,38 @@ class NeuroVLM:
             - Brain latent embeddings of shape ``(384,)`` or ``(N, 384)``
             - Flattened brain vectors of shape ``(28542,)`` or ``(N, 28542)``
             - ``nibabel.Nifti1Image``
+        head : {"qformer", "infonce"}, optional
+            ``"qformer"`` generates text with the QFormer/Qwen path and is
+            the default. ``"infonce"`` retrieves text contrastively.
         datasets : sequence of str, optional
             Optional subset of initialized text datasets.
+            Only used with ``head="infonce"``.
         project : bool, optional
             Whether to use projection heads. Required for brain-to-text retrieval.
+            Only used with ``head="infonce"``.
+
 
         Returns
         -------
-        TextSearchResult
-            Retrieval object exposing ``top_k``/``print``.
+        str, list[str], or TextSearchResult
+            Generated text for ``head="qformer"``; retrieval object exposing
+            ``top_k``/``print`` for ``head="infonce"``.
         """
+        if "method" in generate_kwargs:
+            raise TypeError("to_text() got an unexpected keyword argument 'method'")
+        if head == "qformer":
+            if datasets is not None:
+                raise ValueError("datasets only applies to to_text(head='infonce').")
+            return self.generate_text(X, **generate_kwargs)
+        if head != "infonce":
+            raise ValueError("head must be either 'qformer' or 'infonce'.")
+        if generate_kwargs:
+            names = ", ".join(sorted(generate_kwargs))
+            raise TypeError(
+                "Generation keyword arguments only apply to head='qformer'; "
+                f"got: {names}."
+            )
+
         query, retrieval_space = self._prepare_text_query(X, project=project)
         dataset_names = self._resolve_active_datasets(datasets)
         self._ensure_text_indices(dataset_names, require_shared=(retrieval_space == "shared"))
@@ -870,7 +900,7 @@ class NeuroVLM:
         project: bool = True,
     ) -> TextSearchResult:
         """Alias for contrastive text retrieval. Keeps ``to_text`` semantics explicit."""
-        return self.to_text(X, datasets=datasets, project=project)
+        return self.to_text(X, head="infonce", datasets=datasets, project=project)
 
     def generate_text(
         self,
@@ -886,14 +916,14 @@ class NeuroVLM:
         top_p: float | None = None,
         seed: int | None = 12345,
         projection_temp: float | None = 0.05,
-        use_canonical_projection: bool | None = True,
+        use_canonical_projection: bool | None = None,
+        qformer_variant: str | None = "canonical",
         repetition_penalty: float = 1.18,
         no_repeat_ngram_size: int = 4,
     ) -> str | list[str]:
         """Generate text for one or more brain maps with NeuroQFormer + NeuroQwen3.
 
-        This is intentionally separate from ``to_text``, which remains the
-        contrastive retrieval API.
+        This path is also exposed through ``to_text(head="qformer")``.
         """
         return self._generate_brain_text(
             X,
@@ -908,6 +938,7 @@ class NeuroVLM:
             seed=seed,
             projection_temp=projection_temp,
             use_canonical_projection=use_canonical_projection,
+            qformer_variant=qformer_variant,
             repetition_penalty=repetition_penalty,
             no_repeat_ngram_size=no_repeat_ngram_size,
         )
@@ -916,20 +947,18 @@ class NeuroVLM:
         self,
         X: Any,
         head: Literal["mse", "infonce"] = "mse",
-        project: bool = True,
         dataset: Optional[Union[str, Sequence[str]]] = None,
         adapter: bool = False,
     ) -> BrainSearchResult:
-        """Retrieve brain results for one or many queries.
+        """Generate or retrieve brain results for one or many queries.
 
         Parameters
         ----------
         X : Any
             Query payload with same supported types as ``to_text``.
         head : {"mse", "infonce"}, optional
-            Projection mode for text-to-brain retrieval.
-        project : bool, optional
-            Whether to use projection heads. Required for text-to-brain retrieval.
+            ``"mse"`` generates brain maps; ``"infonce"`` retrieves brain
+            maps after projecting the query into the shared contrastive space.
         dataset : str or sequence of str, optional
             Retrieval corpus/corpora for InfoNCE text-to-brain search.
             Defaults to ``("pubmed", "networks", "neurovault")`` for InfoNCE.
@@ -944,7 +973,7 @@ class NeuroVLM:
         Returns
         -------
         BrainSearchResult
-            Retrieval object exposing ``top_k``/``print``.
+            Generated maps for the MSE path or ranked results for InfoNCE.
         """
         # Track original text query so generate_llm_response can run text-to-text
         # retrieval internally for context when the user is in text-to-brain mode.
@@ -990,7 +1019,7 @@ class NeuroVLM:
             self._last_result = result
             return result
 
-        query, retrieval_space = self._prepare_brain_query(X, head=head, project=project)
+        query, retrieval_space = self._prepare_brain_query(X, head=head)
 
         # MSE path: decode projected text latents directly to brain flatmaps.
         if retrieval_space == "mse":
@@ -1088,20 +1117,18 @@ class NeuroVLM:
     def generate_brain(
         self,
         X: Any,
-        project: bool = True,
         adapter: bool = False,
     ) -> BrainSearchResult:
         """Alias for text-to-brain generation via ``to_brain(head='mse')``."""
-        return self.to_brain(X, head="mse", project=project, adapter=adapter)
+        return self.to_brain(X, head="mse", adapter=adapter)
 
     def retrieve_brain(
         self,
         X: Any,
-        project: bool = True,
         dataset: Optional[Union[str, Sequence[str]]] = None,
     ) -> BrainSearchResult:
         """Alias for contrastive brain retrieval via ``to_brain(head='infonce')``."""
-        return self.to_brain(X, head="infonce", project=project, dataset=dataset)
+        return self.to_brain(X, head="infonce", dataset=dataset)
 
     def top_k(
         self,
@@ -1247,18 +1274,15 @@ class NeuroVLM:
         self,
         X: Any,
         head: Literal["mse", "infonce"],
-        project: bool,
     ) -> Tuple[torch.Tensor, Literal["mse", "infonce"]]:
-        """Prepare query vectors for brain retrieval."""
+        """Prepare query vectors for brain generation or retrieval."""
         if self._is_text_payload(X):
-            if not project:
-                raise ValueError("text-to-brain retrieval requires `project=True`.")
             text_emb = self._encode_text(X)
             return self._project_text_to_brain_space(text_emb, head=head)
 
         if isinstance(X, nib.Nifti1Image):
             latent = self._encode_brain_image(X)
-            return self._project_brain_latent_for_brain_search(latent, head=head, project=project)
+            return self._project_brain_latent_for_brain_search(latent, head=head)
 
         tensor = self._coerce_numeric_query(X)
         if tensor is None:
@@ -1268,16 +1292,14 @@ class NeuroVLM:
 
         dim = int(tensor.shape[1])
         if dim == TEXT_EMBED_DIM:
-            if not project:
-                raise ValueError("text-to-brain retrieval requires `project=True`.")
             return self._project_text_to_brain_space(tensor.to(self.device), head=head)
 
         if dim == BRAIN_FLAT_DIM:
             latent = self._encode_brain_flat(tensor)
-            return self._project_brain_latent_for_brain_search(latent, head=head, project=project)
+            return self._project_brain_latent_for_brain_search(latent, head=head)
 
         if dim == LATENT_DIM:
-            return self._project_brain_latent_for_brain_search(tensor.to(self.device), head=head, project=project)
+            return self._project_brain_latent_for_brain_search(tensor.to(self.device), head=head)
 
         raise ValueError(
             f"Unsupported embedding dim {dim}. Expected {TEXT_EMBED_DIM}, {LATENT_DIM}, or {BRAIN_FLAT_DIM}."
@@ -1318,10 +1340,9 @@ class NeuroVLM:
         self,
         latent: torch.Tensor,
         head: Literal["mse", "infonce"],
-        project: bool,
     ) -> Tuple[torch.Tensor, Literal["mse", "infonce"]]:
         """Prepare latent brain embeddings for brain retrieval."""
-        if head == "infonce" and project:
+        if head == "infonce":
             self._ensure_projection_heads()
             with torch.no_grad():
                 out = self._proj_head_image_infonce(latent.to(self.device))
@@ -1876,19 +1897,22 @@ class NeuroVLM:
         *,
         projection_temp: float | None = 0.05,
         canonical_basis: str | None = "network",
-        use_canonical_projection: bool | None = True,
+        use_canonical_projection: bool | None = None,
+        qformer_variant: str | None = "canonical",
     ) -> None:
         """Lazy-load NeuroQFormer and NeuroQwen for brain-to-text generation."""
         from transformers import AutoModelForCausalLM, AutoTokenizer
         from neurovlm.retrieval_resources import NEURO_QWEN_REPO_ID, _load_neuro_qformer
 
-        if self._neuro_qformer is None:
+        if self._neuro_qformer is None or self._neuro_qformer_variant != qformer_variant:
             self._neuro_qformer = _load_neuro_qformer(
                 device=self.device,
                 projection_temp=projection_temp,
                 canonical_basis=canonical_basis,
                 use_canonical_projection=use_canonical_projection,
+                qformer_variant=qformer_variant,
             ).eval()
+            self._neuro_qformer_variant = qformer_variant
         else:
             self._neuro_qformer.projection_temp = projection_temp
             self._neuro_qformer.canonical_basis = canonical_basis
@@ -1946,6 +1970,13 @@ class NeuroVLM:
             "function": "[FUNCTION]",
         }.get(key)
 
+    @staticmethod
+    def _normalize_qformer_variant(qformer_variant: str | None) -> str:
+        key = "canonical" if qformer_variant is None else str(qformer_variant).lower()
+        if key not in {"canonical", "pubmed"}:
+            raise ValueError("qformer_variant must be 'canonical' or 'pubmed'.")
+        return key
+
     def _prepare_brain_latent_for_generation(self, X: Any) -> torch.Tensor:
         """Prepare NIfTI, mask-space vectors, or latent vectors for QFormer generation."""
         if self._is_text_payload(X):
@@ -1985,19 +2016,23 @@ class NeuroVLM:
         top_p: float | None = None,
         seed: int | None = 12345,
         projection_temp: float | None = 0.05,
-        use_canonical_projection: bool | None = True,
+        use_canonical_projection: bool | None = None,
+        qformer_variant: str | None = "canonical",
         repetition_penalty: float = 1.18,
         no_repeat_ngram_size: int = 4,
     ) -> str | list[str]:
         """Internal QFormer/Qwen generation path for brain inputs."""
+        qformer_variant = self._normalize_qformer_variant(qformer_variant)
         canonical_basis = basis if canonical_basis is None else canonical_basis
         self._ensure_generative_text_model(
             projection_temp=projection_temp,
             canonical_basis=canonical_basis,
             use_canonical_projection=use_canonical_projection,
+            qformer_variant=qformer_variant,
         )
         raw_latent = self._prepare_brain_latent_for_generation(X)
-        prefix_text = self._generation_prefix_for_basis(basis) if prefix_text is None else prefix_text
+        if prefix_text is None:
+            prefix_text = "" if qformer_variant == "pubmed" else self._generation_prefix_for_basis(basis)
 
         assert self._neuro_qformer is not None
         assert self._neuro_qwen_model is not None
@@ -2120,6 +2155,8 @@ class NeuroVLM:
             first = X[0]
             if isinstance(first, (int, float, np.number, list, tuple, np.ndarray)):
                 tensor = torch.as_tensor(X)
+            elif isinstance(first, torch.Tensor):
+                tensor = torch.vstack(X)
         if tensor is None:
             return None
         return self._as_2d_tensor(tensor)
@@ -2234,7 +2271,7 @@ class NeuroVLM:
     ) -> str:
         """Generate an LLM summary using the last retrieval result as context.
 
-        Call this after ``brain(...).to_text()`` (brain-to-text mode) or
+        Call this after ``brain(...).to_text(head="infonce")`` (brain-to-text mode) or
         ``text(...).to_brain()`` (text-to-brain mode).
 
         Parameters
@@ -2259,7 +2296,7 @@ class NeuroVLM:
             Pass the output of ``result.top_k(...).query(...)`` (or any filtered
             slice of it) to control precisely which rows the LLM sees::
 
-                result = nvlm.brain(img).to_text()
+                result = nvlm.brain(img).to_text(head="infonce")
                 filtered = result.top_k(5).query("cosine_similarity > 0.4")
                 nvlm.generate_llm_response(..., table=filtered)
 
@@ -2284,7 +2321,7 @@ class NeuroVLM:
 
         Notes
         -----
-        **Brain-to-text mode** (after ``brain(...).to_text()``):
+        **Brain-to-text mode** (after ``brain(...).to_text(head="infonce")``):
             The LLM receives the top-k text matches (publications,
             NeuroWiki concepts, CogAtlas terms) that were most similar to the
             input brain image and defines/explains them in that neuroimaging
@@ -2300,7 +2337,7 @@ class NeuroVLM:
         --------
         Brain-to-text with filtered table::
 
-            result = nvlm.brain(nifti_img).to_text()
+            result = nvlm.brain(nifti_img).to_text(head="infonce")
             filtered = result.top_k(5).query("cosine_similarity > 0.4")
             response = nvlm.generate_llm_response(
                 backend="ollama",
@@ -2318,7 +2355,7 @@ class NeuroVLM:
         """
         if self._last_result is None:
             raise ValueError(
-                "No results available. Run brain(...).to_text() or "
+                "No results available. Run brain(...).to_text(head='infonce') or "
                 "text(...).to_brain() first."
             )
 
@@ -2451,7 +2488,7 @@ class NeuroVLM:
             saved_last_result = self._last_result
             saved_last_text_result = self.last_text_result
             try:
-                text_result = self.to_text(self._last_text_query, datasets=["wiki", "cogatlas", "ngrams"])
+                text_result = self.to_text(self._last_text_query, head="infonce")
                 _table = text_result.top_k(k=k)
                 papers_ctx, wiki_ctx, cogatlas_ctx = self._format_table_as_context(_table)
             finally:

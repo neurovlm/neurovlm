@@ -15,6 +15,7 @@ import pandas as pd
 from neurovlm.retrieval_resources import (
     NEURO_ADAPTER_REPO_ID,
     NEURO_AUTOENCODER_REPO_ID,
+    NEURO_QFORMER_PUBMED_REPO_ID,
     NEURO_QFORMER_REPO_ID,
     NEURO_QWEN_REPO_ID,
     PROJECTION_HEADS_REPO_ID,
@@ -82,6 +83,7 @@ REPO_MODELS = {
     "NeuroAutoEncoder": NEURO_AUTOENCODER_REPO_ID,
     "ProjectionHeads": PROJECTION_HEADS_REPO_ID,
     "NeuroQformer": NEURO_QFORMER_REPO_ID,
+    "NeuroQformer-PubMed": NEURO_QFORMER_PUBMED_REPO_ID,
     "NeuroAdapter": NEURO_ADAPTER_REPO_ID,
 }
 

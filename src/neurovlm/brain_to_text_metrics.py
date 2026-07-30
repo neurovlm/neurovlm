@@ -197,7 +197,7 @@ def run_b2t_sample(
     datasets=None,
 ) -> list[dict[str, Any]]:
     try:
-        result = nvlm.brain(latent).to_text(datasets=datasets or b2t_datasets)
+        result = nvlm.brain(latent).to_text(head="infonce", datasets=datasets or b2t_datasets)
         all_table = result.top_k(b2t_top_k)
         table = all_table[all_table["cosine_similarity"] > b2t_sim_threshold]
         if table.empty:
@@ -380,7 +380,7 @@ def retrieval_table_for_sample(
     if cache_key in cache:
         return cache[cache_key]
     datasets = term_datasets_by_eval_dataset[dataset_name]
-    result = nvlm.brain(latent).to_text(datasets=datasets)
+    result = nvlm.brain(latent).to_text(head="infonce", datasets=datasets)
     all_table = result.top_k(max(b2t_term_top_k, b2t_evidence_top_k))
     table = all_table[all_table["cosine_similarity"] > b2t_sim_threshold]
     if table.empty:
@@ -403,7 +403,7 @@ def full_retrieval_table_for_sample(
     if cache_key is not None and cache_key in cache:
         return cache[cache_key]
     datasets = term_datasets_by_eval_dataset[dataset_name]
-    result = nvlm.brain(latent).to_text(datasets=datasets)
+    result = nvlm.brain(latent).to_text(head="infonce", datasets=datasets)
     n_candidates = sum(int(scores.shape[0]) for scores in result.scores_by_dataset.values())
     table = result.top_k(n_candidates)
     if cache_key is not None:

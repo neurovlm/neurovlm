@@ -82,17 +82,17 @@ def generate_train_data_from_brain(
 
         try:
             # Search concepts
-            concepts_result = nvlm.brain(brain_vector).to_text(datasets=["cogatlas"])
+            concepts_result = nvlm.brain(brain_vector).to_text(head="infonce", datasets=["cogatlas"])
             concepts_df = concepts_result.top_k(k=k_concepts)
             top_concepts = concepts_df["title"].tolist()
 
             # Search disorders
-            disorders_result = nvlm.brain(brain_vector).to_text(datasets=["cogatlas_disorder"])
+            disorders_result = nvlm.brain(brain_vector).to_text(head="infonce", datasets=["cogatlas_disorder"])
             disorders_df = disorders_result.top_k(k=k_disorders)
             top_disorders = disorders_df["title"].tolist()
 
             # Search tasks
-            tasks_result = nvlm.brain(brain_vector).to_text(datasets=["cogatlas_task"])
+            tasks_result = nvlm.brain(brain_vector).to_text(head="infonce", datasets=["cogatlas_task"])
             tasks_df = tasks_result.top_k(k=k_tasks)
             top_tasks = tasks_df["title"].tolist()
 
@@ -267,17 +267,17 @@ def generate_train_data_from_text(
 
         try:
             # Search concepts using text embedding
-            concepts_result = nvlm.text(text_embedding).to_text(datasets=["cogatlas"])
+            concepts_result = nvlm.text(text_embedding).to_text(head="infonce", datasets=["cogatlas"])
             concepts_df = concepts_result.top_k(k=k_concepts)
             top_concepts = concepts_df["title"].tolist()
 
             # Search disorders
-            disorders_result = nvlm.text(text_embedding).to_text(datasets=["cogatlas_disorder"])
+            disorders_result = nvlm.text(text_embedding).to_text(head="infonce", datasets=["cogatlas_disorder"])
             disorders_df = disorders_result.top_k(k=k_disorders)
             top_disorders = disorders_df["title"].tolist()
 
             # Search tasks
-            tasks_result = nvlm.text(text_embedding).to_text(datasets=["cogatlas_task"])
+            tasks_result = nvlm.text(text_embedding).to_text(head="infonce", datasets=["cogatlas_task"])
             tasks_df = tasks_result.top_k(k=k_tasks)
             top_tasks = tasks_df["title"].tolist()
 

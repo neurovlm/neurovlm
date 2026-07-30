@@ -95,6 +95,7 @@ NEURO_QWEN_REPO_ID = "neurovlm/NeuroQwen3-0.6B"
 NEURO_AUTOENCODER_REPO_ID = "neurovlm/NeuroAutoEncoder"
 PROJECTION_HEADS_REPO_ID = "neurovlm/ProjectionHeads"
 NEURO_QFORMER_REPO_ID = "neurovlm/NeuroQformer"
+NEURO_QFORMER_PUBMED_REPO_ID = "neurovlm/NeuroQformer-PubMed"
 NEURO_ADAPTER_REPO_ID = "neurovlm/NeuroAdapter"
 ATLAS_FREE_CNN_DATASET_REPO = "neurovlm/atlas_free_cnn_dataset"
 ATLAS_FREE_CNN_SPLIT_FILENAMES = {
@@ -132,6 +133,15 @@ CNN_T2B_FILENAMES = {
     "nilearn": "cnn_t2b_nilearn.pt",
     "neurovault": "cnn_t2b_neurovault.pt",
 }
+
+
+def _neuro_qformer_repo_id(qformer_variant: str | None = "canonical") -> str:
+    variant = "canonical" if qformer_variant is None else str(qformer_variant).lower()
+    if variant == "canonical":
+        return NEURO_QFORMER_REPO_ID
+    if variant == "pubmed":
+        return NEURO_QFORMER_PUBMED_REPO_ID
+    raise ValueError("qformer_variant must be 'canonical' or 'pubmed'.")
 
 
 def _download_from_hf(repo_id: str, filename: str, repo_type: str = "dataset") -> str:
@@ -991,19 +1001,21 @@ def _load_neuro_qformer(
     projection_temp: float | None = 0.05,
     canonical_basis: str | None = "all",
     use_canonical_projection: bool | None = None,
+    qformer_variant: str | None = "canonical",
 ) -> NeuroQFormer:
     """Load the packaged NeuroQFormer from HuggingFace.
 
     The package contains the QFormer, frozen image projection head, and frozen
     canonical projection banks as ``model.safetensors`` plus ``config.json``.
     """
+    repo_id = _neuro_qformer_repo_id(qformer_variant)
     model_path = _download_from_hf(
-        NEURO_QFORMER_REPO_ID,
+        repo_id,
         "model.safetensors",
         repo_type="model",
     )
     config_path = _download_from_hf(
-        NEURO_QFORMER_REPO_ID,
+        repo_id,
         "config.json",
         repo_type="model",
     )

@@ -412,6 +412,8 @@ def _load_resolved_model(spec: ModelSpec):
     if spec.loader is ModelLoader.MLP_NEURO_QFORMER:
         from neurovlm.retrieval_resources import _load_neuro_qformer
 
+        if spec.loader_variant is not None:
+            return _load_neuro_qformer(qformer_variant=spec.loader_variant)
         return _load_neuro_qformer()
     if spec.loader is ModelLoader.MLP_NEURO_ADAPTER:
         from neurovlm.retrieval_resources import _load_neuro_adapter

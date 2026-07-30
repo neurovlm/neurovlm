@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "neurovlm"
-version = "0.0.3"
+version = "0.0.5"
 dependencies = [
   "numpy",
   "pandas",
   "torch",
   "nibabel",
   "nilearn",
+  "matplotlib",
   "huggingface-hub",
   "safetensors",
   "adapters",
@@ -22,7 +23,7 @@ dependencies = [
 authors = [
   { name="Ryan Hammonds", email="ryanphammonds@gmail.com" },
 ]
-description = "Neuro vision-language models."
+description = "Neuroimaging vision-language models."
 readme = "README.md"
 requires-python = ">=3.10, <3.14"
 classifiers = [

@@ -1,5 +1,6 @@
 """Tests for loss module."""
 
+import math
 import numpy as np
 import pytest
 import torch
@@ -172,6 +173,69 @@ class TestInfoNCELoss:
 
         # Different temperatures should give different losses
         assert not torch.isclose(loss_low_temp, loss_high_temp)
+
+    def test_infonce_non_learnable_temperature_matches_legacy_formula(self):
+        """Test default path still uses fixed temperature exactly as before."""
+        torch.manual_seed(42)
+        image = torch.randn(8, 64)
+        text = torch.randn(8, 64)
+        temperature = 0.07
+
+        loss_fn = InfoNCELoss(
+            temperature=temperature,
+            learnable_temperature=False,
+            max_scale_logit=1.0,
+        )
+        loss = loss_fn(image, text)
+
+        image_norm = F.normalize(image, dim=1)
+        text_norm = F.normalize(text, dim=1)
+        logits = torch.matmul(image_norm, text_norm.T) / temperature
+        labels = torch.arange(image.size(0), device=image.device)
+        expected = (
+            F.cross_entropy(logits, labels) + F.cross_entropy(logits.T, labels)
+        ) / 2
+
+        assert torch.isclose(loss, expected)
+        assert len(list(loss_fn.parameters())) == 0
+
+    def test_infonce_learnable_temperature_initialization(self):
+        """Test learnable temperature creates a trainable CLIP-style logit scale."""
+        loss_fn = InfoNCELoss(temperature=0.07, learnable_temperature=True)
+
+        assert isinstance(loss_fn.logit_scale, torch.nn.Parameter)
+        assert loss_fn.logit_scale.requires_grad
+        assert torch.isclose(
+            loss_fn.logit_scale.detach().exp(),
+            torch.tensor(1.0 / 0.07),
+        )
+
+    def test_infonce_learnable_temperature_clips_logit_scale(self):
+        """Test learnable temperature caps the logit scaling factor."""
+        torch.manual_seed(42)
+        image = torch.randn(8, 64)
+        text = torch.randn(8, 64)
+
+        loss_fn = InfoNCELoss(
+            temperature=0.07,
+            learnable_temperature=True,
+            max_scale_logit=10.0,
+        )
+        with torch.no_grad():
+            loss_fn.logit_scale.fill_(math.log(100.0))
+
+        loss = loss_fn(image, text)
+
+        image_norm = F.normalize(image, dim=1)
+        text_norm = F.normalize(text, dim=1)
+        logits = torch.matmul(image_norm, text_norm.T) * 10.0
+        labels = torch.arange(image.size(0), device=image.device)
+        expected = (
+            F.cross_entropy(logits, labels) + F.cross_entropy(logits.T, labels)
+        ) / 2
+
+        assert torch.isclose(loss, expected)
+        assert loss_fn.logit_scale.detach().exp() <= 10.0
 
 
 class TestTruncatedLoss:

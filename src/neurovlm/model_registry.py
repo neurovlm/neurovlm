@@ -57,6 +57,7 @@ class ModelVariant(_StringEnum):
     MSE = "mse"
     ADAPTER = "adapter"
     QFORMER = "qformer"
+    PUBMED = "pubmed"
     SPECTER = "specter"
 
 
@@ -154,6 +155,14 @@ def _mlp_specs() -> list[ModelSpec]:
             ModelVariant.QFORMER,
             ModelLoader.MLP_NEURO_QFORMER,
             aliases=("neuro_qformer",),
+        ),
+        ModelSpec(
+            ModelFamily.MLP,
+            ModelTask.BRAIN_TO_TEXT_GENERATION,
+            ModelVariant.PUBMED,
+            ModelLoader.MLP_NEURO_QFORMER,
+            loader_variant="pubmed",
+            aliases=("neuro_qformer_pubmed",),
         ),
         ModelSpec(
             ModelFamily.MLP,
