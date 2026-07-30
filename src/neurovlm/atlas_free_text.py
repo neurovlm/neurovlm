@@ -130,6 +130,15 @@ class AtlasFreeTextEmbeddingLookup:
         except KeyError as error:
             raise KeyError(f"Text ID {key!r} is missing from the published normalized SPECTER2 cache") from error
 
+    def index(self, text_id: str) -> int:
+        """Return the immutable cache row for a text identifier."""
+
+        key = str(text_id)
+        try:
+            return int(self._indices[key])
+        except KeyError as error:
+            raise KeyError(f"Text ID {key!r} is missing from the published normalized SPECTER2 cache") from error
+
     def validate_dataset(self, rows: Sequence[Mapping[str, Any]]) -> None:
         missing = sorted(
             {text_id for row in rows if (text_id := primary_positive_text_id(row)) not in self}
@@ -156,6 +165,11 @@ class AtlasFreeContrastiveCollator:
         map_ids: list[str] = []
         text_ids: list[str] = []
         sources: list[str] = []
+        primary_texts: list[str] = []
+        cache_indices: list[int] = []
+        dataset_indices: list[int | None] = []
+        tensor_indices: list[int | None] = []
+        splits: list[str] = []
         for item in batch:
             volume = torch.as_tensor(item["volume"], dtype=torch.float32)
             if volume.ndim != 4 or volume.shape[0] != 1:
@@ -167,6 +181,11 @@ class AtlasFreeContrastiveCollator:
             text_id = primary_positive_text_id(item)
             volumes.append(torch.nan_to_num(volume, nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0))
             texts.append(self.lookup[text_id])
+            primary_texts.append(primary_positive_text(item))
+            cache_indices.append(self.lookup.index(text_id))
+            dataset_indices.append(item.get("dataset_index"))
+            tensor_indices.append(item.get("tensor_index"))
+            splits.append(str(item.get("split") or (item.get("metadata") or {}).get("split") or ""))
             map_ids.append(str(item.get("map_id") or ""))
             text_ids.append(text_id)
             sources.append(canonical_atlas_free_domain(item.get("metadata") or item))
@@ -175,6 +194,11 @@ class AtlasFreeContrastiveCollator:
             "text_embedding": torch.stack(texts),
             "map_id": map_ids,
             "text_id": text_ids,
+            "primary_text": primary_texts,
+            "text_cache_index": cache_indices,
+            "dataset_index": dataset_indices,
+            "tensor_index": tensor_indices,
+            "split": splits,
             "source": sources,
         }
 

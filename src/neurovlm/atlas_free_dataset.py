@@ -254,6 +254,7 @@ class AtlasFreeCNNDataset(Dataset):
         self.positive_texts = [row["positive_texts"] for row in self.rows]
         self._tensor_indices = [indices[position] for position in selected]
         self._volumes = volumes
+        self._payload_map_ids = payload_map_ids
 
     def __len__(self) -> int:
         return len(self.rows)
@@ -263,6 +264,9 @@ class AtlasFreeCNNDataset(Dataset):
         tensor_index = self._tensor_indices[index]
         return {
             "volume": self._volumes[tensor_index].float(),
+            "dataset_index": index,
+            "tensor_index": tensor_index,
+            "split": self.split,
             "map_id": row["map_id"],
             "positive_texts": row["positive_texts"],
             "metadata": row,

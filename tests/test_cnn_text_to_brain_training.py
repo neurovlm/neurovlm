@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import copy
 import json
 from pathlib import Path
 
@@ -16,6 +17,18 @@ from neurovlm.cnn import (
     text_to_brain_from_payload,
 )
 from neurovlm.evaluation import evaluate_text_to_brain
+from neurovlm.evaluation.text_to_brain_audit import (
+    ae_ceiling_bypass,
+    audit_pairings,
+    audit_raw_latent_path,
+    audit_text_preprocessing,
+    autoencoder_identity,
+    frozen_ae_determinism,
+    latent_diagnostics,
+    loss_gradient_diagnostics,
+    tiny_overfit_projector,
+    volume_scale_diagnostics,
+)
 from neurovlm.training import (
     TextToBrainTrainConfig,
     build_text_to_brain,
@@ -27,6 +40,7 @@ from neurovlm.training import (
 
 class _Pairs(Dataset):
     def __init__(self, split: str, n: int = 3):
+        self.split = split
         self.rows = [
             {
                 "volume": torch.rand(1, 4, 4, 4, generator=torch.Generator().manual_seed(index)),
@@ -39,6 +53,7 @@ class _Pairs(Dataset):
             }
             for index in range(n)
         ]
+        self._tensor_indices = list(range(n))
 
     def __len__(self):
         return len(self.rows)
@@ -146,7 +161,6 @@ def test_default_and_finetuned_choose_exact_released_autoencoder(monkeypatch) ->
 def test_raw_loss_gradients_cross_frozen_decoder_only_into_projector(tmp_path: Path) -> None:
     model = _model()
     assert not model.autoencoder.training
-    assert not any(parameter.requires_grad for parameter in model.autoencoder.parameters())
     target = torch.rand(2, 1, 4, 4, 4)
     text = _lookup().embeddings[:2]
     with torch.no_grad():
@@ -156,9 +170,95 @@ def test_raw_loss_gradients_cross_frozen_decoder_only_into_projector(tmp_path: P
     loss, parts = text_to_brain_loss(raw_prediction, target, brain_z, text_z)
     loss.backward()
     assert torch.allclose(parts["loss"], parts["reconstruction_mse"] + parts["latent_mse"])
+    assert torch.equal(parts["raw_latent_mse"], parts["latent_mse"])
+    assert torch.equal(
+        parts["weighted_reconstruction_contribution"], parts["reconstruction_mse"]
+    )
+    assert torch.equal(parts["weighted_latent_contribution"], parts["latent_mse"])
     assert any(parameter.grad is not None for parameter in model.text_projection.parameters())
     assert all(parameter.grad is None for parameter in model.autoencoder.parameters())
     assert not model.autoencoder.training
+
+
+def test_parent_train_cannot_reenable_frozen_ae_and_bypass_matches_ceiling() -> None:
+    model = _model()
+    target = torch.rand(2, 1, 4, 4, 4)
+    identity = autoencoder_identity(model.autoencoder)
+    assert identity["architecture"]["base_channels"] == 2
+    assert identity["architecture"]["num_blocks"] == 1
+    assert identity["architecture"]["norm"] == "group"
+    assert identity["architecture"]["pooling"] == "max"
+
+    model.train()
+    assert model.training
+    assert model.text_projection.training
+    assert not model.autoencoder.training
+    assert not model.autoencoder.encoder.training
+    assert not model.autoencoder.decoder.training
+    assert not any(parameter.requires_grad for parameter in model.autoencoder.parameters())
+
+    determinism = frozen_ae_determinism(model, target, repeats=5)
+    assert determinism["passed"]
+    assert determinism["maximum_pairwise_latent_difference"] == 0
+
+    bypass = ae_ceiling_bypass(model, target)
+    assert bypass["passed"]
+    assert bypass["max_absolute_voxel_difference"] == 0
+    assert bypass["mean_absolute_voxel_difference"] == 0
+
+
+def test_pairing_preprocessing_latent_scale_and_gradient_audits(tmp_path: Path) -> None:
+    metadata = {
+        "base_model_repository": "allenai/specter2_aug2023refresh_base",
+        "model_revision_or_commit_hash": "model-revision",
+        "adapter_id": "allenai/specter2_aug2023refresh_adhoc_query",
+        "adapter_revision_or_commit_hash": "adapter-revision",
+        "pooling_method": "cls_token",
+        "preprocessing_order": [
+            "subtract_empty_string_embedding",
+            "l2_unit_normalize",
+        ],
+        "empty_string_embedding_checksum": "checksum",
+    }
+    lookup = AtlasFreeTextEmbeddingLookup(
+        _lookup().embeddings,
+        _lookup().text_ids,
+        metadata,
+    )
+    pairings = audit_pairings(_Pairs("train", n=3), lookup, minimum=3, output_dir=tmp_path)
+    assert pairings["passed"]
+    assert pairings["rows"][1]["text_cache_index"] == 1
+    assert (tmp_path / "train_pairing_audit.json").is_file()
+    assert (tmp_path / "train_pairing_audit.csv").is_file()
+    assert audit_text_preprocessing(lookup)["passed"]
+
+    model = _model()
+    assert audit_raw_latent_path(model)["passed"]
+    target = torch.rand(3, 1, 4, 4, 4)
+    text = lookup.embeddings
+    with torch.no_grad():
+        target_latent = model.autoencoder.encoder(target)
+        prediction_latent = model.text_projection(text)
+        prediction = model.autoencoder.decoder(prediction_latent)
+    latent = latent_diagnostics(target_latent, prediction_latent)
+    assert latent["n"] == 3
+    assert len(latent["covariance_eigenvalues"]) == 384
+    scale = volume_scale_diagnostics(target, prediction)
+    assert "negative_fraction_before_clamping" in scale["prediction"]
+    gradients = loss_gradient_diagnostics(model, target, text)
+    assert gradients["all_losses_finite"]
+    assert gradients["gradients_nonzero"]
+    overfit = tiny_overfit_projector(
+        model,
+        text,
+        target,
+        steps=2,
+        report_every=1,
+    )
+    assert overfit["n"] == 3
+    assert overfit["projector_parameter_update_norm"] > 0
+    assert len(overfit["history"]) == 3
+    assert not any(parameter.requires_grad for parameter in model.autoencoder.parameters())
 
 
 def test_evaluation_uses_weights_first_positive_and_bounded_outputs() -> None:
@@ -211,28 +311,55 @@ def test_tiny_training_artifacts_projector_only_reload_and_resume(tmp_path: Path
     assert effective["values"]["autoencoder_frozen"] is True
 
     payload = torch.load(result.best_checkpoint, map_location="cpu", weights_only=True)
-    assert payload["extra"]["autoencoder_source"] == {"kind": "provided_model"}
+    assert payload["extra"]["autoencoder_source"]["kind"] == "provided_model"
+    assert payload["extra"]["autoencoder_source"]["state_sha256"]
+    assert payload["extra"]["autoencoder_source"]["encoder_state_sha256"]
+    assert payload["extra"]["autoencoder_source"]["decoder_state_sha256"]
+    assert payload["extra"]["text_embedding_source"]["embedding_state_sha256"]
+    assert payload["extra"]["text_embedding_source"]["text_ids_sha256"]
     assert set(payload["model_state_dict"]) == set(result.model.text_projection.state_dict())
     assert not any(key.startswith("autoencoder.") for key in payload["model_state_dict"])
     reloaded = text_to_brain_from_checkpoint(
-        result.best_checkpoint, autoencoder=_autoencoder()
+        result.best_checkpoint, autoencoder=result.model.autoencoder
     )
     text = lookup.embeddings[:1]
     with torch.no_grad():
         assert torch.allclose(result.model(text), reloaded(text))
 
     history_before = list(csv.DictReader((result.run_dir / "metrics" / "history.csv").open()))
+    recorded_metrics = {row["metric"] for row in history_before}
+    assert {
+        "train_raw_reconstruction_mse",
+        "train_weighted_reconstruction_contribution",
+        "train_raw_latent_mse",
+        "train_weighted_latent_contribution",
+        "train_total_projector_gradient_norm",
+        "train_projector_parameter_update_norm",
+        "train_learning_rate",
+    } <= recorded_metrics
     resumed = train_text_to_brain(
         _config(tmp_path, epochs=2, generated_output_limit=1, resume="last.pt"),
         provider=provider,
         lookup=lookup,
-        model=_model(),
+        model=build_text_to_brain(
+            _config(Path("unused")),
+            autoencoder=result.model.autoencoder,
+        ),
     )
     history_after = list(csv.DictReader((resumed.run_dir / "metrics" / "history.csv").open()))
     assert resumed.epochs_completed == 2
     assert len(history_after) > len(history_before)
     status = json.loads((resumed.run_dir / "status.json").read_text())
     assert status["resume_count"] == 1
+
+    wrong_autoencoder = copy.deepcopy(result.model.autoencoder)
+    with torch.no_grad():
+        next(wrong_autoencoder.decoder.parameters()).add_(1)
+    with pytest.raises(ValueError, match="autoencoder state checksum mismatch"):
+        text_to_brain_from_checkpoint(
+            result.best_checkpoint,
+            autoencoder=wrong_autoencoder,
+        )
 
 
 def test_checkpoint_architecture_mismatch_and_legacy_payload_compatibility(tmp_path: Path) -> None:

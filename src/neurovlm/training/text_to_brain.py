@@ -25,6 +25,8 @@ from neurovlm.pipelines import (
     atomic_write_csv,
     atomic_write_json,
     sha256_file,
+    sha256_state_dict,
+    sha256_value,
 )
 from neurovlm.training.autoencoder import (
     CNN_AUTOENCODER_PRESET,
@@ -239,8 +241,70 @@ def _validate_autoencoder(autoencoder: nn.Module, config: TextToBrainTrainConfig
 
 def _freeze_autoencoder(autoencoder: nn.Module) -> None:
     autoencoder.eval()
+    autoencoder.encoder.eval()
+    autoencoder.decoder.eval()
     for parameter in autoencoder.parameters():
         parameter.requires_grad_(False)
+
+
+def _autoencoder_state_provenance(
+    source: Mapping[str, Any],
+    autoencoder: nn.Module,
+) -> dict[str, Any]:
+    return {
+        **dict(source),
+        "state_sha256": sha256_state_dict(autoencoder),
+        "encoder_state_sha256": sha256_state_dict(autoencoder.encoder),
+        "decoder_state_sha256": sha256_state_dict(autoencoder.decoder),
+    }
+
+
+def _text_cache_provenance(lookup: AtlasFreeTextEmbeddingLookup) -> dict[str, Any]:
+    return {
+        "filename": "specter2_stage3_stage4_emptycentered_unitnorm.pt",
+        "embedding_state_sha256": sha256_state_dict(
+            {"embeddings": lookup.embeddings}
+        ),
+        "text_ids_sha256": sha256_value(list(lookup.text_ids)),
+        "n": len(lookup),
+        "dimension": int(lookup.embeddings.shape[1]),
+        "metadata": dict(lookup.metadata),
+    }
+
+
+def _validate_recorded_autoencoder_state(
+    source: Mapping[str, Any],
+    autoencoder: nn.Module,
+) -> None:
+    actual = _autoencoder_state_provenance({}, autoencoder)
+    mismatches = [
+        name
+        for name in (
+            "state_sha256",
+            "encoder_state_sha256",
+            "decoder_state_sha256",
+        )
+        if source.get(name) and source.get(name) != actual[name]
+    ]
+    if mismatches:
+        raise ValueError(
+            "Recorded autoencoder state checksum mismatch: " + ", ".join(mismatches)
+        )
+
+
+def _validate_recorded_text_cache(
+    recorded: Mapping[str, Any],
+    actual: Mapping[str, Any],
+) -> None:
+    mismatches = [
+        name
+        for name in ("embedding_state_sha256", "text_ids_sha256", "n", "dimension")
+        if recorded.get(name) is not None and recorded.get(name) != actual.get(name)
+    ]
+    if mismatches:
+        raise ValueError(
+            "Recorded text embedding cache checksum mismatch: " + ", ".join(mismatches)
+        )
 
 
 def build_text_to_brain(
@@ -350,6 +414,8 @@ def text_to_brain_from_checkpoint(
             autoencoder = load_model(**kwargs)
         else:
             raise ValueError(f"Unsupported recorded autoencoder source: {source!r}")
+    if isinstance(source, Mapping):
+        _validate_recorded_autoencoder_state(source, autoencoder)
     _validate_checkpoint_architecture(payload, autoencoder)
     return text_to_brain_from_payload(payload, autoencoder).to(device)
 
@@ -370,14 +436,19 @@ def text_to_brain_loss(
     latent_cosine = F.cosine_similarity(
         text_latent, brain_latent.detach(), dim=1, eps=1e-8
     ).mean()
-    total = reconstruction_weight * reconstruction_mse + latent_weight * latent_mse
+    weighted_reconstruction = reconstruction_weight * reconstruction_mse
+    weighted_latent = latent_weight * latent_mse
+    total = weighted_reconstruction + weighted_latent
     return total, {
         "loss": total,
         "total": total,
+        "raw_latent_mse": latent_mse,
         "latent_mse": latent_mse,
         "latent_cosine": latent_cosine,
         "raw_reconstruction_mse": reconstruction_mse,
         "reconstruction_mse": reconstruction_mse,
+        "weighted_reconstruction_contribution": weighted_reconstruction,
+        "weighted_latent_contribution": weighted_latent,
     }
 
 
@@ -415,7 +486,15 @@ def _train_epoch(
     device: torch.device,
 ) -> tuple[dict[str, float], int]:
     model.text_projection.train()
-    model.autoencoder.eval()
+    _freeze_autoencoder(model.autoencoder)
+    projector_parameters = tuple(model.text_projection.parameters())
+    optimizer_parameter_ids = {
+        id(parameter)
+        for group in optimizer.param_groups
+        for parameter in group["params"]
+    }
+    if any(id(parameter) not in optimizer_parameter_ids for parameter in projector_parameters):
+        raise RuntimeError("Every projector parameter must be present in the optimizer")
     autocast_enabled = config.amp and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=autocast_enabled)
     totals: dict[str, float] = {}
@@ -442,19 +521,57 @@ def _train_epoch(
         if autocast_enabled:
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
+            gradient_norm = torch.linalg.vector_norm(
+                torch.stack(
+                    [
+                        parameter.grad.detach().float().norm()
+                        for parameter in projector_parameters
+                        if parameter.grad is not None
+                    ]
+                )
+            )
+            before_step = [parameter.detach().clone() for parameter in projector_parameters]
             if config.gradient_clip is not None:
                 torch.nn.utils.clip_grad_norm_(
-                    model.text_projection.parameters(), config.gradient_clip
+                    projector_parameters, config.gradient_clip
                 )
             scaler.step(optimizer)
             scaler.update()
         else:
             loss.backward()
+            gradient_norm = torch.linalg.vector_norm(
+                torch.stack(
+                    [
+                        parameter.grad.detach().float().norm()
+                        for parameter in projector_parameters
+                        if parameter.grad is not None
+                    ]
+                )
+            )
+            before_step = [parameter.detach().clone() for parameter in projector_parameters]
             if config.gradient_clip is not None:
                 torch.nn.utils.clip_grad_norm_(
-                    model.text_projection.parameters(), config.gradient_clip
+                    projector_parameters, config.gradient_clip
                 )
             optimizer.step()
+        update_norm = torch.linalg.vector_norm(
+            torch.stack(
+                [
+                    (parameter.detach() - previous).float().norm()
+                    for parameter, previous in zip(
+                        projector_parameters, before_step, strict=True
+                    )
+                ]
+            )
+        )
+        parts = {
+            **parts,
+            "total_projector_gradient_norm": gradient_norm,
+            "projector_parameter_update_norm": update_norm,
+            "learning_rate": torch.as_tensor(
+                optimizer.param_groups[0]["lr"], device=loss.device
+            ),
+        }
         batch_n = len(target)
         for name, value in parts.items():
             totals[name] = totals.get(name, 0.0) + float(value.detach()) * batch_n
@@ -496,6 +613,21 @@ def train_text_to_brain(
     source = _autoencoder_source(config)
     if model is not None:
         source = {"kind": "provided_model"}
+    if provider is None:
+        provider = AtlasFreeCNNDataProvider(
+            domain=config.domain,
+            limit=config.limit,
+            split_dir=config.split_dir,
+            volume_path=config.volume_path,
+        )
+    if lookup is None:
+        lookup = AtlasFreeTextEmbeddingLookup.published()
+    if model is None:
+        model = build_text_to_brain(config)
+    _validate_autoencoder(model.autoencoder, config)
+    _freeze_autoencoder(model.autoencoder)
+    source = _autoencoder_state_provenance(source, model.autoencoder)
+    text_cache_source = _text_cache_provenance(lookup)
     recorded = asdict(config)
     recorded.pop("resume", None)
     # ``epochs`` is a run-control target rather than model/data identity. It
@@ -525,7 +657,7 @@ def train_text_to_brain(
         },
         resources={
             "dataset": "neurovlm/atlas_free_cnn_dataset",
-            "text_embeddings": "specter2_stage3_stage4_emptycentered_unitnorm.pt",
+            "text_embeddings": text_cache_source,
         },
         initialization={"autoencoder": source, "projector": "fresh"},
         requested=recorded,
@@ -540,19 +672,6 @@ def train_text_to_brain(
             "primary_metric": config.primary_metric,
         },
     )
-    if provider is None:
-        provider = AtlasFreeCNNDataProvider(
-            domain=config.domain,
-            limit=config.limit,
-            split_dir=config.split_dir,
-            volume_path=config.volume_path,
-        )
-    if lookup is None:
-        lookup = AtlasFreeTextEmbeddingLookup.published()
-    if model is None:
-        model = build_text_to_brain(config)
-    _validate_autoencoder(model.autoencoder, config)
-    _freeze_autoencoder(model.autoencoder)
     model = model.to(device)
     for parameter in model.text_projection.parameters():
         parameter.requires_grad_(True)
@@ -561,7 +680,20 @@ def train_text_to_brain(
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
     )
-    manager = CheckpointManager(run_config, expected_architecture=architecture)
+    def validate_stage4_checkpoint(payload: Mapping[str, Any]) -> None:
+        extra = payload.get("extra") or {}
+        recorded_ae = extra.get("autoencoder_source")
+        if isinstance(recorded_ae, Mapping):
+            _validate_recorded_autoencoder_state(recorded_ae, model.autoencoder)
+        recorded_text = extra.get("text_embedding_source")
+        if isinstance(recorded_text, Mapping):
+            _validate_recorded_text_cache(recorded_text, text_cache_source)
+
+    manager = CheckpointManager(
+        run_config,
+        expected_architecture=architecture,
+        validation_hook=validate_stage4_checkpoint,
+    )
     start_epoch = 1
     best_metric = -float("inf")
     early_best = -float("inf")
@@ -620,6 +752,7 @@ def train_text_to_brain(
             }
             checkpoint_extra = {
                 "autoencoder_source": source,
+                "text_embedding_source": text_cache_source,
                 "early_best": early_best,
                 "stale_epochs": stale_epochs,
             }
@@ -647,6 +780,7 @@ def train_text_to_brain(
                 architecture=architecture,
                 extra={
                     "autoencoder_source": source,
+                    "text_embedding_source": text_cache_source,
                     "early_best": early_best,
                     "stale_epochs": stale_epochs,
                 },
@@ -706,6 +840,7 @@ def train_text_to_brain(
                 "primary_metric": config.primary_metric,
                 "internal_variant": config.internal_variant,
                 "autoencoder_source": source,
+                "text_embedding_source": text_cache_source,
                 "test": test_metrics,
             },
         )

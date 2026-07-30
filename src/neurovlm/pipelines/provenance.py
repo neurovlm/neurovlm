@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+import torch
+
 from .serialization import json_safe
 
 
@@ -32,6 +34,43 @@ def sha256_value(value: Any) -> str:
         json_safe(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def sha256_state_dict(
+    value: Any,
+    *,
+    prefix: str | None = None,
+) -> str:
+    """Return a deterministic SHA256 digest for tensor state dictionaries.
+
+    PyTorch checkpoint bytes are not a stable model-identity checksum because
+    serialization metadata can change independently of the tensors. This
+    helper hashes sorted tensor names, dtypes, shapes, and contiguous CPU
+    bytes. ``prefix`` selects a branch while retaining full parameter names,
+    which is useful for proving matching autoencoder encoder/decoder states.
+    """
+
+    state = value if isinstance(value, Mapping) else getattr(value, "state_dict", lambda: None)()
+    if not isinstance(state, Mapping):
+        raise TypeError("value must be a state-dict mapping or expose state_dict()")
+    digest = hashlib.sha256()
+    selected = 0
+    for name, tensor in sorted(state.items(), key=lambda item: str(item[0])):
+        name = str(name)
+        if prefix is not None and not name.startswith(prefix):
+            continue
+        if not torch.is_tensor(tensor):
+            raise TypeError(f"State entry {name!r} is not a tensor")
+        contiguous = tensor.detach().cpu().contiguous()
+        digest.update(name.encode("utf-8"))
+        digest.update(str(contiguous.dtype).encode("ascii"))
+        digest.update(str(tuple(contiguous.shape)).encode("ascii"))
+        digest.update(contiguous.numpy().tobytes())
+        selected += 1
+    if not selected:
+        label = "state dictionary" if prefix is None else f"state prefix {prefix!r}"
+        raise ValueError(f"No tensors found for {label}")
+    return digest.hexdigest()
 
 
 def fingerprint_path(path: str | Path) -> dict[str, Any]:
@@ -146,5 +185,6 @@ __all__ = [
     "fingerprint_references",
     "git_provenance",
     "sha256_file",
+    "sha256_state_dict",
     "sha256_value",
 ]
