@@ -15,8 +15,11 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.utils.data import DataLoader, Dataset
 
-from neurovlm.ale_cnn import ALE3DCNNAutoEncoder
-from neurovlm.atlas_free_dataset import AtlasFreeCNNDataProvider, canonical_atlas_free_domain
+from neurovlm.cnn.architectures import ALE3DCNNAutoEncoder
+from neurovlm.data.atlas_free_dataset import (
+    AtlasFreeCNNDataProvider,
+    canonical_atlas_free_domain,
+)
 from neurovlm.evaluation.spatial import reconstruction_metrics
 from neurovlm.pipelines import (
     CheckpointManager,
@@ -612,7 +615,7 @@ def train_autoencoder(
         assert initialization_path is not None
         _load_initial_state(model, initialization_path, architecture)
     elif initialization_source == "released_mixed":
-        from neurovlm.models import load_model
+        from neurovlm.models.base import load_model
 
         released = load_model(family="cnn", task="autoencoder", variant="mixed_baseline")
         try:

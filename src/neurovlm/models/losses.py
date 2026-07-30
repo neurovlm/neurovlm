@@ -1,0 +1,144 @@
+"""Non-standard torch loss functions."""
+import math
+import torch
+from torch import nn
+import torch.nn.functional as F
+import numpy as np
+from typing import Optional
+
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=1, gamma=2):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def forward(self, inputs, targets):
+        bce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
+        pt = torch.exp(-bce_loss)
+        focal_loss = self.alpha * (1-pt)**self.gamma * bce_loss
+        return focal_loss.mean()
+
+
+class FocalWithLogitsLoss(nn.Module):
+    """Focal loss operating on raw logits (numerically stable).
+
+    Focal loss down-weights easy negatives so the model focuses on
+    hard-to-classify examples. Particularly useful when the label
+    distribution has a long tail of rare terms.
+
+    Parameters
+    ----------
+    gamma : float
+        Focusing parameter. gamma=0 recovers standard BCE.
+        Higher values focus more on hard examples. Default 2.0.
+    pos_weight : torch.Tensor or None
+        Per-label positive class weight (same as BCEWithLogitsLoss).
+    """
+
+    def __init__(self, gamma: float = 2.0, pos_weight: Optional[torch.Tensor] = None):
+        super().__init__()
+        self.gamma = gamma
+        self.register_buffer('pos_weight', pos_weight)
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # Numerically stable sigmoid
+        p = torch.sigmoid(logits)
+
+        # Standard BCE from logits (stable)
+        bce = nn.functional.binary_cross_entropy_with_logits(
+            logits, targets, reduction='none'
+        )
+
+        # Focal modulating factor
+        p_t = targets * p + (1 - targets) * (1 - p)
+        focal_weight = (1 - p_t) ** self.gamma
+
+        loss = focal_weight * bce
+
+        # Apply pos_weight: scale the positive-class loss terms
+        if self.pos_weight is not None:
+            weight = targets * self.pos_weight.unsqueeze(0) + (1 - targets)
+            loss = loss * weight
+
+        return loss.mean()
+
+class InfoNCELoss(torch.nn.Module):
+    """Compute symmetric InfoNCE loss between paired image/brain and text embeddings.
+
+    This is not a reconstruction, cosine-regression, or MSE loss. Inputs are
+    first L2-normalized, the batch x batch similarity matrix is built from
+    paired embeddings, and the diagonal is treated as the true match in both
+    image-to-text and text-to-image directions.
+    """
+
+    def __init__(
+        self,
+        temperature: float = 0.07,
+        learnable_temperature: bool = False,
+        max_scale_logit: float = 100.0,
+    ):
+        super().__init__()
+
+        self.temperature = temperature
+        self.learnable_temperature = learnable_temperature
+        self.max_scale_logit = max_scale_logit
+
+        if self.learnable_temperature:
+            if temperature <= 0:
+                raise ValueError("temperature must be positive")
+            if max_scale_logit <= 0:
+                raise ValueError("max_scale_logit must be positive")
+            self.logit_scale = nn.Parameter(
+                torch.tensor(math.log(1.0 / temperature), dtype=torch.float32)
+            )
+
+    @torch.no_grad()
+    def clamp_logit_scale_(self):
+        """Clip the learnable logit scale to prevent unstable large logits."""
+        if self.learnable_temperature:
+            self.logit_scale.clamp_(max=math.log(self.max_scale_logit))
+
+    def forward(self, image, text):
+        # Normalize embeddings
+        image = F.normalize(image, dim=1)
+        text = F.normalize(text, dim=1)
+
+        # Compute similarity matrix: (batch_size, batch_size)
+        logits = torch.matmul(image, text.T)
+        if self.learnable_temperature:
+            self.clamp_logit_scale_()
+            logits = logits * self.logit_scale.exp()
+        else:
+            logits = logits / self.temperature
+
+        # Labels are indices of the correct pairs
+        batch_size = image.size(0)
+        labels = torch.arange(batch_size, device=image.device)
+
+        # Cross-entropy loss in both directions (symmetrized)
+        loss_i2t = F.cross_entropy(logits, labels)
+        loss_t2i = F.cross_entropy(logits.T, labels)
+
+        return (loss_i2t + loss_t2i) / 2
+
+class TruncatedLoss(nn.Module):
+    def __init__(self, percentile=0.8, base_loss="l1"):
+        super().__init__()
+        self.percentile = percentile
+        self.base_loss = base_loss
+
+    def forward(self, predicted, target):
+        # either smooth l1, here it's huber, or mse loss
+        if self.base_loss == "l1":
+            loss_per_sample = F.smooth_l1_loss(predicted, target, reduction='none', beta=1.).mean(dim=1)
+        else:
+            loss_per_sample = F.mse_loss(predicted, target, reduction='none').mean(dim=1)
+
+        # keep the easiest x% of examples
+        threshold = torch.quantile(loss_per_sample, self.percentile)
+        easy_mask = loss_per_sample <= threshold
+
+        if easy_mask.sum() > 0:
+            return loss_per_sample[easy_mask].mean()
+        else:
+            return loss_per_sample.mean()

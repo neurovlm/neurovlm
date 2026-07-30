@@ -158,3 +158,16 @@ This protocol distinction explains an apparent PubMed MLP contrastive regression
 - `training/architecture_background.ipynb`: non-prescriptive architecture history.
 - `evaluation/*_comparison.ipynb`: package-level reconstruction, retrieval, and generation comparisons.
 - `../tutorials/06_atlas_free_cnn.ipynb`: short inference quickstart.
+
+```{toctree}
+:hidden:
+:maxdepth: 1
+
+training/architecture_background
+training/autoencoder
+training/contrastive_and_text_to_brain
+training/contrastive_pubmed
+evaluation/autoencoder_comparison
+evaluation/contrastive_comparison
+evaluation/text_to_brain_comparison
+```

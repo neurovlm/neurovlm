@@ -23,7 +23,6 @@ import matplotlib.pyplot as plt
 from nilearn.image import resample_img
 from neurovlm.data import load_dataset, load_masker, load_latent
 from neurovlm.models import load_model
-from neurovlm.train import which_device
 ```
 
 # Step 2 — Load Available Brain Networks
