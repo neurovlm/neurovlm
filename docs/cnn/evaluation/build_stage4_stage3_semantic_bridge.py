@@ -268,16 +268,14 @@ cells = [
     markdown("## Configuration\n\n`FAST_RUN` is a smoke test. Set `FULL_RUN=True` for evidence."),
     code(
         r"""
-        # Experiment selection. All six released branches are valid choices.
+        # Mixed Stage 1A AE only: domain-finetuned AEs did not improve the
+        # reconstruction/contrastive prerequisites and are excluded.
         ALL_BRANCHES = [
             "mixed_to_pubmed",
             "mixed_to_nilearn",
             "mixed_to_neurovault",
-            "pubmed",
-            "nilearn",
-            "neurovault",
         ]
-        BRANCHES_TO_RUN = ["mixed_to_pubmed"]  # choose any subset, or ALL_BRANCHES
+        BRANCHES_TO_RUN = ALL_BRANCHES
         unknown_branches = sorted(set(BRANCHES_TO_RUN) - set(ALL_BRANCHES))
         if unknown_branches:
             raise ValueError(f"Unknown branches: {unknown_branches}")
@@ -340,8 +338,9 @@ cells = [
 
         EPOCHS = 50 if FULL_RUN else 2
         BATCH_SIZE = 64 if FULL_RUN else 8
-        EVAL_BATCH_SIZE = 64 if FULL_RUN else 8
-        NUM_WORKERS = 2 if FULL_RUN else 0
+        EVAL_BATCH_SIZE = 128 if FULL_RUN else 32
+        NUM_WORKERS = 8 if IN_COLAB else 0
+        PREFETCH_FACTOR = 4
         LEARNING_RATE = 3e-4
         WEIGHT_DECAY = 1e-4
         GRADIENT_CLIP = 1.0
@@ -393,11 +392,11 @@ cells = [
         r"""
         ## Strict branch resources and provenance
 
-        `mixed_to_*` branches pair the released mixed Stage 1 AE with the
-        corresponding released Stage 3 branch. Domain-only branches pair the
-        domain-fine-tuned AE with the matching Stage 3 branch. The Stage 3 brain
-        encoder and text projector share one composite file, but their tensor
-        states are fingerprinted separately.
+        Every branch pairs the released mixed Stage 1A AE with the
+        corresponding released Stage 3 domain branch. Domain-finetuned AEs are
+        deliberately excluded. The Stage 3 brain encoder and text projector
+        share one composite file, but their tensor states are fingerprinted
+        separately.
         """
     ),
     code(
@@ -406,9 +405,6 @@ cells = [
             "mixed_to_pubmed": {"domain": "pubmed", "ae_variant": "mixed"},
             "mixed_to_nilearn": {"domain": "nilearn", "ae_variant": "mixed"},
             "mixed_to_neurovault": {"domain": "neurovault", "ae_variant": "mixed"},
-            "pubmed": {"domain": "pubmed", "ae_variant": "pubmed"},
-            "nilearn": {"domain": "nilearn", "ae_variant": "nilearn"},
-            "neurovault": {"domain": "neurovault", "ae_variant": "neurovault"},
         }
 
         def load_branch_resources(branch):
@@ -522,6 +518,7 @@ cells = [
                 pin_memory=DEVICE.type == "cuda",
                 persistent_workers=NUM_WORKERS > 0,
                 generator=torch.Generator().manual_seed(seed),
+                **({"prefetch_factor": PREFETCH_FACTOR} if NUM_WORKERS > 0 else {}),
             )
 
         def cache_binding(provenance, split):
@@ -1207,6 +1204,13 @@ cells = [
             "repo_commit": resolved_commit,
             "branches_to_run": BRANCHES_TO_RUN,
             "all_valid_branches": ALL_BRANCHES,
+            "mixed_ae_only": True,
+            "resource_profile": {
+                "batch_size": BATCH_SIZE,
+                "eval_batch_size": EVAL_BATCH_SIZE,
+                "num_workers": NUM_WORKERS,
+                "prefetch_factor": PREFETCH_FACTOR,
+            },
             "run_grid": [
                 {
                     **{k: v for k, v in item.items() if k != "loss"},

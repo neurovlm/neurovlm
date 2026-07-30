@@ -16,11 +16,35 @@ be worth promoting instead of discarding.
 - Remote state at capture: `HEAD == origin/neurovlm_experiments`
 - Intended clean baseline: the GitHub state at the base commit above
 - Validation at capture: `476 passed, 1 skipped`
+- Validation after the 2026-07-29 mixed-AE/resource update:
+  `490 passed, 1 skipped`
 - Local experiment result directories: neither `runs/` nor
   `neurovlm_runs/` currently exists
 
-This ledger is itself an untracked experiment-support file. Keep it until the
-last cleanup step.
+This ledger is tracked experiment-support documentation. Keep it until the
+last cleanup step and review its final diff rather than deleting it with the
+experiment implementation.
+
+### 2026-07-29 experiment-scope and resource decision
+
+All six notebooks were restricted to the released mixed Stage 1A AE:
+
+- `mixed_to_pubmed`
+- `mixed_to_nilearn`
+- `mixed_to_neurovault`
+
+The domain-finetuned Stage 1B AE branches were removed because their
+reconstruction and contrastive prerequisites did not improve over the mixed
+AE. This halves the former six-branch runs without removing any evaluation
+domain.
+
+The RTX PRO 6000 Blackwell 96-GB profile keeps original training batch sizes
+to preserve optimization semantics, but uses larger evaluation batches,
+eight Colab data-loader workers, four-batch prefetching, pinned/persistent
+workers, and high float32 matrix-multiplication precision. The standardized
+ablation additionally caches validation AE latents, keeps training latents on
+the active device, avoids per-component batch synchronizations, and defers
+nearest-reference latent distances until selected-checkpoint evaluation.
 
 ## Experiment inventory
 
@@ -190,6 +214,7 @@ experiments are retired:
 - `src/neurovlm/experiments/stage4_joint_finetuning.py`
 - `src/neurovlm/experiments/stage4_semantic_bridge.py`
 - `src/neurovlm/experiments/stage4_probabilistic.py`
+- `tests/test_stage4_mixed_ae_resource_profiles.py`
 
 `src/neurovlm/experiments/__init__.py` connects the experiment modules and
 should be removed last. The entire `src/neurovlm/experiments/` directory is
@@ -205,6 +230,7 @@ commit.
 
 | Path | Current experiment-related change |
 | --- | --- |
+| `docs/cnn/evaluation/STAGE4_TEXT_TO_BRAIN_EXPERIMENT_CLEANUP.md` | Records the experiment-only inventory, mixed-AE decision, resource profile, and safe eventual cleanup procedure. |
 | `src/neurovlm/atlas_free_dataset.py` | Exposes immutable dataset/tensor indices and split identity to experiment loaders. |
 | `src/neurovlm/atlas_free_text.py` | Exposes text-cache row indices and collates primary text, cache, dataset, tensor, and split identities. |
 | `src/neurovlm/cnn.py` | Forces the Stage 1 AE to remain frozen/eval when the parent Stage 4 model enters training mode. |

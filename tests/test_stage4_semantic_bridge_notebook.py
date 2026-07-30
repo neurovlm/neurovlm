@@ -34,17 +34,20 @@ def test_semantic_bridge_is_a_valid_parseable_gpu_colab_notebook() -> None:
             ast.parse("".join(cell["source"]), filename=f"notebook-cell-{index}")
 
 
-def test_notebook_contains_six_branches_six_paths_and_three_bridges() -> None:
+def test_notebook_contains_three_mixed_ae_branches_six_paths_and_three_bridges() -> None:
     source = _source()
     for branch in (
         "mixed_to_pubmed",
         "mixed_to_nilearn",
         "mixed_to_neurovault",
-        "pubmed",
-        "nilearn",
-        "neurovault",
     ):
         assert branch in source
+    for specialized in (
+        '"ae_variant": "pubmed"',
+        '"ae_variant": "nilearn"',
+        '"ae_variant": "neurovault"',
+    ):
+        assert specialized not in source
     for path in (
         "direct_baseline",
         "stage3_text_bridge",

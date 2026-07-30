@@ -105,16 +105,19 @@ cells = [
         assert SMOKE_MODE ^ FULL_EXPERIMENT
 
         ALL_BRANCHES = [
-            "mixed_to_pubmed", "pubmed",
-            "mixed_to_nilearn", "nilearn",
-            "mixed_to_neurovault", "neurovault",
+            "mixed_to_pubmed",
+            "mixed_to_nilearn",
+            "mixed_to_neurovault",
         ]
         BRANCHES_TO_RUN = ["mixed_to_pubmed"] if SMOKE_MODE else ALL_BRANCHES
         FULL_DATA_LIMIT = 128 if SMOKE_MODE else None
         EPOCHS = 2 if SMOKE_MODE else 100
         BATCH_SIZE = 16 if SMOKE_MODE else 64
-        EVAL_BATCH_SIZE = 16 if SMOKE_MODE else 32
-        NUM_WORKERS = 0 if not IN_COLAB else 2
+        # Training batch stays baseline-compatible. K-sample evaluation already
+        # expands this batch by K, so it is raised conservatively.
+        EVAL_BATCH_SIZE = 32 if SMOKE_MODE else 64
+        NUM_WORKERS = 8 if IN_COLAB else 0
+        PREFETCH_FACTOR = 4
         SEED = 42
         LEARNING_RATE = 3e-4
         WEIGHT_DECAY = 1e-4
@@ -212,6 +215,7 @@ cells = [
             torch.backends.cudnn.benchmark = False
 
         seed_everything(SEED)
+        torch.set_float32_matmul_precision("high")
         DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         MIXED_PRECISION_DTYPE = resolve_amp_dtype(DEVICE, AMP_DTYPE)
         AMP_ENABLED = DEVICE.type == "cuda" and MIXED_PRECISION_DTYPE != torch.float32
@@ -233,11 +237,8 @@ cells = [
         """
         BRANCH_SPECS = {
             "mixed_to_pubmed": {"domain": "pubmed", "variant": "mixed_baseline", "stage1": "1A", "ae_variant": "mixed"},
-            "pubmed": {"domain": "pubmed", "variant": "finetuned", "stage1": "1B", "ae_variant": "pubmed"},
             "mixed_to_nilearn": {"domain": "nilearn", "variant": "mixed_baseline", "stage1": "1A", "ae_variant": "mixed"},
-            "nilearn": {"domain": "nilearn", "variant": "finetuned", "stage1": "1B", "ae_variant": "nilearn"},
             "mixed_to_neurovault": {"domain": "neurovault", "variant": "mixed_baseline", "stage1": "1A", "ae_variant": "mixed"},
-            "neurovault": {"domain": "neurovault", "variant": "finetuned", "stage1": "1B", "ae_variant": "neurovault"},
         }
         for name, spec in BRANCH_SPECS.items(): spec["branch"] = name
         unknown = set(BRANCHES_TO_RUN) - set(BRANCH_SPECS)
@@ -285,6 +286,7 @@ cells = [
                 collate_fn=AtlasFreeContrastiveCollator(lookup, (36, 45, 38)),
                 pin_memory=DEVICE.type == "cuda", persistent_workers=NUM_WORKERS > 0,
                 generator=torch.Generator().manual_seed(seed),
+                **({"prefetch_factor": PREFETCH_FACTOR} if NUM_WORKERS > 0 else {}),
             )
 
         class ShuffledTargetDataset(Dataset):
@@ -347,7 +349,8 @@ cells = [
             name: value for name, value in globals().items()
             if name in {
                 "SMOKE_MODE", "FULL_EXPERIMENT", "BRANCHES_TO_RUN", "FULL_DATA_LIMIT",
-                "EPOCHS", "BATCH_SIZE", "EVAL_BATCH_SIZE", "SEED", "LEARNING_RATE",
+                "EPOCHS", "BATCH_SIZE", "EVAL_BATCH_SIZE", "NUM_WORKERS",
+                "PREFETCH_FACTOR", "SEED", "LEARNING_RATE",
                 "WEIGHT_DECAY", "GRADIENT_CLIP", "AMP_DTYPE", "U_DIMS", "BETA_VALUES",
                 "KL_SCHEDULES", "FREE_BITS_VALUES", "CONDITION_DROPOUT_VALUES",
                 "W_LATENT", "W_IMAGE", "W_FG", "W_COS", "K_VALUES",

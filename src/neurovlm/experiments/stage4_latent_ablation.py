@@ -74,6 +74,7 @@ class Stage4AblationTrainConfig:
     batch_size: int = 64
     eval_batch_size: int | None = None
     num_workers: int = 0
+    prefetch_factor: int = 4
     learning_rate: float = 3e-4
     weight_decay: float = 1e-4
     gradient_clip: float | None = 1.0
@@ -99,6 +100,8 @@ class Stage4AblationTrainConfig:
             raise ValueError("eval_batch_size must be positive")
         if self.num_workers < 0:
             raise ValueError("num_workers must be non-negative")
+        if self.prefetch_factor < 1:
+            raise ValueError("prefetch_factor must be positive")
         if self.learning_rate <= 0 or self.weight_decay < 0:
             raise ValueError("learning_rate must be positive and weight_decay non-negative")
         if self.gradient_clip is not None and self.gradient_clip <= 0:
@@ -507,6 +510,7 @@ def latent_ablation_metrics(
     prediction_chunk_size: int = 512,
     reference_chunk_size: int = 4096,
     distance_device: str | torch.device | None = None,
+    compute_nearest_reference: bool = True,
 ) -> tuple[dict[str, float], list[dict[str, float]]]:
     """Compute checkpoint metrics and per-dimension raw-latent diagnostics."""
 
@@ -536,12 +540,16 @@ def latent_ablation_metrics(
     ).detach().float().cpu()
     if reference.ndim != 2 or reference.shape[1] != target.shape[1] or not len(reference):
         raise ValueError("nearest_reference must be a non-empty M x D tensor")
-    nearest = _nearest_distances(
-        prediction,
-        reference,
-        prediction_chunk_size=prediction_chunk_size,
-        reference_chunk_size=reference_chunk_size,
-        device=distance_device,
+    nearest = (
+        _nearest_distances(
+            prediction,
+            reference,
+            prediction_chunk_size=prediction_chunk_size,
+            reference_chunk_size=reference_chunk_size,
+            device=distance_device,
+        )
+        if compute_nearest_reference
+        else torch.full((len(prediction),), float("nan"))
     )
     target_norm = target.norm(dim=1)
     prediction_norm = prediction.norm(dim=1)
@@ -639,11 +647,17 @@ def _loader(
     shuffle: bool,
     seed: int,
     num_workers: int,
+    prefetch_factor: int,
     target_shape: tuple[int, int, int],
 ) -> DataLoader:
     rows = getattr(dataset, "rows", None)
     if rows is not None:
         lookup.validate_dataset(rows)
+    worker_options = (
+        {"prefetch_factor": prefetch_factor}
+        if num_workers > 0
+        else {}
+    )
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -653,6 +667,7 @@ def _loader(
         pin_memory=torch.cuda.is_available(),
         persistent_workers=num_workers > 0,
         generator=torch.Generator().manual_seed(seed),
+        **worker_options,
     )
 
 
@@ -665,6 +680,7 @@ def encode_stage1_latents(
     device: str | torch.device,
     batch_size: int = 64,
     num_workers: int = 0,
+    prefetch_factor: int = 4,
     target_shape: tuple[int, int, int] = (36, 45, 38),
 ) -> Tensor:
     """Encode an ordered split without changing the frozen AE mode."""
@@ -681,6 +697,7 @@ def encode_stage1_latents(
         shuffle=False,
         seed=0,
         num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
         target_shape=target_shape,
     ):
         encoded.append(autoencoder.encoder(batch["volume"].to(resolved)).float().cpu())
@@ -704,10 +721,13 @@ def evaluate_stage4_ablation(
     device: str | torch.device,
     batch_size: int = 64,
     num_workers: int = 0,
+    prefetch_factor: int = 4,
     target_shape: tuple[int, int, int] = (36, 45, 38),
     max_batches: int | None = None,
     reconstruction_examples: int = 6,
     semantic_evaluator: Callable[..., Mapping[str, float]] | None = None,
+    target_raw_latents: Tensor | None = None,
+    include_expensive_diagnostics: bool = True,
 ) -> Stage4AblationEvaluation:
     """Evaluate a split; callers control whether the split is validation or test."""
 
@@ -730,6 +750,7 @@ def evaluate_stage4_ablation(
         shuffle=False,
         seed=0,
         num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
         target_shape=target_shape,
     )
     for batch_index, batch in enumerate(loader):
@@ -737,7 +758,14 @@ def evaluate_stage4_ablation(
             break
         target_volume = batch["volume"].to(resolved, non_blocking=True)
         text = batch["text_embedding"].to(resolved, non_blocking=True)
-        target_raw = autoencoder.encoder(target_volume)
+        if target_raw_latents is None:
+            target_raw = autoencoder.encoder(target_volume)
+        else:
+            indices = torch.as_tensor(batch["dataset_index"], dtype=torch.long)
+            target_raw = target_raw_latents.index_select(0, indices).to(
+                resolved,
+                non_blocking=True,
+            )
         representation = projector(text)
         prediction_raw = transform.inverse(representation)
         prediction_volume = autoencoder.decoder(prediction_raw)
@@ -778,6 +806,7 @@ def evaluate_stage4_ablation(
         torch.cat(prediction_latents),
         transform=transform,
         nearest_reference=training_reference_latents,
+        compute_nearest_reference=include_expensive_diagnostics,
     )
     summary = {
         **latent_metrics,
@@ -835,7 +864,7 @@ def _train_epoch(
         "cuda",
         enabled=autocast_enabled and amp_dtype == torch.float16,
     )
-    totals: dict[str, float] = {}
+    totals: dict[str, Tensor] = {}
     n = 0
     loader = _loader(
         dataset,
@@ -844,6 +873,7 @@ def _train_epoch(
         shuffle=True,
         seed=config.seed + epoch,
         num_workers=config.num_workers,
+        prefetch_factor=config.prefetch_factor,
         target_shape=target_shape,
     )
     parameters = tuple(projector.parameters())
@@ -886,11 +916,18 @@ def _train_epoch(
             optimizer.step()
         batch_n = len(target_volume)
         for name, value in output.parts.items():
-            totals[name] = totals.get(name, 0.0) + float(value.detach()) * batch_n
+            detached = value.detach().float()
+            totals[name] = totals.get(
+                name,
+                torch.zeros((), device=detached.device),
+            ) + detached * batch_n
         n += batch_n
     if not n:
         raise RuntimeError("Training dataset produced no batches")
-    return {name: value / n for name, value in totals.items()}, n
+    return {
+        name: float((value / n).cpu())
+        for name, value in totals.items()
+    }, n
 
 
 def train_stage4_ablation(
@@ -951,6 +988,24 @@ def train_stage4_ablation(
     per_dimension_rows: list[dict[str, Any]] = []
     last_examples: tuple[Mapping[str, Any], ...] = ()
     epochs_completed = start_epoch - 1
+    training_latents_device = training_latents.to(
+        resolved,
+        non_blocking=True,
+    )
+    validation_latents = (
+        encode_stage1_latents(
+            autoencoder,
+            validation_dataset,
+            lookup,
+            device=resolved,
+            batch_size=config.eval_batch_size or config.batch_size,
+            num_workers=config.num_workers,
+            prefetch_factor=config.prefetch_factor,
+            target_shape=target_shape,
+        )
+        if start_epoch <= config.epochs
+        else None
+    )
     for epoch in range(start_epoch, config.epochs + 1):
         train_metrics, train_n = _train_epoch(
             projector,
@@ -958,7 +1013,7 @@ def train_stage4_ablation(
             transform,
             train_dataset,
             lookup,
-            training_latents,
+            training_latents_device,
             optimizer,
             config,
             device=resolved,
@@ -975,10 +1030,13 @@ def train_stage4_ablation(
             device=resolved,
             batch_size=config.eval_batch_size or config.batch_size,
             num_workers=config.num_workers,
+            prefetch_factor=config.prefetch_factor,
             target_shape=target_shape,
             max_batches=config.max_eval_batches,
             reconstruction_examples=config.reconstruction_examples,
             semantic_evaluator=semantic_evaluator,
+            target_raw_latents=validation_latents,
+            include_expensive_diagnostics=False,
         )
         row = {"epoch": epoch, "n": train_n, **{f"train_{k}": v for k, v in train_metrics.items()}}
         history.append(row)

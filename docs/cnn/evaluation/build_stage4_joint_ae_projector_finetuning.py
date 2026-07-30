@@ -163,7 +163,11 @@ cells = [
     ),
     code(
         """
-        BRANCHES_TO_RUN = ["mixed_to_pubmed"]
+        BRANCHES_TO_RUN = [
+            "mixed_to_pubmed",
+            "mixed_to_nilearn",
+            "mixed_to_neurovault",
+        ]
         VARIANTS_TO_RUN = [
             "projector_only_baseline",
             "projector_plus_decoder_output",
@@ -183,8 +187,9 @@ cells = [
         PROJECTOR_SEED = 42
         EPOCHS = 50
         BATCH_SIZE = 32
-        EVAL_BATCH_SIZE = 32
-        NUM_WORKERS = 2
+        EVAL_BATCH_SIZE = 128
+        NUM_WORKERS = 8 if IN_COLAB else 0
+        PREFETCH_FACTOR = 4
         MAX_TRAIN_BATCHES = None
         MAX_EVAL_BATCHES = None
         DATA_LIMIT = None
@@ -330,6 +335,7 @@ cells = [
             torch.backends.cudnn.benchmark = False
 
         seed_everything(SEED)
+        torch.set_float32_matmul_precision("high")
         DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         MIXED_PRECISION_DTYPE = resolve_amp_dtype(DEVICE, AMP_DTYPE)
         AUTOCAST_ENABLED = (
@@ -376,20 +382,11 @@ cells = [
             "mixed_to_pubmed": {
                 "domain": "pubmed", "stage1": "1A", "ae_variant": "mixed"
             },
-            "pubmed": {
-                "domain": "pubmed", "stage1": "1B", "ae_variant": "pubmed"
-            },
             "mixed_to_nilearn": {
                 "domain": "nilearn", "stage1": "1A", "ae_variant": "mixed"
             },
-            "nilearn": {
-                "domain": "nilearn", "stage1": "1B", "ae_variant": "nilearn"
-            },
             "mixed_to_neurovault": {
                 "domain": "neurovault", "stage1": "1A", "ae_variant": "mixed"
-            },
-            "neurovault": {
-                "domain": "neurovault", "stage1": "1B", "ae_variant": "neurovault"
             },
         }
         unknown_branches = sorted(set(BRANCHES_TO_RUN) - set(BRANCH_SPECS))
@@ -436,6 +433,7 @@ cells = [
                 pin_memory=DEVICE.type == "cuda",
                 persistent_workers=NUM_WORKERS > 0,
                 generator=torch.Generator().manual_seed(seed),
+                **({"prefetch_factor": PREFETCH_FACTOR} if NUM_WORKERS > 0 else {}),
             )
 
         def load_branch_resources(branch):
@@ -1634,6 +1632,9 @@ cells = [
             "epochs": EPOCHS,
             "batch_size": BATCH_SIZE,
             "eval_batch_size": EVAL_BATCH_SIZE,
+            "num_workers": NUM_WORKERS,
+            "prefetch_factor": PREFETCH_FACTOR,
+            "mixed_ae_only": True,
             "projector_learning_rate": PROJECTOR_LEARNING_RATE,
             "decoder_learning_rate": DECODER_LEARNING_RATE,
             "encoder_head_learning_rate": ENCODER_HEAD_LEARNING_RATE,
