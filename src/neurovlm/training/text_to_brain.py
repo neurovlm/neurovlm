@@ -12,9 +12,12 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.utils.data import DataLoader, Dataset
 
-from neurovlm.atlas_free_dataset import AtlasFreeCNNDataProvider
-from neurovlm.atlas_free_text import AtlasFreeContrastiveCollator, AtlasFreeTextEmbeddingLookup
-from neurovlm.cnn import CNNTextToBrainModel, GenerativeTextToAELatent
+from neurovlm.cnn.models import CNNTextToBrainModel, GenerativeTextToAELatent
+from neurovlm.data.atlas_free_dataset import AtlasFreeCNNDataProvider
+from neurovlm.data.atlas_free_text import (
+    AtlasFreeContrastiveCollator,
+    AtlasFreeTextEmbeddingLookup,
+)
 from neurovlm.evaluation.text_to_brain import TextToBrainEvaluation, evaluate_text_to_brain
 from neurovlm.pipelines import (
     CheckpointManager,
@@ -256,7 +259,7 @@ def build_text_to_brain(
         if source["kind"] in {"from_run", "checkpoint"}:
             autoencoder = autoencoder_from_checkpoint(source["path"])
         else:
-            from neurovlm.models import load_model
+            from neurovlm.models.base import load_model
 
             kwargs: dict[str, Any] = {
                 "family": "cnn",
@@ -316,7 +319,7 @@ def text_to_brain_from_checkpoint(
 ) -> CNNTextToBrainModel:
     """Reload a standardized Stage 4 projector and its recorded frozen AE."""
 
-    from neurovlm.cnn import text_to_brain_from_payload
+    from neurovlm.cnn.models import text_to_brain_from_payload
 
     payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
     if not isinstance(payload, dict):
@@ -338,7 +341,7 @@ def text_to_brain_from_checkpoint(
                 raise ValueError("Recorded autoencoder checkpoint SHA256 mismatch")
             autoencoder = autoencoder_from_checkpoint(path)
         elif source.get("kind") == "released":
-            from neurovlm.models import load_model
+            from neurovlm.models.base import load_model
 
             kwargs: dict[str, Any] = {
                 "family": "cnn",

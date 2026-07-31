@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
-from neurovlm.model_registry import ModelSpec, resolve_model_spec
+from neurovlm.models.registry import ModelSpec, resolve_model_spec
 
 
 RUN_CONFIG_VERSION = 1

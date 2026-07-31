@@ -12,7 +12,7 @@ Install the package and run a minimal quickstart.
 :::
 
 :::{grid-item-card} Tutorials
-:link: tutorials/index
+:link: 01_tutorials/index
 :link-type: doc
 Step-by-step notebooks to learn the workflow.
 :::
@@ -24,7 +24,7 @@ Function and class reference for the public package API.
 :::
 
 :::{grid-item-card} Atlas-free CNN
-:link: cnn/index
+:link: 05_cnn/technical_guide
 :link-type: doc
 Inference, training, comparison, and reproducibility workflows.
 :::
@@ -42,8 +42,8 @@ R. P. Hammonds, J. Aguirre-Chavez, B. Omoma-Edosa, and B. Voytek, “NeuroVLM: A
 :maxdepth: 2
 
 installation
-tutorials/index
-cnn/index
+01_tutorials/index
+05_cnn/technical_guide
 api
 ```
 

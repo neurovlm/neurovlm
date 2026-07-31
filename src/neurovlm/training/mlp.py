@@ -28,8 +28,8 @@ from neurovlm.evaluation.mlp import (
     evaluate_mlp_contrastive,
     evaluate_mlp_text_to_brain,
 )
-from neurovlm.loss import InfoNCELoss
-from neurovlm.models import NeuroAutoEncoder, ProjHead
+from neurovlm.models.base import NeuroAutoEncoder, ProjHead
+from neurovlm.models.losses import InfoNCELoss
 from neurovlm.pipelines import (
     CheckpointManager,
     MetricDirection,
@@ -290,7 +290,7 @@ def build_mlp_text_to_brain(
     if autoencoder is None:
         if config.preset != "retained":
             raise ValueError("Custom text-to-brain dimensions require an injected autoencoder")
-        from neurovlm.models import load_model
+        from neurovlm.models.base import load_model
         autoencoder = load_model(family="mlp", task="autoencoder")
     if text_projection is None:
         text_projection = ProjHead(config.text_dim, config.hidden_dim, config.latent_dim, seed=config.seed)
@@ -347,7 +347,7 @@ def mlp_text_to_brain_from_checkpoint(
     if autoencoder is None:
         if arch.get("preset") != "retained" or source not in {None, "released_autoencoder_and_scratch_projection"}:
             raise ValueError("Reloading this text-to-brain checkpoint requires autoencoder=")
-        from neurovlm.models import load_model
+        from neurovlm.models.base import load_model
         autoencoder = load_model(family="mlp", task="autoencoder")
     projection = ProjHead(int(arch["text_dim"]), int(arch["hidden_dim"]), int(arch["latent_dim"]))
     try:

@@ -1,6 +1,6 @@
 # Installation
 
 ```{include} ../README.md
-:start-after: "## Install"
-:end-before: "## Quickstart"
+:start-after: "## Installation"
+:end-before: "## Demo"
 ```

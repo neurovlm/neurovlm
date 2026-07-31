@@ -12,7 +12,10 @@ import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from neurovlm.atlas_free_text import AtlasFreeContrastiveCollator, AtlasFreeTextEmbeddingLookup
+from neurovlm.data.atlas_free_text import (
+    AtlasFreeContrastiveCollator,
+    AtlasFreeTextEmbeddingLookup,
+)
 from neurovlm.evaluation.spatial import reconstruction_metrics
 
 

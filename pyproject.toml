@@ -48,14 +48,6 @@ nct = [
 coords = [
   "nimare",
 ]
-crawling = [
-  "requests",
-  "beautifulsoup4",
-  "tqdm",
-]
-cogatlas = [
-  "networkx",
-]
 viz = [
   "matplotlib",
   "seaborn",
@@ -77,16 +69,18 @@ docs = [
   "sphinx-design>=0.6,<1",
   "sphinx-copybutton>=0.5,<1",
 ]
+test = [
+  "pytest>=7",
+  "pytest-cov>=4",
+  "pytest-xdist>=3",
+]
 full = [
   "nltk",
   "rouge-score",
   "scikit-learn",
   "scikit-image",
   "nimare",
-  "requests",
-  "beautifulsoup4",
   "tqdm",
-  "networkx",
   "matplotlib",
   "seaborn",
   "ipython",
@@ -107,4 +101,16 @@ include = [
   "pyproject.toml",
   "README.md",
   "LICENSE",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "unit: isolated offline behavior",
+  "integration: multi-component behavior",
+  "slow: long-running tests",
+  "network: requires external network access",
+  "requires_data: requires downloaded datasets",
+  "requires_pretrained: requires released model weights",
+  "requires_specter: requires a Hugging Face SPECTER model",
 ]
