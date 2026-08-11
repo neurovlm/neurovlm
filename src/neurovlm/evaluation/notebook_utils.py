@@ -17,14 +17,14 @@ from neurovlm.data.loaders import load_dataset, load_latent
 NETWORK_TEST_SET_SOURCE = "huggingface:neurovlm/embedded_text/network_test_set_labels.csv"
 
 
-def resolve_evaluation_output_dir(path: str = "docs/04_evaluation/outputs") -> Path:
-    """Resolve evaluation outputs from the repository or evaluation directory."""
+def resolve_evaluation_output_dir(path: str = "docs/figures/outputs") -> Path:
+    """Resolve evaluation outputs from the repository or notebook directory."""
 
     output_dir = Path(path)
     if output_dir.parent.exists():
         return output_dir
     local_output_dir = Path("outputs")
-    if Path.cwd().name == "03_evaluation":
+    if Path.cwd().name in {"figures", "evaluation"}:
         return local_output_dir
     return output_dir
 

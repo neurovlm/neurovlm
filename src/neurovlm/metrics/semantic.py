@@ -1219,7 +1219,7 @@ def find_default_mesh_json() -> Path | None:
 
     candidates = [
         Path("experiments/data/mesh_kg/mesh_annotations.json"),
-        Path("docs/04_evaluation/mesh_annotations.json"),
+        Path("docs/figures/mesh_annotations.json"),
     ]
     candidates.extend(Path(".").glob("**/*mesh*annotations*.json"))
     for candidate in candidates:

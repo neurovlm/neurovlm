@@ -105,7 +105,10 @@ resume; and explicit local-run chaining.
 
 ## Documentation
 
-See the [docs](https://neurovlm.github.io/neurovlm/) for the [API](https://neurovlm.github.io/neurovlm/api.html) and [tutorials](https://neurovlm.github.io/neurovlm/tutorials/index.html).
+See the [docs](https://neurovlm.github.io/neurovlm/) for the
+[API](https://neurovlm.github.io/neurovlm/api.html),
+[tutorials](https://neurovlm.github.io/neurovlm/01_tutorials/index.html), and
+[paper figure reproduction](https://neurovlm.github.io/neurovlm/figures/README.html).
 
 
 ## Reproducibility
@@ -115,9 +118,8 @@ Analyses are organized as Jupyter notebooks:
 1. `docs/01_tutorials`: User-facing examples
 2. `docs/02_data`: Data loading and preprocessing
 3. `docs/03_models`: Model training and development
-4. `docs/04_evaluation`: Evaluation and publication figures
-5. `docs/05_cnn`: Atlas-free CNN training and evaluation
-6. `docs/06_data_preparation`: Dataset artifact generation
+4. `docs/figures`: Preprint-v3 evaluation and figure reproduction
+5. `docs/experimental`: Retained exploratory evaluation, atlas-free CNN, and data-preparation research
 
 ## License
 

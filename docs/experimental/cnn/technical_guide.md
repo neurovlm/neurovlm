@@ -157,7 +157,7 @@ This protocol distinction explains an apparent PubMed MLP contrastive regression
 - `training/contrastive_and_text_to_brain.ipynb`: domain switches for both downstream tasks.
 - `training/architecture_background.ipynb`: non-prescriptive architecture history.
 - `evaluation/*_comparison.ipynb`: package-level reconstruction, retrieval, and generation comparisons.
-- `../tutorials/06_atlas_free_cnn.ipynb`: short inference quickstart.
+- `../../01_tutorials/06_atlas_free_cnn.ipynb`: short inference quickstart.
 
 ```{toctree}
 :hidden:
