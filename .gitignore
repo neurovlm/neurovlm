@@ -4,6 +4,8 @@
 .claude/settings.local.json
 .pytest_cache/
 .DS_Store
+__MACOSX/
+.ipynb_checkpoints/
 .coverage
 htmlcov/
 dist/
@@ -17,11 +19,11 @@ docs/generated/
 *.pkl.gz
 *.nii.gz
 *.jsonl
-*.pyc
+*.py[cod]
 __pycache__/
 
 # Generated research outputs and downloaded source data.
 docs/**/outputs/
-docs/06_data_preparation/**/*.csv
-docs/06_data_preparation/**/*.json
-docs/06_data_preparation/**/*.xml
+docs/experimental/data_preparation/**/*.csv
+docs/experimental/data_preparation/**/*.json
+docs/experimental/data_preparation/**/*.xml
