@@ -18,3 +18,10 @@ configurations.
 
 For the publication reproduction path, start with
 [`../figures/README.md`](../figures/README.md).
+
+```{toctree}
+:hidden:
+:maxdepth: 1
+
+cnn/technical_guide
+```
