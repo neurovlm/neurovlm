@@ -50,8 +50,11 @@ jobs:
           python -c "import torch; print('torch version:', torch.__version__)"
           python -c "import transformers; print('transformers version:', transformers.__version__)"
 
-      - name: Run tests
-        run: pytest tests/ -v --cov=neurovlm --cov-report=xml --cov-report=term --tb=short
+      - name: Run offline tests
+        run: >-
+          pytest tests/ -v
+          -m "not network and not requires_data and not requires_pretrained and not requires_specter and not slow"
+          --cov=neurovlm --cov-report=xml --cov-report=term --tb=short
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'

@@ -31,7 +31,7 @@ Installation take a couple minutes. After installation, calling `neurovlm.data.f
 
 ## Demo
 
-See [here](https://github.com/neurovlm/neurovlm/blob/main/docs/tutorials/00_quickstart.ipynb) for the introductory notebook that walks through using all NeuroVLM models. In short:
+See [here](https://github.com/neurovlm/neurovlm/blob/main/docs/01_tutorials/00_quickstart.ipynb) for the introductory notebook that walks through using all NeuroVLM models. In short:
 
 Fetch NeuroVLM's datasets and models:
 
@@ -72,7 +72,7 @@ text-to-brain heads use the mixed baseline unless `variant="finetuned"` is
 requested explicitly:
 
 ```python
-from neurovlm.runtime import load_pipeline
+from neurovlm import load_pipeline
 
 autoencoder = load_pipeline(family="cnn", task="autoencoder")
 contrastive = load_pipeline(
@@ -105,16 +105,21 @@ resume; and explicit local-run chaining.
 
 ## Documentation
 
-See the [docs](https://neurovlm.github.io/neurovlm/) for the [API](https://neurovlm.github.io/neurovlm/api.html) and [tutorials](https://neurovlm.github.io/neurovlm/tutorials/index.html).
+See the [docs](https://neurovlm.github.io/neurovlm/) for the
+[API](https://neurovlm.github.io/neurovlm/api.html),
+[tutorials](https://neurovlm.github.io/neurovlm/01_tutorials/index.html), and
+[paper figure reproduction](https://neurovlm.github.io/neurovlm/figures/README.html).
 
 
 ## Reproducibility
 
-All analyses are in Juptyer notebooks. Their are three directories:
+Analyses are organized as Jupyter notebooks:
 
-1. `docs/01_data`: Fetch raw data and preprocess
-2. `docs/02_models`: Trains all models
-3. `docs/03_evaluation`: Evaluates models and reproduces publication figures.
+1. `docs/01_tutorials`: User-facing examples
+2. `docs/02_data`: Data loading and preprocessing
+3. `docs/03_models`: Model training and development
+4. `docs/figures`: Preprint-v3 evaluation and figure reproduction
+5. `docs/experimental`: Retained exploratory evaluation, atlas-free CNN, and data-preparation research
 
 ## License
 

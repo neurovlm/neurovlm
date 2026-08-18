@@ -1,6 +1,22 @@
 name: Docs
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/**"
+      - "src/**"
+      - "README.md"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "src/**"
+      - "README.md"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
@@ -39,7 +55,7 @@ jobs:
         run: uv pip install -p .venv/bin/python -e ".[docs]"
 
       - name: Build docs
-        run: .venv/bin/sphinx-build -b html -E -a docs docs/_build/html
+        run: .venv/bin/sphinx-build -W --keep-going -b html -E -a docs docs/_build/html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -47,6 +63,7 @@ jobs:
           path: docs/_build/html
 
   deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

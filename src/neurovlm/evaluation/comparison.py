@@ -20,18 +20,21 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from neurovlm.atlas_free_dataset import AtlasFreeCNNDataProvider, canonical_atlas_free_domain
-from neurovlm.atlas_free_text import (
+from neurovlm.data.atlas_free_dataset import (
+    AtlasFreeCNNDataProvider,
+    canonical_atlas_free_domain,
+)
+from neurovlm.data.atlas_free_text import (
     AtlasFreeContrastiveCollator,
     AtlasFreeTextEmbeddingLookup,
     primary_positive_text,
     primary_positive_text_id,
 )
-from neurovlm.cnn import atlas_free_volume_to_mlp_flat
+from neurovlm.cnn.models import atlas_free_volume_to_mlp_flat
 from neurovlm.evaluation.contrastive import evaluate_contrastive
 from neurovlm.evaluation.spatial import reconstruction_metrics
-from neurovlm.model_registry import ModelDomain, ModelFamily, ModelTask, ModelVariant
-from neurovlm.runtime import NeuroVLMRuntime, load_pipeline
+from neurovlm.core.runtime import NeuroVLMRuntime, load_pipeline
+from neurovlm.models.registry import ModelDomain, ModelFamily, ModelTask, ModelVariant
 
 
 @dataclass(frozen=True)
@@ -398,7 +401,7 @@ def _family_text_lookup(
 def _default_mlp_text_encoder(device: str | torch.device) -> Callable[[Sequence[str]], Tensor]:
     """Construct the MLP family's released SPECTER2 query encoder lazily."""
 
-    from neurovlm.models import Specter
+    from neurovlm.models.base import Specter
 
     return Specter(device=str(device))
 

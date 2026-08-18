@@ -2,7 +2,7 @@
 
 NeuroVLM maps between neuroimaging activation maps and neuroscience text.
 
-::::{grid} 1 1 2 3
+::::{grid} 1 1 2 4
 :gutter: 2
 
 :::{grid-item-card} Installation
@@ -12,9 +12,15 @@ Install the package and run a minimal quickstart.
 :::
 
 :::{grid-item-card} Tutorials
-:link: tutorials/index
+:link: 01_tutorials/index
 :link-type: doc
 Step-by-step notebooks to learn the workflow.
+:::
+
+:::{grid-item-card} Paper Figures
+:link: figures/README
+:link-type: doc
+Preprint-v3 figure map and reproduction guidance.
 :::
 
 :::{grid-item-card} API Reference
@@ -23,27 +29,25 @@ Step-by-step notebooks to learn the workflow.
 Function and class reference for the public package API.
 :::
 
-:::{grid-item-card} Atlas-free CNN
-:link: cnn/index
-:link-type: doc
-Inference, training, comparison, and reproducibility workflows.
-:::
-
 ::::
 
 ## Preprint
 
-R. P. Hammonds, J. Aguirre-Chavez, B. Omoma-Edosa, and B. Voytek, “NeuroVLM: A generative vision-language framework for human neuroimaging,” *bioRxiv*, preprint, Feb. 9, 2026. [Online]. Available: https://www.biorxiv.org/content/10.64898/2026.02.06.704508v2.full
+R. P. Hammonds, J. Aguirre-Chavez, B. Omoma-Edosa, A. Patel, and B. Voytek, “NeuroVLM: A generative vision-language framework for human neuroimaging,” *bioRxiv*, preprint v3, July 1, 2026. [Online]. Available: https://www.biorxiv.org/content/10.64898/2026.02.06.704508v3
 
-[biorxiv link](https://www.biorxiv.org/content/10.64898/2026.02.06.704508v2.full)
+[bioRxiv preprint v3](https://www.biorxiv.org/content/10.64898/2026.02.06.704508v3)
+
+Ongoing and historical research notebooks remain available under
+[Experimental Notebooks](experimental/README.md).
 
 ```{toctree}
 :hidden:
 :maxdepth: 2
 
 installation
-tutorials/index
-cnn/index
+01_tutorials/index
+figures/README
+experimental/README
 api
 ```
 

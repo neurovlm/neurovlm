@@ -12,12 +12,12 @@ from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from neurovlm.loss import InfoNCELoss
-from neurovlm.retrieval_metrics import (
+from neurovlm.metrics.retrieval import (
     bidirectional_retrieval_metrics,
     normalized_k_values,
     recall_curve,
 )
+from neurovlm.models.losses import InfoNCELoss
 
 
 @dataclass(frozen=True)

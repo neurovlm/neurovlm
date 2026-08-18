@@ -1,9 +1,8 @@
 """Pytest configuration and fixtures for neurovlm tests."""
 
-import os
+import numpy as np
 import pytest
 import torch
-import numpy as np
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +25,7 @@ def device():
 def specter_model():
     """Fixture to provide Specter model"""
     from neurovlm.models import Specter
+
     model = Specter()
     return model
 
@@ -34,6 +34,7 @@ def specter_model():
 def pretrained_autoencoder():
     """Fixture to provide pretrained autoencoder"""
     from neurovlm.models import load_model
+
     model = load_model("autoencoder")
     return model
 
@@ -42,6 +43,7 @@ def pretrained_autoencoder():
 def pretrained_proj_heads():
     """Fixture to provide pretrained projection heads"""
     from neurovlm.models import load_model
+
     text_infonce = load_model("proj_head_text_infonce")
     image_infonce = load_model("proj_head_image_infonce")
     text_mse = load_model("proj_head_text_mse")
@@ -51,20 +53,13 @@ def pretrained_proj_heads():
         "text_mse": text_mse,
     }
 
-def pytest_configure(config):
-    """Configure pytest with custom markers."""
-    config.addinivalue_line(
-        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
-    )
-    config.addinivalue_line(
-        "markers",
-        "requires_data: marks tests that require downloaded data files",
-    )
-    config.addinivalue_line(
-        "markers",
-        "requires_pretrained: marks tests that require pretrained models",
-    )
-    config.addinivalue_line(
-        "markers",
-        "requires_specter: mark test as requiring Specter model from HuggingFace"
-    )
+
+def pytest_collection_modifyitems(items):
+    """Label tests from their unit/integration directory."""
+
+    for item in items:
+        parts = item.path.parts
+        if "unit" in parts:
+            item.add_marker(pytest.mark.unit)
+        elif "integration" in parts:
+            item.add_marker(pytest.mark.integration)

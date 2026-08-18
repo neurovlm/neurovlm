@@ -10,14 +10,14 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from neurovlm.atlas_free_dataset import AtlasFreeCNNDataProvider
-from neurovlm.atlas_free_text import (
+from neurovlm.cnn.models import CNNContrastiveModel
+from neurovlm.data.atlas_free_dataset import AtlasFreeCNNDataProvider
+from neurovlm.data.atlas_free_text import (
     AtlasFreeContrastiveCollator,
     AtlasFreeTextEmbeddingLookup,
 )
-from neurovlm.cnn import CNNContrastiveModel
 from neurovlm.evaluation.contrastive import ContrastiveEvaluation, evaluate_contrastive
-from neurovlm.loss import InfoNCELoss
+from neurovlm.models.losses import InfoNCELoss
 from neurovlm.pipelines import (
     CheckpointManager,
     MetricDirection,
@@ -216,7 +216,7 @@ def build_contrastive(
         if path is not None:
             autoencoder = autoencoder_from_checkpoint(path)
         else:
-            from neurovlm.models import load_model
+            from neurovlm.models.base import load_model
 
             kwargs: dict[str, Any] = {
                 "family": "cnn",
@@ -253,7 +253,7 @@ def build_contrastive(
         if mismatches:
             raise ValueError("Autoencoder encoder architecture mismatch: " + "; ".join(mismatches))
     if text_projection is None:
-        from neurovlm.models import ProjHead
+        from neurovlm.models.base import ProjHead
 
         text_projection = ProjHead.from_pretrained("text_infonce")
     model = CNNContrastiveModel(encoder, text_projection)
@@ -269,7 +269,7 @@ def contrastive_from_checkpoint(
 ) -> CNNContrastiveModel:
     """Reload a standardized or legacy Stage 3 checkpoint."""
 
-    from neurovlm.cnn import contrastive_from_payload
+    from neurovlm.cnn.models import contrastive_from_payload
 
     payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
     if not isinstance(payload, dict):

@@ -11,16 +11,16 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from neurovlm.atlas_free_text import (
+from neurovlm.data.atlas_free_text import (
     AtlasFreeContrastiveCollator,
     AtlasFreeTextEmbeddingLookup,
 )
-from neurovlm.loss import InfoNCELoss
-from neurovlm.retrieval_metrics import (
+from neurovlm.metrics.retrieval import (
     bidirectional_retrieval_metrics,
     normalized_k_values,
     recall_curve,
 )
+from neurovlm.models.losses import InfoNCELoss
 
 
 @dataclass(frozen=True)

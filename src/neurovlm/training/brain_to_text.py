@@ -29,8 +29,8 @@ from neurovlm.pipelines import (
     RunContext,
 )
 from neurovlm.pipelines.serialization import atomic_write_csv, atomic_write_json
-from neurovlm.qformer import NeuroQFormer
-from neurovlm.retrieval_resources import NEURO_QFORMER_REPO_ID, NEURO_QWEN_REPO_ID
+from neurovlm.models.qformer import NeuroQFormer
+from neurovlm.resources.loaders import NEURO_QFORMER_REPO_ID, NEURO_QWEN_REPO_ID
 
 
 QFORMER_RETAINED_ARCHITECTURE = (384, 384, 1024, 32, 512, 8, 6)
@@ -294,7 +294,7 @@ def build_brain_to_text_generation(
             if qformer_loader is not None:
                 qformer = qformer_loader()
             else:
-                from neurovlm.models import load_model
+                from neurovlm.models.base import load_model
 
                 qformer = load_model(
                     family="mlp", task="brain_to_text_generation", variant="qformer"

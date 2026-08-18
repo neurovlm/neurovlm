@@ -36,7 +36,7 @@ Task-oriented tensor inference selects the family, task, domain, variant, and
 released checkpoint or local run explicitly. CNN domain tasks default to the
 mixed baseline; fine-tuning is explicit.
 
-.. currentmodule:: neurovlm.runtime
+.. currentmodule:: neurovlm.core.runtime
 
 .. autosummary::
    :toctree: generated/
@@ -92,7 +92,7 @@ Atlas-free CNN datasets
 Published split JSONLs and their shared volume tensor. Legacy per-row local
 paths are ignored.
 
-.. currentmodule:: neurovlm.atlas_free_dataset
+.. currentmodule:: neurovlm.data.atlas_free_dataset
 
 .. autosummary::
    :toctree: generated/
@@ -119,7 +119,7 @@ Pretrained models return from load_model or calling .from_pretrained on model cl
 
 The structured selectors are defined in the model registry:
 
-.. currentmodule:: neurovlm.model_registry
+.. currentmodule:: neurovlm.models.registry
 
 .. autosummary::
    :toctree: generated/
@@ -152,7 +152,7 @@ Loss Functions
 
 The pretrained models used InfoNCELoss or MSELoss. Additional options include FocalLoss or TruncatedLoss.
 
-.. currentmodule:: neurovlm.loss
+.. currentmodule:: neurovlm.models.losses
 
 .. autosummary::
    :toctree: generated/
@@ -163,16 +163,6 @@ The pretrained models used InfoNCELoss or MSELoss. Additional options include Fo
 
 Training
 --------
-
-The original generic PyTorch trainer remains supported.
-
-.. currentmodule:: neurovlm.train
-
-.. autosummary::
-   :toctree: generated/
-
-   Trainer
-   which_device
 
 Standardized task runners
 ~~~~~~~~~~~~~~~~~~~~~~~~~
