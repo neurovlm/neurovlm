@@ -8,7 +8,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: .venv (3.12.12)
+#     display_name: .conda
 #     language: python
 #     name: python3
 # ---
