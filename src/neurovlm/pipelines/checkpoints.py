@@ -302,7 +302,7 @@ class CheckpointManager:
         if path is None:
             return self.checkpoint_dir / "last.pt"
         path = Path(path)
-        if not path.is_absolute():
+        if not path.is_absolute() and not path.exists():
             candidate = self.checkpoint_dir / path
             path = candidate if candidate.exists() else self.config.run_dir / path
         return path

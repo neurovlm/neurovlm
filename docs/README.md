@@ -1,5 +1,16 @@
 # Docs Development
 
+## Notebooks
+
+Every notebook under `docs/` is paired with a jupytext `.py:percent` mirror
+(e.g. `01_tutorials/00_quickstart.ipynb` <-> `01_tutorials/00_quickstart.py`).
+The `.py` mirror is the diff-friendly, reviewable source; edit either file and
+run `jupytext --sync <path-to-either-file>` to resync the other. Both files
+are committed. See `../tests/README.md` for how these mirrors get smoke-tested
+(`scripts/smoke_notebooks.sh`).
+
+## Build
+
 Build locally with `uv`:
 
 ```bash

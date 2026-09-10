@@ -226,6 +226,41 @@ def test_checkpoint_best_direction_last_alias_hash_and_resume(
         assert torch.equal(expected_parameter, actual_parameter)
 
 
+def test_checkpoint_load_resume_accepts_fully_qualified_relative_run_dir_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Training modules resume with ``run_dir / "checkpoints" / "best.pt"``.
+
+    That path is already correct relative to the cwd, so it must round-trip
+    unchanged even when ``output_root`` (and therefore ``run_dir``) is itself
+    relative -- otherwise it gets re-anchored under run_dir a second time.
+    """
+    monkeypatch.chdir(tmp_path)
+    config = RunConfig.resolve(
+        task="autoencoder",
+        output_root="runs",
+        run_id="run-001",
+        primary_metric="val_loss",
+        metric_direction="min",
+        data={"split": "hf://published/split.jsonl"},
+        resources={"checkpoint": "hf://published/model.pt"},
+        initialization={"source": "released"},
+    )
+    assert not config.output_root.is_absolute()
+    RunArtifacts(config).initialize(repo=tmp_path)
+    model = torch.nn.Linear(2, 1)
+    manager = CheckpointManager(config, expected_architecture={"width": 2})
+    manager.save_best(model, 1.0, epoch=0, architecture={"width": 2})
+
+    restored = torch.nn.Linear(2, 1)
+    state = manager.load_resume(
+        config.run_dir / "checkpoints" / "best.pt", model=restored, map_location="cpu"
+    )
+    assert state.epoch == 0
+    for expected_parameter, actual_parameter in zip(model.parameters(), restored.parameters()):
+        assert torch.equal(expected_parameter, actual_parameter)
+
+
 def test_checkpoint_validation_and_integrity_fail_closed(tmp_path: Path) -> None:
     config = _config(tmp_path)
     RunArtifacts(config).initialize(repo=tmp_path)

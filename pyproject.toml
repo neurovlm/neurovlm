@@ -73,6 +73,7 @@ test = [
   "pytest>=7",
   "pytest-cov>=4",
   "pytest-xdist>=3",
+  "jupytext>=1.16",
 ]
 full = [
   "nltk",
@@ -113,4 +114,5 @@ markers = [
   "requires_data: requires downloaded datasets",
   "requires_pretrained: requires released model weights",
   "requires_specter: requires a Hugging Face SPECTER model",
+  "notebook_smoke: executes a notebook's jupytext .py mirror end-to-end at smoke scale",
 ]
