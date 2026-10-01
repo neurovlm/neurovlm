@@ -1,5 +1,32 @@
 # Docs Development
 
+## Notebooks
+
+Edit and commit the `.ipynb` notebooks. Generate Python scripts on demand with
+Jupytext (included in `pip install -e ".[test]"`):
+
+```bash
+python scripts/export_notebook.py docs/01_tutorials/00_quickstart.ipynb
+```
+
+The script prints the output path under `docs/generated/notebooks/`, which is
+ignored by Git. Use `-o /tmp/quickstart.py` to choose another output path.
+When running an export, use the original notebook's directory as the working
+directory so relative data paths resolve correctly. IPython magics and shell
+commands are commented out by Jupytext's Python export; notebooks that rely
+on them need an IPython environment or adaptation before script execution.
+
+Smoke tests generate temporary scripts automatically; no committed `.py`
+duplicates are needed. Test one notebook with:
+
+```bash
+scripts/smoke_notebooks.sh -k 00_quickstart
+```
+
+See `../tests/README.md` for test requirements and limitations.
+
+## Build
+
 Build locally with `uv`:
 
 ```bash
