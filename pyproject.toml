@@ -114,5 +114,5 @@ markers = [
   "requires_data: requires downloaded datasets",
   "requires_pretrained: requires released model weights",
   "requires_specter: requires a Hugging Face SPECTER model",
-  "notebook_smoke: executes a notebook's jupytext .py mirror end-to-end at smoke scale",
+  "notebook_smoke: exports and executes a notebook end-to-end at smoke scale",
 ]

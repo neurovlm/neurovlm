@@ -1,4 +1,4 @@
-"""Runtime patches applied before executing a notebook's jupytext .py mirror in smoke mode.
+"""Runtime patches applied before executing a notebook's generated Python script in smoke mode.
 
 Import side effects only: capping training to a handful of batches for a single
 epoch lets a notebook's real code path (data loading, model construction,

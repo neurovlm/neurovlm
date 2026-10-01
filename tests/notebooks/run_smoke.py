@@ -1,4 +1,4 @@
-"""Execute a jupytext .py:percent notebook mirror as a script, in smoke mode.
+"""Execute a generated .py:percent notebook script as a script, in smoke mode.
 
 Usage: python run_smoke.py <path/to/notebook.py>
 

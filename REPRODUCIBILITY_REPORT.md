@@ -8,27 +8,30 @@
 - Deterministic test suite: **369 passed**, 0 regressions (up from 368 — added a regression test for a real bug found below).
 - All 46 notebooks under `docs/` accounted for: **25 pass**, **19 documented skip** (genuinely missing data/models, not bugs), **2 fail** (a local machine SSL issue, not a code bug — see below).
 - **6 real bugs found and fixed**, most notably a checkpoint-resume bug affecting all 5 training pipelines.
-- New, reusable infrastructure: every notebook now has a jupytext `.py` mirror, plus a smoke-test harness and two convenience scripts, so this whole check can be re-run in one command after the next refactor.
+- New, reusable infrastructure: every notebook can be exported on demand with Jupytext, plus a smoke-test harness and two convenience scripts, so this whole check can be re-run in one command after the next refactor.
 - Re-verified from a clean run after this report was first drafted — **results are stable and reproducible** (see "Re-verification" below).
 
 ---
 
 ## What was built
 
-### 1. jupytext mirrors for every notebook
+### 1. On-demand Python exports
 
-Every `docs/**/*.ipynb` is now paired with a `.py:percent` mirror (e.g. `00_quickstart.ipynb` ↔ `00_quickstart.py`). The `.py` file is a plain, diff-friendly Python script — same code, markdown cells as comments — kept in sync via:
+Notebooks are the committed source of truth. Generate a `.py:percent` script
+(same code, markdown cells as comments) for a selected notebook with:
 
 ```bash
-jupytext --sync path/to/notebook.ipynb   # or the .py file, either direction
+python scripts/export_notebook.py docs/01_tutorials/00_quickstart.ipynb
 ```
 
-Both files are committed. Edit either one, then sync before committing.
+Exports default to Git-ignored `docs/generated/notebooks/`. Smoke tests export
+notebooks to temporary scripts automatically, so no duplicate `.py` files
+need to be committed.
 
 ### 2. Notebook smoke-test harness (`tests/notebooks/`)
 
 - `smoke_bootstrap.py` — when `NEUROVLM_SMOKE=1`, monkeypatches all 8 `train_*` entry points to cap `epochs=1`, and patches `torch.utils.data.DataLoader.__iter__` to yield at most 2 batches. This lets a notebook's _real_ training code run against _real_ cached data in seconds instead of hours, without touching the notebook's own source.
-- `run_smoke.py` — executes one `.py` mirror as a script inside that patched environment.
+- `run_smoke.py` — executes one generated `.py` script as a script inside that patched environment.
 - `test_notebooks.py` — a pytest module that discovers every notebook, runs each as an isolated subprocess (own interpreter, `MPLBACKEND=Agg`, cwd set to the notebook's own directory to match Jupyter's convention), and reports pass/fail with the tail of stdout/stderr on failure. Notebooks that structurally cannot run in this checkout are marked `skip` with a documented reason in `KNOWN_UNRUNNABLE` (see below) rather than silently excluded.
 
 This is **not** part of the default `pytest` run — it needs network access and the same local data cache the notebooks themselves use, and can take significant wall time. Run it explicitly:
@@ -232,4 +235,4 @@ scripts/smoke_training.sh
 scripts/smoke_notebooks.sh
 ```
 
-If you edit a notebook, edit either the `.ipynb` or its paired `.py` file and run `jupytext --sync <path>` before committing, so the two never drift.
+Edit and commit the `.ipynb` notebook; smoke tests always export its current cells before execution.

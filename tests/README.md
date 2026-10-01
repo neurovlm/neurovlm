@@ -16,7 +16,7 @@ tests/
 │   ├── api/
 │   ├── evaluation/
 │   └── training/
-└── notebooks/          # smoke-executes every docs/**.ipynb via its jupytext mirror
+└── notebooks/          # exports and smoke-executes docs/**.ipynb
 ```
 
 Unit tests cover isolated functions, model definitions, loaders with mocked
@@ -80,13 +80,23 @@ collection filter, requires network access and the same local
 data/model cache the notebooks themselves use (`neurovlm.data.fetch_data`),
 and can take significant wall time (some figure-reproduction notebooks
 legitimately run for tens of minutes even at smoke scale). Every notebook
-under `docs/` is paired with a jupytext `.py:percent` mirror (kept in sync via
-`jupytext --sync <notebook>.ipynb`); `tests/notebooks/test_notebooks.py` runs
-each mirror as a subprocess with `NEUROVLM_SMOKE=1`, which caps training to a
+under `docs/` is converted with Jupytext to a temporary `.py:percent` script;
+`tests/notebooks/test_notebooks.py` runs each export as a subprocess from the
+original notebook's directory with `NEUROVLM_SMOKE=1`, which caps training to a
 single epoch over a couple of batches (see `tests/notebooks/smoke_bootstrap.py`)
 so real data/model code paths get exercised in seconds instead of hours. This
 proves the notebook's code still runs after a refactor; it does not validate
 numerical quality.
+
+To test a specific notebook, use `scripts/smoke_notebooks.sh -k 00_quickstart`.
+To only generate its Python script, run:
+
+```bash
+python scripts/export_notebook.py docs/01_tutorials/00_quickstart.ipynb
+```
+
+Exports go to Git-ignored `docs/generated/notebooks/` by default; `-o` chooses
+an explicit output path. The notebooks are the committed source of truth.
 
 Some notebooks are marked `skip` with a documented reason in
 `tests/notebooks/test_notebooks.py::KNOWN_UNRUNNABLE` — e.g. they depend on a
@@ -105,7 +115,7 @@ data situation changes.
 - `requires_data`: requires downloaded datasets
 - `requires_pretrained`: requires released model weights
 - `requires_specter`: requires a Hugging Face SPECTER model
-- `notebook_smoke`: executes a notebook's jupytext `.py` mirror end-to-end at smoke scale
+- `notebook_smoke`: exports and executes a notebook end-to-end at smoke scale
 
 New tests should be deterministic, use `tmp_path` for artifacts, mock network
 access unless explicitly marked, and test behavior rather than notebook prose

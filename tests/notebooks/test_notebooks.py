@@ -1,4 +1,4 @@
-"""Smoke-execute every notebook's jupytext .py:percent mirror.
+"""Export and smoke-execute every notebook as a temporary Python script.
 
 Each notebook is run as a subprocess (clean interpreter per notebook) with
 NEUROVLM_SMOKE=1, which caps training loops to one epoch over a couple of
@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from scripts.export_notebook import export_notebook
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS_ROOT = REPO_ROOT / "docs"
@@ -156,9 +158,8 @@ def _params():
 
 
 @pytest.mark.parametrize("notebook_path", list(_params()))
-def test_notebook_smoke(notebook_path: Path):
-    py_path = notebook_path.with_suffix(".py")
-    assert py_path.is_file(), f"missing jupytext mirror for {notebook_path}; run `jupytext --sync {notebook_path}`"
+def test_notebook_smoke(notebook_path: Path, tmp_path: Path):
+    py_path = export_notebook(notebook_path, tmp_path / notebook_path.with_suffix(".py").name)
 
     rel_key = str(_relative_py(notebook_path))
     timeout = TIMEOUT_OVERRIDES.get(rel_key, DEFAULT_TIMEOUT)
@@ -171,7 +172,7 @@ def test_notebook_smoke(notebook_path: Path):
 
     result = subprocess.run(
         [sys.executable, str(RUNNER), str(py_path)],
-        cwd=py_path.parent,
+        cwd=notebook_path.parent,
         env=env,
         capture_output=True,
         text=True,

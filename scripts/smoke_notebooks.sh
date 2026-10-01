@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke-execute notebook jupytext mirrors after a refactor.
+# Export and smoke-execute notebooks after a refactor.
 #
 # Usage:
 #   scripts/smoke_notebooks.sh                 # everything (public docs + experimental + figures)
@@ -8,7 +8,7 @@
 #   scripts/smoke_notebooks.sh figures          # docs/figures only
 #   scripts/smoke_notebooks.sh -k coordinate    # pytest -k filter, any scope
 #
-# Notebooks are run against their jupytext .py:percent mirror with training
+# Notebooks are exported to temporary Python scripts with training
 # capped to a single epoch over a couple of batches (NEUROVLM_SMOKE=1); this
 # proves the code path still runs after a refactor, not that metrics match a
 # full run. Requires network access and the cached datasets/models the
