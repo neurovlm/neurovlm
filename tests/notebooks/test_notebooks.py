@@ -22,11 +22,10 @@ from pathlib import Path
 
 import pytest
 
-from scripts.export_notebook import export_notebook
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS_ROOT = REPO_ROOT / "docs"
 RUNNER = Path(__file__).parent / "run_smoke.py"
+EXPORTER = REPO_ROOT / "scripts" / "export_notebook.py"
 
 DEFAULT_TIMEOUT = 300
 
@@ -159,7 +158,13 @@ def _params():
 
 @pytest.mark.parametrize("notebook_path", list(_params()))
 def test_notebook_smoke(notebook_path: Path, tmp_path: Path):
-    py_path = export_notebook(notebook_path, tmp_path / notebook_path.with_suffix(".py").name)
+    py_path = tmp_path / notebook_path.with_suffix(".py").name
+    # Invoke the CLI by absolute path so the pytest console entry point does
+    # not need the repository root on sys.path. Export only selected tests.
+    subprocess.run(
+        [sys.executable, str(EXPORTER), str(notebook_path), "--output", str(py_path)],
+        check=True,
+    )
 
     rel_key = str(_relative_py(notebook_path))
     timeout = TIMEOUT_OVERRIDES.get(rel_key, DEFAULT_TIMEOUT)
