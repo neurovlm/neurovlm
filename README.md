@@ -105,6 +105,9 @@ resume; and explicit local-run chaining.
 
 ## Documentation
 
+For collaborators and coding agents, see the [codebase map](CODEBASE_MAP.md) for
+source modules, notebooks, data and output locations, tests, and an agent prompt.
+
 See the [docs](https://neurovlm.github.io/neurovlm/) for the
 [API](https://neurovlm.github.io/neurovlm/api.html),
 [tutorials](https://neurovlm.github.io/neurovlm/01_tutorials/index.html), and
