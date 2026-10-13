@@ -1,6 +1,8 @@
 #!/usr/bin/env python
-"""Fig. S2: ALE kernel maps (top of each pair) vs their DiFuMo-512 reconstruction (bottom)
-(docs/02_data/01_coordinate.ipynb).
+"""Fig. S2: Gaussian-kernel maps of single studies (top of each pair) vs their DiFuMo-512 reconstruction (bottom)
+(docs/02_data/01_coordinate.ipynb). The top map is the per-study modeled activation of nimare's ALE kernel
+(scripts/data/01_coordinate.py: every focus convolved with a 9 mm FWHM Gaussian, maximum over the foci); with one study
+no ALE union across studies is taken, so it is a Gaussian-kernel map (the "ale" names below are the data files').
 
     .venv/bin/python scripts/figures/main/figS2_difumo_v_ale.py
 """
@@ -19,7 +21,7 @@ VIEWS = "xz"  # sagittal and axial
 
 
 def parse_args():
-    p = fig_parser("Fig. S2: ALE kernel maps vs DiFuMo reconstruction.")
+    p = fig_parser("Fig. S2: Gaussian-kernel maps vs DiFuMo reconstruction.")
     p.add_argument("--n-examples", type=int, default=8, help="Examples (<= 20), four per row.")
     p.add_argument("--threshold", type=float, default=0.1, help="Display threshold (the notebook's vmin).")
     return finalize(p.parse_args())
@@ -73,7 +75,7 @@ def _crop_white(arr: np.ndarray) -> np.ndarray:
 
 
 def render(args, payload):
-    """Examples in rows of PER_ROW, each a framed pair: ALE kernel above DiFuMo, sagittal and axial views at the
+    """Examples in rows of PER_ROW, each a framed pair: Gaussian kernel above DiFuMo, sagittal and axial views at the
     DiFuMo map's cut coordinates."""
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
@@ -99,9 +101,9 @@ def render(args, payload):
         x0 = left_in + col * (cell_w + gap_in)
         y_top = H - 0.02 - row * (block_h + gap_in)
         if col == 0:
-            for r, lab in enumerate(("ALE kernel", "DiFuMo")):
+            for r, lab in enumerate(("Gaussian\nkernel", "DiFuMo")):
                 fig.text((left_in - 0.06) / W, (y_top - pad - r * (brain_h + pad) - brain_h / 2) / H, lab, ha="right",
-                         va="center", fontsize=fs + 1)
+                         va="center", ma="right", fontsize=fs + 1, linespacing=1.15)
         if payload["mode"] == "data":
             img_d = masker.inverse_transform(payload["difumo"][c])
             img_a = masker.inverse_transform(payload["ale"][c])
@@ -127,8 +129,11 @@ def main():
     with timed("render", log, args.cache_dir, stage=STEM):
         fig = render(args, payload)
         # no trained model: --model-dir only changes the cache tag
-        finish(fig, STEM, args, log, text_dump={"mode": payload["mode"],
-                                                "pmids": payload.get("pmids"), "pairs": payload.get("pairs")})
+        finish(fig, STEM, args, log, text_dump={
+            "mode": payload["mode"], "pmids": payload.get("pmids"), "pairs": payload.get("pairs"),
+            "rows": "top: Gaussian-kernel map of one study (neuro_vectors_ale.pt: nimare ALEKernel modeled activation, "
+                    "9 mm FWHM Gaussian per focus, maximum over foci, / kernel peak, clamped at 1); bottom: its DiFuMo-512 "
+                    "reconstruction (neuro_vectors.pt)"})
 
 
 if __name__ == "__main__":

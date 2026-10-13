@@ -54,7 +54,7 @@ Sources: the author's hand edits to `response_letter.tex` (git diff), the paper 
 - At most 45 words: an optional bold title of two to five words (the paper's form), then one sentence on what is plotted and one on how it is computed or read (axes, panels, bars, colors).
 - No method details, sample breakdowns, hyperparameters, result narration or caveats. Those go to the Methods or the response text.
 - Tables label rows and columns so they read without the caption ("Hard negatives", not "Same domain").
-- The normalized-rank axis is labeled "k/n (fraction of all candidates)".
+- The normalized-rank axis is labeled "k/n", and the caption defines it ("with k/n the fraction of all candidates"), as in Fig. 4 (check6). Figs. 5 and S3 still print the longer "k/n (fraction of all candidates)" until they are redrawn.
 - Paper model (29 words): "\textbf{Gaussian products transformed to DiFuMo.} Points, from coordinate tables, were first convolved with a Gaussian kernel (top). The image output from Gaussian kernel convolution was reconstructed with DiFuMo (bottom)."
 - Fig. R1 at this length (illustration, 32 words): "Text-to-brain maps from NeuroVLM and simpler methods, scored against each test paper's reconstructed map (n = 2,971). Panels show (a) Dice and (b) voxelwise Pearson r, with means and 95\% bootstrap intervals."
 
@@ -80,7 +80,7 @@ Sources: the author's hand edits to `response_letter.tex` (git diff), the paper 
 | settings chosen on the validation set | choosing the recipe on the validation set only, recipe |
 | calibrated (rescale only if calibration fails) | rescaled to peak at one, post hoc |
 | 1.3: NeuroVault evaluation | Reviewer 1, comment 1.3: NeuroVault evaluation |
-| k/n (fraction of all candidates) | other labels for the normalized-rank axis |
+| k/n on the axis, defined in the caption as the fraction of all candidates | other labels for the normalized-rank axis |
 | Qformer (as in the paper) | Q-Former |
 | versus, against | vs |
 | American forms listed under Sentences | summarised, labelled, labelling, unlabelled, centred, colour, binarised, favour, quantisation, whilst, utilise |

@@ -11,7 +11,7 @@ from _shared import (
     calibrate_maps, cohen_d, deranged_perm, fig_parser, finalize, finish, format_p, free_gpu, get_logger, hf_cache_pinned, hf_pinned, hf_pinned_dir, load_component,
     load_pt, make_nvlm, map_cal_tag, map_factor,
     match_null_box, note_source, panel_label, pubmed_keep, pubmed_test_mask, recall_axes, run_file, save_pt,
-    select_device, sig_text, strip_steering_tags, timed, to_device_batches, welch_log10p,
+    select_device, strip_steering_tags, timed, to_device_batches, welch_log10p,
 )
 
 STEM = "fig4_generative_metrics"
@@ -385,34 +385,92 @@ def compute_b2t(args, device):
     return payload
 
 
+def stars(log10_p: float) -> str:
+    """'***' p < 0.001, '**' p < 0.01, '*' p < 0.05, '' otherwise (and for nan)."""
+    for cut, s in ((-3.0, "***"), (-2.0, "**"), (np.log10(0.05), "*")):
+        if log10_p < cut:
+            return s
+    return ""
+
+
+def _tick1(v, _):
+    """One-decimal tick label (0.0 / 0.5 / 1.0, not 0 / 1) with the typographic minus."""
+    return f"{round(v, 1) + 0.0:.1f}".replace("-", "\u2212")
+
+
+def _whiskers(v):
+    """matplotlib's whisker ends: the most extreme values within 1.5 IQR of the box."""
+    q1, q3 = np.percentile(v, [25, 75])
+    r = 1.5 * (q3 - q1)
+    return float(v[v >= q1 - r].min()), float(v[v <= q3 + r].max())
+
+
+def box_pair(ax, match, null, *, ylabel, title, star, star_size):
+    """match_null_box with the y range fitted to the whiskers (outliers are not drawn) and the stars over a bracket."""
+    match_null_box(ax, match, null, ylabel=ylabel, title=title)
+    vals = [np.asarray(v, dtype=float) for v in (match, null)]
+    lo, hi = zip(*(_whiskers(v[np.isfinite(v)]) for v in vals))
+    lo, hi = min(lo), max(hi)
+    span = max(hi - lo, 1e-6)
+    top = hi
+    if star:
+        y = hi + 0.06 * span
+        ax.plot([0, 0, 1, 1], [y, y + 0.03 * span, y + 0.03 * span, y], color="black", lw=0.7)
+        ax.text(0.5, y, star, ha="center", va="bottom", fontsize=star_size)  # the glyphs sit high in their line box
+        top = y + 0.2 * span
+    ax.set_ylim(lo - 0.05 * span, top + 0.04 * span)
+    ax.set_xlim(-0.42, 1.42)  # room for the Match / Null tick labels in narrow panels
+
+
+def place_columns(fig, grid, W, ax_h, *, left=0.17, gap=0.04, right=0.02):
+    """Set the x positions of the five columns from the measured y-axis decorations (tick labels + label) of each
+    column, so no y label reaches the panel to its left; the four box columns share the remaining width, less what
+    the last column's title needs beyond its axes."""
+    r = fig.canvas.get_renderer()
+
+    def ydec(ax):  # inches left of the axes used by its y tick labels and label
+        return (ax.get_window_extent(r).x0 - ax.yaxis.get_tightbbox(r).x0) / fig.dpi
+
+    def xover(ax):  # inches right of the axes used by its x tick labels
+        return max(0.0, (ax.xaxis.get_tightbbox(r).x1 - ax.get_window_extent(r).x1) / fig.dpi)
+
+    dec = [max(ydec(axes[c]) for axes in grid) for c in range(5)]
+    x0 = left + dec[0]
+    x = x0 + ax_h + max(xover(axes[0]) for axes in grid)
+    avail = W - x - sum(gap + d for d in dec[1:])
+    title_w = max(axes[4].title.get_window_extent(r).width for axes in grid) / fig.dpi
+    box_w = (avail - right) / 4
+    for _ in range(5):  # the centred title overhangs the axes by (title_w - box_w) / 2 on each side
+        box_w = (avail - right - max(0.0, (title_w - box_w) / 2)) / 4
+    xs = []
+    for d in dec[1:]:
+        x += gap + d
+        xs.append(x)
+        x += box_w
+    for axes in grid:
+        y0, h = axes[0].get_position().y0, axes[0].get_position().height
+        axes[0].set_position([x0 / W, y0, ax_h / W, h])
+        for ax, xb in zip(axes[1:], xs):
+            ax.set_position([xb / W, y0, box_w / W, h])
+    return box_w
+
+
 def render(args, a, b):
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
-    from matplotlib.ticker import MaxNLocator
+    from matplotlib.ticker import FuncFormatter, MaxNLocator
 
     plt.rcParams["savefig.bbox"] = "standard"  # the saved figure is exactly FIG_FULL_W wide
     fs = args.font_size
     W = FIG_FULL_W
-    # inches: a square recall panel then four box panels per row; one legend (Match / Null / p=0.05) on top replaces
-    # the boxes' tick labels
-    ax_h, legend_h, title_h, below_h, row_gap = 0.9, 0.2, 0.36, 0.37, 0.06
-    x_recall, margin = 0.6, 0.44  # left edge of the recall axes; y label + ticks left of each box panel
-    box_w = (W - 0.18 - x_recall - ax_h - 4 * margin) / 4  # the right margin holds the last two-line title
-    n_rows = (a is not None) + (b is not None)
-    H = legend_h + n_rows * (title_h + ax_h + below_h) + (n_rows - 1) * row_gap
+    # inches: per row a title band, the axes (the recall panel square) and the tick labels / k/n label below;
+    # the legend (Match / Null / p = 0.05) at the bottom
+    ax_h, title_h, below_h, row_gap, legend_h = 0.8, 0.36, 0.28, 0.06, 0.2
+    rows = [(kind, d) for kind, d in (("a", a), ("b", b)) if d is not None]
+    H = len(rows) * (title_h + ax_h + below_h) + (len(rows) - 1) * row_gap + legend_h
     fig = plt.figure(figsize=(W, H))
-    fig.legend(handles=[Patch(facecolor=MATCH_COLOR, alpha=0.8, label="Match"),
-                        Patch(facecolor=NULL_COLOR, alpha=0.8, label="Null"),
-                        Line2D([], [], color=STATUS_BAD, ls="--", lw=0.9, label="p = 0.05")],
-               loc="upper right", bbox_to_anchor=(1.0, 1.0), ncol=3, fontsize=fs, handlelength=1.4,
-               columnspacing=1.2, borderaxespad=0.1)
     stats, null_tests = {}, {}
-
-    def box_axes(y0):
-        """The five axes of a row whose axes bottom is y0 inches."""
-        rects = [(x_recall, ax_h)] + [(x_recall + ax_h + margin + k * (box_w + margin), box_w) for k in range(4)]
-        return [fig.add_axes([x / W, y0 / H, w / W, ax_h / H]) for x, w in rects]
 
     def p_panel(ax, pvals, n_grid, title, note, key):
         """Per-map permutation p-values (blue) next to their exact null (grey, p uniform on {1/n_grid, ..., 1});
@@ -439,29 +497,30 @@ def render(args, a, b):
             "frac_at_min_p": float((pv <= (1.0 / n_grid) * (1 + 1e-6)).mean()),  # p stored as float32
             "mean_neglog10_p": float(vals.mean()), "null_mean_neglog10_p": float(null.mean()),
             "cohen_d": cohen_d(vals, null), "log10_p": lp, "p": format_p(lp)}
-        match_null_box(ax, vals, null, ylabel="−log10 p", title=title, annotation=sig_text(lp), annotation_size=fs)
-        thr = -np.log10(0.05)
-        ax.axhline(thr, color=STATUS_BAD, ls="--", lw=0.9, zorder=0)  # p = 0.05, named in the legend
+        box_pair(ax, vals, null, ylabel="−log10 p", title=title, star=stars(lp), star_size=fs + 2)
+        ax.axhline(-np.log10(0.05), color=STATUS_BAD, ls="--", lw=0.9, zorder=0)  # p = 0.05, named in the legend
 
-    def row(ridx, data, label, letter, kind):
-        y0 = H - legend_h - ridx * (title_h + ax_h + below_h + row_gap) - title_h - ax_h
-        axes = box_axes(y0)
+    def row(ridx, kind, data):
+        y0 = H - ridx * (title_h + ax_h + below_h + row_gap) - title_h - ax_h
+        axes = [fig.add_axes([0, y0 / H, ax_h / W, ax_h / H]) for _ in range(5)]  # x: place_columns
         ax = axes[0]
-        # two-line title: the square panel (recall_axes) is narrower than the one-line title
+        # two-line title: the square panel is narrower than the one-line title
         recall_axes(ax, title=("Generated-image" if kind == "a" else "Generated-text") + f"\nretrieval (n={data['n']})")
+        ax.set_xlabel(r"$k/n$")  # short form of recall_axes' label; the caption defines it
+        ax.set_xticks([0, 0.5, 1])
+        ax.set_yticks([0, 0.5, 1])
         ax.plot(data["retrieval"]["normalized_k"], data["retrieval"]["recall"], color=BLUE, lw=1.3)
-        # single series: no legend box; AUC/n annotation + labelled chance diagonal instead
         ax.text(0.97, 0.05, f"AUC = {data['retrieval']['auc']:.3f}", transform=ax.transAxes,
                 ha="right", va="bottom", fontsize=fs, color=BLUE)
         ax.text(0.7, 0.7, "chance", ha="center", va="center", fontsize=fs, color="0.3",
-                rotation=45, rotation_mode="anchor",  # square panel (recall_axes): the diagonal is at 45 degrees
+                rotation=45, rotation_mode="anchor",  # square panel: the diagonal is at 45 degrees
                 bbox=dict(facecolor="white", edgecolor="none", pad=0.6))
         # panel letter at the left edge of the figure, above the rotated row label and level with the panel titles
-        panel_label(fig, letter, 0.01 / W, (y0 + ax_h + title_h - 0.02) / H, size_delta=1.0)
-        fig.text(0.07 / W, (y0 + ax_h / 2) / H, label, rotation=90, ha="center", va="center", fontsize=fs + 2)
+        panel_label(fig, kind, 0.01 / W, (y0 + ax_h + title_h - 0.02) / H, size_delta=1.0)
+        fig.text(0.07 / W, (y0 + ax_h / 2) / H, "Text-to-brain" if kind == "a" else "Brain-to-text",
+                 rotation=90, ha="center", va="center", fontsize=fs + 2)
         if kind == "a":
-            specs = [("contrastive", "Contrastive", "Cosine similarity"),
-                     ("dice", f"Dice\n(top {100 - data['dice_pct']:.0f}%)", "Dice"),
+            specs = [("contrastive", "Contrastive", "Cosine similarity"), ("dice", "Dice", "Dice"),
                      ("correlation", data["correlation"]["title"], "Correlation")]
         else:
             specs = [("contrastive", "Contrastive", "Cosine similarity"), ("bertscore", "BERTScore", "F1 score"),
@@ -470,25 +529,29 @@ def render(args, a, b):
             d = data["dice"][data["dice_pct"]] if key == "dice" else data[key]
             w = welch_log10p(d["match"], d["null"])
             stats[f"{kind}:{key}"] = w
-            match_null_box(ax, d["match"], d["null"], ylabel=ylab, title=title, annotation=sig_text(w["log10_p"]),
-                           annotation_size=fs)
+            box_pair(ax, d["match"], d["null"], ylabel=ylab, title=title, star=stars(w["log10_p"]), star_size=fs + 2)
         if kind == "a":
             sp = data["spin"]
-            n_tested = int(len(sp["tested_idx"]))
-            p_panel(axes[4], sp["p"], int(sp["n_perm"]) + 1, f"Spin test\n(n={n_tested})",
+            p_panel(axes[4], sp["p"], int(sp["n_perm"]) + 1, "Spin test",
                     "spin test\ndisabled" if not sp["enabled"] else "no cortical\nmaps tested", "a:spin")
         else:
             p_panel(axes[4], data["null_test"]["p"], int(data["n"]), "Contrastive\nnull test", "n/a", "b:null_test")
         for ax in axes[1:]:
-            ax.set_xticks([])  # Match / Null: the legend
-            ax.yaxis.set_major_locator(MaxNLocator(nbins=4, steps=[1, 2, 2.5, 5, 10]))
-            ax.tick_params(axis="y", pad=2)
-            ax.yaxis.labelpad = 2
+            ax.tick_params(axis="x", length=0, pad=2)  # Match / Null
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=2, steps=[1, 2, 5, 10]))  # one-decimal ticks, narrow
+            ax.tick_params(axis="y", pad=1.5, length=2.5)
+            ax.yaxis.labelpad = 1.5
+        for ax in axes[1:4]:
+            ax.yaxis.set_major_formatter(FuncFormatter(_tick1))
+        return axes
 
-    if a is not None:
-        row(0, a, "Text-to-brain", "a", "a")
-    if b is not None:
-        row(1, b, "Brain-to-text", "b", "b")
+    grid = [row(ridx, kind, data) for ridx, (kind, data) in enumerate(rows)]
+    place_columns(fig, grid, W, ax_h)
+    fig.legend(handles=[Patch(facecolor=MATCH_COLOR, alpha=0.8, label="Match"),
+                        Patch(facecolor=NULL_COLOR, alpha=0.8, label="Null"),
+                        Line2D([], [], color=STATUS_BAD, ls="--", lw=0.9, label="p = 0.05")],
+               loc="lower center", bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=fs, handlelength=1.4,
+               columnspacing=1.6, borderaxespad=0.1)
     return fig, stats, null_tests
 
 
@@ -505,7 +568,7 @@ def main():
                  "b:semantic": "b Semantic", "b:null_test": "b Contrastive null test"}
         per_panel = {names[k]: {"p": v["p"], "log10_p": round(v["log10_p"], 2), "cohen_d": round(v["cohen_d"], 2),
                                 "test": "Welch t (match vs deranged null)" if k in stats else "exact binomial vs uniform-p null",
-                                "below_1e-100": bool(v["log10_p"] < -100)}
+                                "stars": stars(v["log10_p"])}
                      for k, v in {**stats, **null_tests}.items()}
         dump = {"p_values_per_panel": per_panel, "welch_tests": stats, "null_tests": null_tests}
         if a is not None:

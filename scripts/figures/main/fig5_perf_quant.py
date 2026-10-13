@@ -441,8 +441,8 @@ def render(args, a, b, c, d):
 
     fs = args.font_size
     plt.rcParams["savefig.bbox"] = "standard"  # exactly FIG_FULL_W wide
-    # layout in inches: top row a | b + its legend column (square recall panels); bottom row c1 | c2 (square ROC)
-    # with their legend underneath | d, the matrix with the class names left of it and, at 60 degrees, below it.
+    # layout in inches: top row a | b + its legend column (square recall panels); bottom row c1 | c2 (square ROC,
+    # c's legend inside it) | d, the matrix with the class names left of it and, at 60 degrees, below it.
     # The tops of c and of the matrix are level.
     fig_w = FIG_FULL_W
     side = 1.45                                 # a and b
@@ -524,7 +524,7 @@ def render(args, a, b, c, d):
             y_next = ax_b.transAxes.inverted().transform(leg.get_window_extent(renderer))[0, 1] - 0.06
         ax_b.text(0.03, 0.97, f"n={b['n']}", transform=ax_b.transAxes, va="top", fontsize=fs, color="0.3")
         header("b", x_b - 0.43, y_label, "NeuroVault contrastive recall")
-    # c) autoencoder: one legend for both sub-panels, below them, with the voxel ROC AUCs
+    # c) autoencoder: one legend for both sub-panels, inside the voxel ROC
     if c is not None:
         bins = np.linspace(-20, 90, 45)
         for (name, ds), col in zip(c["datasets"].items(), (BLUE, ORANGE)):
@@ -543,12 +543,11 @@ def render(args, a, b, c, d):
         ax_c2.set_box_aspect(1)  # default data margins (no xlim/ylim at the origin)
         ax_c2.set_title("Voxel ROC")
         ax_c2.grid(alpha=0.25)
-        keys = [Patch(color=col, alpha=0.6, label=f"{name} (AUC {ds['auc']:.3f})")
-                for (name, ds), col in zip(c["datasets"].items(), (BLUE, ORANGE))]
+        keys = [Patch(color=col, alpha=0.6, label=name) for name, col in zip(c["datasets"], (BLUE, ORANGE))]
         keys.append(Line2D([], [], ls="--", color="black", lw=0.9, label="Chance"))
-        fig.legend(handles=keys, loc="center", ncol=2,  # centred below c's x labels
-                   bbox_to_anchor=((x_c1 + x_c2 + s_c) / 2 / fig_w, (y_c - 0.34) / 2 / fig_h),
-                   **leg_kw | dict(handlelength=1.2, columnspacing=1.0, labelspacing=0.3))
+        # one key for both sub-panels, in the ROC's empty lower right (below the diagonal); AUROCs in the caption
+        ax_c2.legend(handles=keys, loc="lower right", **leg_kw | dict(handlelength=1.0, borderaxespad=0.15,
+                                                                      alignment="right"))
         header("c", 0.02, y_head, "Autoencoder")
     # d) confusion matrix: per cell the percentage of its true class (empty = 0); the same class names on both axes
     if d is not None:
@@ -567,7 +566,7 @@ def render(args, a, b, c, d):
         ax_d.tick_params(length=2, pad=2)
         ax_d.set_xlabel("Predicted", labelpad=2)
         ax_d.set_ylabel("True", labelpad=2)
-        ax_d.set_title(f"n={d['n']}, accuracy {d['accuracy']:.2f}, % of true class", loc="right", fontsize=fs + 1)
+        ax_d.set_title("% of true class", fontsize=fs + 1)  # n and accuracy in the caption
         for sp in ("top", "right"):
             ax_d.spines[sp].set_visible(True)
         header("d", x_m - 0.04 - names_w - 0.3, y_head, "Network classification")

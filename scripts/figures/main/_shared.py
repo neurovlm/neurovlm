@@ -743,18 +743,29 @@ def load_network_list(*, include_only: Iterable[str] | None = None):
     return out
 
 
-# Figs. 2 and 3 draw every brain map (generated, atlas and true alike) at the voxels above half its maximum. A fraction of
-# the maximum also works on calibrated maps clipped at 1, whose top percentiles can all equal 1 (a 99th-percentile cut
-# then keeps nothing); Fig. 3's true maps, divided by their 99th percentile and clipped at 1, were already drawn at 0.5.
-MAP_DISPLAY_FRACTION = 0.5
-MAP_DISPLAY_RULE = "voxels above 50 % of the map's own maximum (generated, atlas and true maps alike; no cluster threshold)"
+# Figs. 2 and 3 draw every brain map (generated, atlas and true alike) at its top 5 % of in-mask voxels, about the extent
+# of the maps in the submitted Fig. 3. A rank cut does not depend on a map's scale: half the maximum (the previous rule)
+# kept up to a sixth of the brain on calibrated maps, whose global factor (x19 for the final head) clips the broad base
+# of a peaked map at 1. Binary atlas maps keep all their voxels (ties at the cut are drawn, zeros never).
+MAP_DISPLAY_TOP = 0.05
+MAP_DISPLAY_RULE = ("the top 5 % of in-mask voxels of each map (ties at the cut drawn, zeros never; generated, atlas and "
+                    "true maps alike; no cluster threshold)")
 
 
-def display_vector(vec, fraction: float = MAP_DISPLAY_FRACTION) -> tuple[np.ndarray, float]:
-    """The map with every voxel at or below ``fraction`` x its maximum set to 0, and that threshold."""
+def display_vector(vec, top: float = MAP_DISPLAY_TOP) -> tuple[np.ndarray, float]:
+    """The map with every voxel outside its top ``top`` fraction (and every zero) set to 0, and a threshold just below
+    its smallest drawn value (plot_stat_map hides the values at or below its threshold)."""
     vec = np.asarray(vec, dtype=np.float32)
-    thr = fraction * float(vec.max())
-    return np.where(vec > thr, vec, 0.0).astype(np.float32), thr
+    keep = (vec >= np.quantile(vec, 1.0 - top)) & (vec > 0)
+    if not keep.any():
+        return np.zeros_like(vec), 0.0
+    return np.where(keep, vec, 0.0).astype(np.float32), float(np.nextafter(vec[keep].min(), np.float32(0)))
+
+
+def display_vmin(threshold: float, vmax: float) -> float:
+    """Colour-scale floor that puts a drawn map's lowest value a third up the colour map, so every map spans the same
+    visible range (light at its cut, dark at its maximum) whatever its cut."""
+    return threshold - 0.5 * (vmax - threshold)
 
 
 def mask_vector(masker, img) -> np.ndarray:

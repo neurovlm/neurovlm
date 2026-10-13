@@ -8,8 +8,10 @@ review/
                            links between comments, figures Fig. R1, R2, ... at the full 6.5 in text width and tables
                            Table R1, R2, ..., each with its caption (written here only)
   response_letter_with_manuscript.tex
-                           the letter followed by the revised manuscript (../../../../paper/sn-article.pdf, one page
-                           per page), with every line and page reference of the changes lines linked to its page
+                           the letter followed by the revised manuscript twice, first with the changes marked
+                           (../../../../paper/sn-article-diff.pdf, latexdiff from the submitted version: additions in
+                           blue, deletions in red), then clean (../../../../paper/sn-article.pdf), one page per page,
+                           with every line and page reference of the changes lines linked to its clean page
   check_letter_sync.py     checks that the letter carries the RESPONSE.md text, tables, figure numbers and comment links
                            (--counts: words and numbers per answer)
   reviewer_01/ .. 03/      per reviewer: README.md (comment -> response -> figure with its letter caption -> files) + the
@@ -41,7 +43,7 @@ bash scripts/figures/review/core/run_all.sh a3_neurovault_bounds             # o
 .venv/bin/python scripts/figures/review/check_letter_sync.py                 # letter = RESPONSE.md (0 mismatches)
 cd scripts/figures/review && pdflatex response_letter.tex && pdflatex response_letter.tex   # two passes: contents, Fig. R refs
 cd scripts/figures/review && pdflatex response_letter_with_manuscript.tex && pdflatex response_letter_with_manuscript.tex
-                                                         # after the paper build; a third pass if no .aux exists yet
+                                                         # after the paper and marked-paper builds; a third pass if no .aux exists yet
 ```
 
 The letter is set on US letter paper with 1 in margins (text block 6.5 x 9 in).  Each figure is shown at the full text
@@ -59,8 +61,8 @@ written in the letter only; `build_reviewer_dirs.py` copies the figure captions 
 Each "Changes to the manuscript" line names the paper section and its lines in the clean manuscript PDF
 (`../../../../manuscript_changes.md`): `\msl{359}{363}` prints "l. 359–363", `\msp{14}` "p. 14" and
 `\mspp{11}{12}` "pp. 11–12".  The standalone letter prints them as text.  `response_letter_with_manuscript.tex` reads
-the letter unchanged, appends the manuscript with pdfpages (each page gets the target `ms.<page>`, opened to fit the
-window) and defines `\mslink`, so each reference links to the page that holds it (46 numbered lines per manuscript
+the letter unchanged, appends the marked and then the clean manuscript with pdfpages (each clean page gets the target
+`ms.<page>`, each marked page `msd.<page>`, opened to fit the window) and defines `\mslink`, so each reference links to the page that holds it (46 numbered lines per manuscript
 page, so line l is on page (l + 22) / 46 as `\numexpr` rounds it).  After a paper edit moves text, re-measure the line
 numbers, update manuscript_changes.md and the changes lines, and rebuild both PDFs.  Facts only the authors can supply
 stay as `[AUTHOR: ...]` placeholders, bold in the text with a red-on-yellow note (`\authornote`) in the letter and
@@ -99,7 +101,8 @@ test, and NeuroVault evaluation papers; the shipped model predates that filter a
 abstracts until the author's retrain, see `OPEN_ITEMS.md`; memorization check in `core/a4_memorization_check`); 2.6
 summary and synthetic-text prompts and examples (the summary prompt, model and sampling settings come from
 `docs/02_data/07_transform_text.ipynb`); 3.7 second half (line 672, no scaling analysis); 1.6, 1.7, 1.9 (text changes); 2.11
-(table from the run summaries and the NeuroQwen3-0.6B model card); 1.10 (repository: `scripts/reproduce.sh`, the CI
+(table from the run summaries and the NeuroQwen3-0.6B model card); 1.0, 1.10, 2.0 and 3.0 (general remarks, overall
+assessment and summary, answered by pointing to the comments); 1.11 (repository: `scripts/reproduce.sh`, the CI
 smoke test `.github/workflows/smoke.yml` that trains every stage for one batch on CPU, and `.coveragerc`).
 
 ## Dependencies beyond the base environment

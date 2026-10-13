@@ -22,8 +22,7 @@ import time
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
-FIG_STEMS = ["fig2_network_examples", "fig2_network_examples_p2", "fig2_network_examples_p3", "fig2_network_examples_p4",
-             "fig3_newgen", "fig3_newgen_p2", "fig4_generative_metrics", "fig5_perf_quant", "fig6_autoencoder_qual",
+FIG_STEMS = ["fig2_network_examples", "fig3_newgen", "fig4_generative_metrics", "fig5_perf_quant", "fig6_autoencoder_qual",
              "figS2_difumo_v_ale", "figS3_recall_comparison", "figS4_clip_ica", "figS4_clip_ica_p2"]  # every page, as drawn
 
 

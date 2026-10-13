@@ -7,7 +7,7 @@ The figures and tables of each reviewer's comments are copied into `reviewer_01/
 ## To the editor
 We thank the editor and reviewers for their thoughtful comments. The revisions and response address every comment. The main changes are:
 
-- Independent voxel-space evaluation of text-to-brain maps against simple baselines and published models ([1.1](#1.1)).
+- Independent voxel-space evaluation of text-to-brain maps against simple baselines and existing, published models ([1.1](#1.1)).
 - Retrieval measured by recall@k, mean reciprocal rank and median rank, also against hard negatives ([1.1](#1.1)).
 - A comparison of generated and retrieved captions ([3.3](#3.3)).
 - A data-flow diagram of every training stage ([1.2](#1.2)).
@@ -16,19 +16,19 @@ We thank the editor and reviewers for their thoughtful comments. The revisions a
 - Out-of-distribution and failure-case analyses ([1.4](#1.4) and [2.12](#2.12)).
 - Corrected numbers, names and claims throughout.
 
-We also changed the model and its evaluation:
+We also updated the model and its evaluation:
 
-- We retrained the text-to-brain head to predict the autoencoder latent, which makes its maps more accurate ([1.1](#1.1)).
+- We added a latent-space loss when training the text-to-brain head, which makes its maps more accurate ([1.1](#1.1)).
 - Generated maps are calibrated to the scale of the training maps, with one factor per model fitted on the validation set.
 - An MLP projector replaces the Qformer in both brain-to-text stages ([2.1](#2.1)).
 - The synthetic training maps had included held-out papers. We rebuilt them from training papers only and retrained the models that use them ([2.4](#2.4)).
 - Every evaluation leaves out the duplicated papers found by the leakage audit ([2.4](#2.4)).
 - All paper figures were redrawn from the final model.
-<!-- TODO confirm before sending: Methods moved after the Discussion (journal format), marking scheme, PDF version. Calibration (z64/calibration.md): calibrated = min(c x sigmoid(output), 1), c = median over validation maps of 1 / map peak, fitted once per model (head v2 19.16, anatomical head 6.13; runs/final/map_calibration.json); scorer Dice unchanged (0.531), recall AUC 0.9499 -> 0.9525 (anatomical head 0.9435 -> 0.9447); no per-map fallback (0 maps rescaled individually). The variant c' (same factor, per-map maximum where the factor pushes a map above 1) is in OPEN_ITEMS.md. Text2Brain is being added as a baseline (2.5); "published models" in the first item covers Neurosynth, NeuroQuery and Text2Brain. Editorial items for the cover letter (Data/Code Availability, Reporting Summary, ML checklist, SAGER statement, Source Data, color vision, ORCID): z47/manuscript_changes.md -->
+<!-- TODO confirm before sending: Methods moved after the Discussion (journal format), PDF version. Calibration (z64/calibration.md): calibrated = min(c x sigmoid(output), 1), c = median over validation maps of 1 / map peak, fitted once per model (head v2 19.16, anatomical head 6.13; runs/final/map_calibration.json); scorer Dice unchanged (0.531), recall AUC 0.9499 -> 0.9525 (anatomical head 0.9435 -> 0.9447); no per-map fallback (0 maps rescaled individually). The variant c' (same factor, per-map maximum where the factor pushes a map above 1) is in OPEN_ITEMS.md. Text2Brain is being added as a baseline (2.5); "published models" in the first item covers Neurosynth, NeuroQuery and Text2Brain. Editorial items for the cover letter (Data/Code Availability, Reporting Summary, ML checklist, SAGER statement, Source Data, color vision, ORCID): z47/manuscript_changes.md -->
 
 Comments are numbered in order within each reviewer, minor comments and code availability included. For example, [1.5](#1.5) is the first minor comment of Reviewer 1. Each comment is quoted in a shaded box, followed by our response and the changes to the manuscript. Comment numbers in a response link to those comments, and figures and tables in this letter are numbered R1, R2, and so on.
 
-Line and page numbers in the changes to the manuscript refer to the revised manuscript.
+Line and page numbers in the changes to the manuscript refer to the clean revised manuscript. The marked copy shows additions in blue and deletions in red.
 
 ## What goes where
 | Item | Comments | Where it goes |
@@ -54,12 +54,17 @@ Line and page numbers in the changes to the manuscript refer to the revised manu
 
 ## Reviewer 1
 
+<a id="1.0"></a>
+### 1.0: General remarks
+**Comment:** an ambitious and timely framework with a large corpus and public code, but the evaluation and data construction need clarification before the stronger claims are supported. \
+We added the requested analyses and clarifications, as detailed in comments [1.1](#1.1) to [1.10](#1.10).
+
 <a id="1.1"></a>
 ### 1.1: More independent evaluation of the generative outputs
 **Comment:** outputs are scored in NeuroVLM's own space. Add independent representations, expert ratings, hard negatives, nearest training examples, simple baselines, recall@k, MRR and median rank. \
 We agree. Fig. R1 and Table R1 score text-to-brain maps in voxel space, against each test paper's map as the autoencoder reconstructs it. NeuroVLM leads, narrowly ahead of linear regression and ahead of Text2Brain, mean and domain maps, atlas labeling, Neurosynth, NeuroQuery, and the nearest training paper (Dice 0.53 against at most 0.49). Neurosynth, NeuroQuery, and Text2Brain are used as published, although their corpora each hold nearly half the test papers.
 
-**Independent evaluation.** Both directions are also scored outside NeuroVLM's representation space. Maps are compared in voxel space, as above. Generated captions are compared with the paper's text by MiniLM cosine and BERTScore, whose encoders were not used in training ([3.3](#3.3)).
+**Independent evaluation.** Both directions are also scored outside NeuroVLM's representation space. Maps are compared in voxel space, as above. Generated captions are compared with the paper's text by MiniLM cosine and BERTScore, whose encoders were not used in training ([3.3](#3.3)). The submission's BERTScore null came from an earlier generation run. With the null computed from the same captions, BERTScore separates matched from shuffled pairs only weakly (0.553 against 0.548).
 
 **Expert ratings.** We did not run blinded expert ratings, because they are time consuming and hard to scale. Instead, we used existing expert labels and automatic checks. For anatomical and semantic accuracy, region titles are checked against anatomical atlases and network titles against expert atlas labels ([3.6](#3.6)). Hard negatives test specificity. Unsupported claims are counted as study details, such as a sample size, that a map cannot support ([3.3](#3.3)).
 
@@ -176,10 +181,15 @@ We timed both full pipelines, projector and language model included, on a consum
 We redrew Figs. 2, 3 and S4 at the journal's text width with larger text. Fig. R5 shows the new Fig. 2. Supplementary Table S5 gives the complete texts of Fig. 2, and Figs. 3 and S4 print each generated text in full beside its map. Seven of the eight Fig. 2 titles name the network exactly, and all eight name the right system. We also corrected the affiliations. \
 ![Fig. R5](reviewer_01/1.9_fig2_network_examples.png)
 <!-- produced by ../main/make_all.py (final model; Fig. 2 titles and caption fixes in ../main/README.md). Fig. 2 is one page; its complete texts are ../main/fig2_texts_table.{tex,md} (written by fig2_network_examples.py; --text-pages restores the old pages 2-4), Supplementary Table S5 if appended after the paper's four supplementary tables (z57 section 4). Counting rule (strict): a title is exact only if it names the reference network itself, so "Object Perception Network" for the visual map (YeoLab VisualA) counts as the right system only. 7 of 8 exact network names (the somatomotor map is titled "Somatomotor Network" since the canonical-title decoding, z65), 8 of 8 right system. Stage 14 was retrained with a changed recipe (scripts/REPRODUCTION.md, "Stage 14 recipe change"): all five seeds title the Du SAL/PMN map "Salience Network" -->
-<!-- z47: Fig. 4 caption said p < 1e-100 for all panels; BERTScore is p = 9e-19, Cohen's d 0.23 (matched 0.553 vs null 0.548; MiniLM 0.463 vs 0.397, p = 1e-109; calibrated maps, canonical titles, scripts/figures/main/fig4_generative_metrics_text.json of 2026-10-13). Fig. 5 caption AUC fix: 2.8. Both are listed in the 1.9 changes line only (z61: cut from the response text as beyond the request) -->
+<!-- z47: Fig. 4 caption said p < 1e-100 for all panels; BERTScore is p = 9e-19, Cohen's d 0.23 (matched 0.553 vs null 0.548; MiniLM 0.463 vs 0.397, p = 1e-109; calibrated maps, canonical titles, scripts/figures/main/fig4_generative_metrics_text.json of 2026-10-13). Fig. 5 caption AUC fix: 2.8. Both are listed in the 1.9 changes line only (z61: cut from the response text as beyond the request). z84 (check6, z82): the submitted Table S4 null (0.52) was a cached null_bert_f1_seed0.pt from an earlier generation run of notebook 24 (dated 17:12, captions regenerated 20:03); the submitted captions against their proper shuffled references give 0.5567 vs 0.5538 on 400 items, so the gap was about 0.005 then too; one sentence in 1.1 and one in Supplementary S6 -->
 
 <a id="1.10"></a>
-### 1.10: Code availability
+### 1.10: Overall assessment
+**Comment:** a creative and useful framework that needs independent validation of the generated outputs, clearer dataset separation, a revised NeuroVault evaluation, and more precise framing of the generated maps. \
+The four revisions named here are answered above. Comment [1.1](#1.1) covers independent validation of the generated outputs, [1.2](#1.2) the separation of datasets, [1.3](#1.3) the NeuroVault evaluation and [1.4](#1.4) the framing of the outputs.
+
+<a id="1.11"></a>
+### 1.11: Code availability
 **Comment:** fix the merge conflicts, remove manual steps and machine-specific paths, pin dependencies and Hugging Face artifacts, and add a figure-by-figure guide. Coverage was 47%. \
 We resolved the merge conflicts in both notebooks and added a figure-by-figure guide that names the script behind every paper figure. One command builds the pinned environment and fetches the Hugging Face inputs at pinned, checksummed revisions. It then retrains the model, redraws the figures, and checks each metric against the paper. Two runs from scratch gave byte-identical weights, text, and figures on the same GPU model and library versions.
 
@@ -190,6 +200,11 @@ We resolved the merge conflicts in both notebooks and added a figure-by-figure g
 <!-- z47: figure guide = scripts/figures/main/README.md (figure -> script -> outputs -> models table) and scripts/README.md; external inputs = scripts/REPRODUCTION.md 'Known limits' (AAL via --external-dir; Fig. S3 baselines via --external-root) -->
 
 ## Reviewer 2
+
+<a id="2.0"></a>
+### 2.0: General remarks
+**Comment:** a meaningful topic with a potentially valuable dataset, but not suitable for publication in its current form. \
+We addressed each issue, as detailed in comments [2.1](#2.1) to [2.12](#2.12).
 
 <a id="2.1"></a>
 ### 2.1: Motivation of the Qformer
@@ -205,7 +220,7 @@ We agree. Our original Qformer attended over only two input tokens, the map late
 
 **2. Reuse across stages.** Yes, the training papers are reused across stages. The autoencoder, the projection heads, and the stage 1 projector all learn from these papers. The anatomically centered head and the stage 2 projector learn from short concept texts, paired with maps built from training papers only ([2.6](#2.6)). No validation or test paper trains these components. The language model's training script also removes them from its corpus ([2.11](#2.11)). \
 ![Fig. R7](reviewer_02/2.2_dataflow.png)
-<!-- per-stage table (Table R7): core/a4_counts_table/outputs/stage_splits.md (written by core/a4_counts_table from scripts/outputs/runs/final/*.summary.json: stage 2 projector 972 / 134 texts, 1,106 of 1,338 kept; anatomically centred head 6,309 / 64 pairs), the same numbers as the diagram. NeuroQwen3-0.6B row from z53 (01_dapt.ipynb, 05_dapt_pubmed_neuroimaging.ipynb): 1,231,613 records, random 1 % validation split (seed 12345), 1,219,296 train / 12,317 validation; stage_splits.md still says 1,200,000 / 0 and should be updated. Corpus overlap with the test set: 2,906 of the 2,971 evaluated test papers (z53/overlap.py; 2.11). The concept texts are not all LLM-written (2.6), hence "short concept texts". -->
+<!-- per-stage table (Table R7): core/a4_counts_table/outputs/stage_splits.md (written by core/a4_counts_table from scripts/outputs/runs/final/*.summary.json: stage 2 projector 972 / 134 texts, 1,106 of 1,338 kept; anatomically centered head 6,309 / 64 pairs), the same numbers as the diagram. NeuroQwen3-0.6B row from z53 (01_dapt.ipynb, 05_dapt_pubmed_neuroimaging.ipynb): 1,231,613 records, random 1 % validation split (seed 12345), 1,219,296 train / 12,317 validation; stage_splits.md still says 1,200,000 / 0 and should be updated. Corpus overlap with the test set: 2,906 of the 2,971 evaluated test papers (z53/overlap.py; 2.11). The concept texts are not all LLM-written (2.6), hence "short concept texts". -->
 
 <a id="2.3"></a>
 ### 2.3: NeuroVault selection bias
@@ -379,7 +394,7 @@ Table R11 gives the parameters, training data, epochs, optimizer, learning rate,
 | Stage 2 projector (MLP) | 28.3 M | concept texts and maps, 972 / 134 | 30 (last) | AdamW, 1e-4 with cosine decay, 18 | 3 (best of 1–5) | 5 min per seed |
 | NeuroQwen3-0.6B | 596 M | PubMed titles and abstracts, 1.22 M / 12,317 (385 M tokens) | 1 | AdamW, 5e-6 with cosine decay, 16 sequences of 1,024 tokens, bf16 | 12345 | not recorded (one H100) |
 
-<!-- no script yet: per-stage numbers in scripts/README.md ("Runtime", "Final run") and the stage summaries in scripts/outputs/runs/final/*.summary.json. Training time measured in both reproduction runs with the previous stage-14 settings (scripts/REPRODUCTION.md): stages 08-14 with five stage-14 seeds 3,386 / 3,353 s, five-fold CV (stage 20) 2,908 / 2,868 s, 6,294 / 6,221 s in all (1.75 / 1.73 h; deterministic kernels; data download, validation and figures excluded). The current stage-14 settings take 1,502 s for five seeds (296-306 s each) instead of 1,316 s (251-271 s) (scripts/REPRODUCTION.md, "Stage 14 recipe change"), so training in all takes about 6,480 s (1.8 h); measured in the two proof runs of 2026-10-10/11: stages 08-14 3,377 / 3,399 s, stage 20 (five folds) 2,847 / 2,850 s. The autoencoder trains 101 epochs (08_autoencoder.summary.json; the paper says 100), the InfoNCE heads 301. Details dropped from the old caption (for the supplementary table): fp32 weights with TF32 matrix products, projectors under bf16 autocast; frozen SPECTER2 (111 M); the text-to-brain head's validation leaves out the 26 audit papers; losses: autoencoder binary cross-entropy; contrastive heads symmetric InfoNCE (temperature 0.07; the text head starts from a voxel-wise head, 17 s more); text-to-brain head latent error plus voxel-correlation terms; anatomically centred head synthetic-pair loss plus the text-to-brain loss on PubMed training pairs, learning rate halved on plateaus; projectors next-token cross-entropy through the frozen NeuroQwen3-0.6B (stage 1 adds an alignment term and 5 % warm-up; stage 2 weighs title tokens five times), stage 2 trained with seeds 1-5 and the lowest final validation loss kept; the five CV folds (48 min) reuse the autoencoder and head settings. -->
+<!-- no script yet: per-stage numbers in scripts/README.md ("Runtime", "Final run") and the stage summaries in scripts/outputs/runs/final/*.summary.json. Training time measured in both reproduction runs with the previous stage-14 settings (scripts/REPRODUCTION.md): stages 08-14 with five stage-14 seeds 3,386 / 3,353 s, five-fold CV (stage 20) 2,908 / 2,868 s, 6,294 / 6,221 s in all (1.75 / 1.73 h; deterministic kernels; data download, validation and figures excluded). The current stage-14 settings take 1,502 s for five seeds (296-306 s each) instead of 1,316 s (251-271 s) (scripts/REPRODUCTION.md, "Stage 14 recipe change"), so training in all takes about 6,480 s (1.8 h); measured in the two proof runs of 2026-10-10/11: stages 08-14 3,377 / 3,399 s, stage 20 (five folds) 2,847 / 2,850 s. The autoencoder trains 101 epochs (08_autoencoder.summary.json; the paper says 100), the InfoNCE heads 301. Details dropped from the old caption (for the supplementary table): fp32 weights with TF32 matrix products, projectors under bf16 autocast; frozen SPECTER2 (111 M); the text-to-brain head's validation leaves out the 26 audit papers; losses: autoencoder binary cross-entropy; contrastive heads symmetric InfoNCE (temperature 0.07; the text head starts from a voxel-wise head, 17 s more); text-to-brain head latent error plus voxel-correlation terms; anatomically centered head synthetic-pair loss plus the text-to-brain loss on PubMed training pairs, learning rate halved on plateaus; projectors next-token cross-entropy through the frozen NeuroQwen3-0.6B (stage 1 adds an alignment term and 5 % warm-up; stage 2 weighs title tokens five times), stage 2 trained with seeds 1-5 and the lowest final validation loss kept; the five CV folds (48 min) reuse the autoencoder and head settings. -->
 <!-- z61: NeuroQwen3-0.6B facts (scratchpad z53/facts.md section 2; efficient_ai/project/notebooks/01_dapt.ipynb): full-parameter continued pretraining of Qwen/Qwen3-0.6B (post-trained checkpoint) with TRL SFTTrainer on plain text, loss on every token, no LoRA and nothing frozen; PubMed E-utilities neuroimaging query, 1990-01-01 to 2026-02-26, 1,231,613 records (title, blank line, abstract), random 1 % validation (seed 12345): 1,219,296 / 12,317; 385,468,745 training tokens; packing into 1,024-token sequences, 8 per device x 2 accumulation = 16,384 tokens per step (~23.6 k steps); lr 5e-6 peak, cosine, 10 % warm-up, weight decay 0.01, max_grad_norm 0.3; AdamW (Trainer default); bf16; one H100 on Colab; wall time and final losses not recorded. Overlap: 2,906 of the 2,971 evaluated test papers are in the corpus, 2,878 in its training portion (z53/overlap.py). Parameters: 596 M as loaded by NeuroVLM (transformers 4.57 ties lm_head to the trained embeddings; the checkpoint stores a separately trained lm_head, 752 M values in all). -->
 <!-- z72: "We did not retrain it" and the overlap sentence replaced by the exclusion sentence, Table R11 row label "(not retrained)" dropped. After the retrain update the row (corpus size, GPU, time) and the first sentences of this paragraph. -->
 
@@ -396,6 +411,10 @@ We added random results and failure cases for every evaluation set. They include
 <!-- z47: 'provided as separate files' = the reviewer_02/ bundle (2.12_pubmed_random, _pubmed_t2b_worst, _networks_bottom, _neurovault_b2t_best, _neurovault_t2b_best). AUTHOR: attach these files to the resubmission, or move the random set into the supplement -->
 
 ## Reviewer 3
+
+<a id="3.0"></a>
+### 3.0: Summary
+**Comment:** summary of the framework and its results, no action requested.
 
 <a id="3.1"></a>
 ### 3.1: Novelty and what the model learns
@@ -487,16 +506,16 @@ Titles and abstracts exist for every paper, but table captions only for papers w
 <a id="3.9"></a>
 ### 3.9: Percentiles of the qualitative examples
 **Comment:** report where the Fig. 2 and Fig. 3 examples fall in the similarity distribution. \
-The captions of Fig. 2 and Fig. 3 give each example's percentile within its set (Table R16). The examples span the 15th to 99th percentiles. Fig. 3 also plots the distribution of both similarity scores and marks each example. With the final model, four Fig. 3 examples no longer fit their High, Medium, or Low label on both scores. We replaced them with examples from the matching third.
+Table R16 gives each example's percentile within its set, from the 15th to the 99th. Fig. 3 also plots both similarity distributions and marks each example. Its rows follow a fixed rule. In each third, they are the papers nearest the center, for High and Medium only those whose title names one domain and whose true map has distinct clusters.
 
 | Example | Text → brain percentile | Brain → text percentile |
 |---|---|---|
-| Fig. 3, High, page 1 | 93 | 96 |
-| Fig. 3, High, page 2 | 79 | 83 |
-| Fig. 3, Medium, page 1 | 50 | 49 |
-| Fig. 3, Medium, page 2 | 55 | 51 |
-| Fig. 3, Low, page 1 | 16 | 18 |
-| Fig. 3, Low, page 2 | 15 | 20 |
+| Fig. 3, High, working memory | 86 | 79 |
+| Fig. 3, High, language | 77 | 87 |
+| Fig. 3, Medium, memory | 52 | 62 |
+| Fig. 3, Medium, reward | 36 | 43 |
+| Fig. 3, Low, poor input map | 16 | 18 |
+| Fig. 3, Low, surprising pair | 15 | 20 |
 | Fig. 2, Visual | 76 | 99 |
 | Fig. 2, Language | 75 | 37 |
 | Fig. 2, Auditory | 31 | 19 |
@@ -506,10 +525,10 @@ The captions of Fig. 2 and Fig. 3 give each example's percentile within its set 
 | Fig. 2, Frontoparietal control | 48 | 53 |
 | Fig. 2, Salience | 33 | 46 |
 
-<!-- produced by core/a7_failure_cases_percentiles/make_figure.py (outputs/captions.tex; percentiles: run_analysis.py) and ../main/fig3_newgen.py (Fig. 3 rows and density strips). Final model (retrained stage 14), calibrated maps, canonical titles (z66): Fig. 3 rows 189, 149, 101, 110, 92, 74 (101, 110, 92, 74 replace hand-picked 124, 152, 147, 167, which broke the thirds; page 1 holds High, Medium and Low = 189, 101, 92, page 2 = 149, 110, 74) at P93, 79, 50, 55, 16, 15 (text to brain) and P96, 83, 49, 51, 18, 20 (brain to text) of the figure's 305-paper pool (fig3_newgen_text.json); Fig. 2 maps P31-P76 of 119, descriptions P19-P99 of 145; Fig. S4 components P6-P99 of 40. Percentile = 100 x (#below + 0.5 #ties) / n. -->
+<!-- produced by core/a7_failure_cases_percentiles/make_figure.py (outputs/captions.tex; percentiles: run_analysis.py) and ../main/fig3_newgen.py (Fig. 3 rows and density strips). Final model (retrained stage 14), calibrated maps, canonical titles (z66). Fig. 3 is one page since check6 (z81): rows 30, 150 (High), 52, 117 (Medium), 92, 74 (Low), picked by select_rows in ../main/fig3_newgen.py (nearest the third's center; High and Medium need a title naming exactly one domain and a clean true map at the top-5 % display rule; Low labeled poor input map / surprising pair), at P86, 77, 52, 36, 16, 15 (text to brain) and P79, 87, 62, 43, 18, 20 (brain to text) of the figure's 305-paper pool (fig3_newgen_text.json); Fig. 2 maps P31-P76 of 119, descriptions P19-P99 of 145; Fig. S4 components P6-P99 of 40. Percentile = 100 x (#below + 0.5 #ties) / n. -->
 
 <a id="3.10"></a>
 ### 3.10: Code availability
 **Comment:** positive, no action requested. \
-No change was requested. The reproducibility changes for comment [1.10](#1.10) also apply here. Code coverage counts the 57 files that train the models and draw the figures, and continuous integration trains every model for one batch to test the whole pipeline.
-<!-- no script; as 1.10. Coverage: `coverage report` with .coveragerc lists 57 files (25 scripts + 32 library modules; one further matching file is empty and skipped). Smoke test: common.py SmokeCaps.max_batches = 1, so CI (.github/workflows/smoke.yml) trains each of stages 08, 09, 20 fold 0, 11, 12, 13 and 14 for one epoch of one batch on CPU; z62 ran it (all stages exit 0, 5 min). -->
+No change was requested. The reproducibility changes for comment [1.11](#1.11) also apply here. Code coverage counts the 57 files that train the models and draw the figures, and continuous integration trains every model for one batch to test the whole pipeline.
+<!-- no script; as 1.11. Coverage: `coverage report` with .coveragerc lists 57 files (25 scripts + 32 library modules; one further matching file is empty and skipped). Smoke test: common.py SmokeCaps.max_batches = 1, so CI (.github/workflows/smoke.yml) trains each of stages 08, 09, 20 fold 0, 11, 12, 13 and 14 for one epoch of one batch on CPU; z62 ran it (all stages exit 0, 5 min). -->

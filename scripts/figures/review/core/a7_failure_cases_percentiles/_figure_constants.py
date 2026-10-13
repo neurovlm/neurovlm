@@ -1,10 +1,10 @@
 """Constants copied from scripts/figures/main/{fig3_newgen,figS4_clip_ica}.py and their outputs; update them if those
 scripts change."""
 
-# the six rows of the final Fig. 3, top to bottom (scripts/figures/main/fig3_newgen_text.json): the hand-picked
-# 189, 149 and 101, 110, 92, 74, which replace 124, 152, 147, 167 because those broke the pool-tercile rule (global map
-# calibration; canonical titles after the tags the model writes)
-KEEP_TEXT_IDXS = [189, 149, 101, 110, 92, 74]
+# the six rows of the final Fig. 3, top to bottom (scripts/figures/main/fig3_newgen_text.json), picked by fig3_newgen's
+# select_rows: High 30, 150 and Medium 52, 117 (title naming one domain, clean true map, nearest the third's centre),
+# Low 92 (poor input map) and 74 (surprising pair), the two papers nearest the bottom third's centre
+KEEP_TEXT_IDXS = [30, 150, 52, 117, 92, 74]
 
 # from scripts/figures/main/figS4_clip_ica.py
 COHORTS = (("UKBICA", "UK Biobank"), ("HCPICA", "Human Connectome Project"))

@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 """Fig. 6: autoencoder reconstructions of 8 network, NeuroVault and PubMed test maps (docs/figures/16_qualatative_auto).
+The examples and their order are those of the submitted figure, which was assembled by hand from the notebook's
+per-example plots (data_dir/ae_qual): the notebook's random draws and network_examples.csv, with the csv's networks 5-8
+shown first. One axial view per example, the axial slice of the submitted figure's views.
 
     .venv/bin/python scripts/figures/main/fig6_autoencoder_qual.py
 """
@@ -19,6 +22,7 @@ log = get_logger(STEM)
 GROUPS = ("Networks", "NeuroVault", "PubMed")
 COMPONENTS = ("autoencoder", "pmids_split")
 NETWORK_CSV = Path(__file__).with_name("network_examples.csv")  # the 8 curated networks (notebook 15)
+NETWORK_ORDER = [4, 5, 6, 7, 0, 1, 2, 3]  # csv rows in the submitted figure's order (default mode, motor, ... first)
 
 
 def parse_args():
@@ -38,7 +42,9 @@ def _clean_choice(n: int, k: int, ok: np.ndarray) -> np.ndarray:
 
 
 def compute(args, device):
-    cache = cache_file(args, "fig6_panels", excl=True)
+    """Per dataset the autoencoder input, the map drawn as True and the reconstruction (sigmoid), in the submitted
+    figure's order, and the ids of the examples."""
+    cache = cache_file(args, "fig6_examples", excl=True)
     if cache.exists() and not args.force:
         log.info("cache hit %s", cache)
         return load_pt(cache)
@@ -62,7 +68,8 @@ def compute(args, device):
             np.random.seed(0)
             inds = _clean_choice(len(test_rows), 8, ok)
             X_pm = np.asarray(payload["neuro_vectors"][torch.as_tensor(test_rows[inds])], dtype="float32")
-            notes["PubMed"] = {"source": "neuro_vectors.pt test split", "pmids": np.asarray(payload["pmid"])[test_rows[inds]].tolist()}
+            notes["PubMed"] = {"source": "neuro_vectors.pt test split, np.random.seed(0)",
+                               "pmids": np.asarray(payload["pmid"])[test_rows[inds]].tolist()}
         else:
             log.warning("neuro_vectors.pt missing: sampling HF pubmed_images with the test flag "
                         "(different ordering -> different random examples than the notebook)")
@@ -78,31 +85,33 @@ def compute(args, device):
         nets = load_network_list()
         csv = NETWORK_CSV if NETWORK_CSV.exists() else dd / "network_examples.csv"
         if csv.exists():
-            df_ex = pd.read_csv(csv)
-            net_inds = df_ex.iloc[:, 0].to_numpy().astype(int)
-            notes["Networks"] = {"source": rel_path(csv)}
+            net_inds = pd.read_csv(csv).iloc[:, 0].to_numpy().astype(int)[NETWORK_ORDER]
+            notes["Networks"] = {"source": f"{rel_path(csv)}, rows {NETWORK_ORDER} (the submitted figure's order)"}
         else:
             log.warning("%s and %s missing: choosing 8 networks at random (seed 0)", NETWORK_CSV, csv)
             net_inds = np.random.RandomState(0).choice(len(nets), 8, replace=False)
             notes["Networks"] = {"source": "random (network_examples.csv missing)"}
-        net_inds = net_inds[:8]
         notes["Networks"]["maps"] = [f"{nets[i][0]}/{nets[i][1]}" for i in net_inds]
         X_net = np.stack([
             mask_vector(masker, resample_to_img(nets[i][2], masker.mask_img, force_resample=True, copy_header=True))
             for i in net_inds
         ]).astype("float32")
-        # NeuroVault: 8 random clustered maps (seed 1), binarised
+        # NeuroVault: 8 random clustered maps (seed 1); the autoencoder sees them binarised, True shows the cluster values
         nvp = dd / "neurovault.pt"
         if nvp.exists():
             nv = torch.load(nvp, map_location="cpu", weights_only=False)
             clust = np.asarray(nv["neuro_clustered"])
-            ok = neurovault_keep(args, nv["df_neuro"]["doi"].tolist(), key="NeuroVault images", log=log, image_ids=nv["df_neuro"]["id"].to_numpy())
+            meta = nv["df_neuro"].reset_index(drop=True)
+            ok = neurovault_keep(args, meta["doi"].tolist(), key="NeuroVault images", log=log, image_ids=meta["id"].to_numpy())
             np.random.seed(1)
             nv_inds = _clean_choice(len(clust), 8, ok)
-            X_nv = (clust[nv_inds] > 0).astype("float32")
-            notes["NeuroVault"] = {"source": "neurovault.pt neuro_clustered", "rows": nv_inds.tolist()}
+            T_nv = clust[nv_inds].astype("float32")
+            notes["NeuroVault"] = {"source": "neurovault.pt neuro_clustered, np.random.seed(1)", "rows": nv_inds.tolist(),
+                                   "image_ids": meta.loc[nv_inds, "id"].astype(int).tolist(),
+                                   "collection_ids": meta.loc[nv_inds, "collection_id"].astype(int).tolist(),
+                                   "dois": meta.loc[nv_inds, "doi"].astype(str).tolist()}
         else:
-            log.warning("neurovault.pt missing: using HF neurovault_images > 0")
+            log.warning("neurovault.pt missing: using HF neurovault_images")
             img = load_dataset("neurovault_images").float()
             meta = load_dataset("neurovault_images_meta").reset_index(drop=True)
             finite = ~img.isnan().any(dim=1)
@@ -110,13 +119,15 @@ def compute(args, device):
             ok = neurovault_keep(args, meta["doi"].tolist(), key="NeuroVault images", log=log, image_ids=meta["id"].to_numpy())
             np.random.seed(1)
             nv_inds = _clean_choice(len(img), 8, ok)
-            X_nv = (img[torch.as_tensor(nv_inds)] > 0).float().numpy()
-            notes["NeuroVault"] = {"source": "HF neurovault_images > 0", "rows": nv_inds.tolist()}
+            T_nv = img[torch.as_tensor(nv_inds)].numpy()
+            notes["NeuroVault"] = {"source": "HF neurovault_images", "rows": nv_inds.tolist(),
+                                   "image_ids": meta.loc[nv_inds, "id"].astype(int).tolist()}
+        X_nv = (T_nv > 0).astype("float32")
     with timed("reconstruct", log, args.cache_dir, stage=STEM):
         sets = {}
-        for name, X in (("Networks", X_net), ("NeuroVault", X_nv), ("PubMed", X_pm)):
+        for name, X, T in (("Networks", X_net, X_net), ("NeuroVault", X_nv, T_nv), ("PubMed", X_pm, X_pm)):
             recon = torch.sigmoid(to_device_batches(ae, X, device, batch_size=8)).numpy().astype("float32")
-            sets[name] = {"true": X, "pred": recon}
+            sets[name] = {"input": X, "true": T, "pred": recon}
     del ae
     free_gpu()
     payload = {"sets": sets, "notes": notes}
@@ -124,27 +135,29 @@ def compute(args, device):
     return payload
 
 
-def axial_cut(imgs, threshold: float = 1e-2) -> float:
-    """Axial cut (z, mm) shared by imgs: the slice that maximises the product over the maps of their drawn activation
-    summed over the slice (values above threshold, each map scaled to max 1), as in Fig. 3."""
-    profiles = []
-    for img in imgs:
-        v = np.nan_to_num(np.asarray(img.get_fdata(), dtype=float))
-        v = np.where(v > threshold, v, 0.0) / max(float(v.max()), 1e-12)
-        profiles.append(v.sum(axis=(0, 1)))
-    score = np.prod(profiles, axis=0)
-    if score.max() <= 0:  # no slice holds both maps: the slice with the most activation of all maps
-        score = np.sum([q / max(q.max(), 1e-12) for q in profiles], axis=0)
-    aff = imgs[0].affine  # diagonal (the masker's MNI grid)
-    return float(aff[2, 2] * int(np.argmax(score)) + aff[2, 3])
+def cluster_99(img):
+    """The notebook's display threshold: voxels above the map's 99th percentile, clusters of at least 50 voxels."""
+    from nilearn.image import threshold_img
+
+    try:
+        return threshold_img(img, "99%", cluster_threshold=50, two_sided=False, copy_header=True)
+    except Exception:
+        return img
+
+
+def axial_cut(pred_img) -> float:
+    """The submitted figure's slice: z of nilearn's cut for the thresholded reconstruction (plot_stat_map's default
+    find_xyz_cut_coords), at which the true map was drawn too."""
+    from nilearn.plotting import find_xyz_cut_coords
+
+    return float(find_xyz_cut_coords(pred_img, activation_threshold=1e-6)[2])
 
 
 def render(args, payload):
-    """Per dataset a True and a Predicted row of n_cols examples, all in one axial view; both maps of an example share
-    the cut (axial_cut)."""
+    """Per dataset a True and a Predicted row of n_cols examples in one axial view; both maps of an example share the
+    cut (axial_cut). Reconstructions are drawn on [0, 1], true maps on [0, their maximum], as the notebook."""
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
-    from nilearn.image import threshold_img
     from _shared import load_masker
 
     plt.rcParams["savefig.bbox"] = "standard"  # the saved figure is exactly FIG_FULL_W wide
@@ -159,13 +172,6 @@ def render(args, payload):
     fig = plt.figure(figsize=(FIG_FULL_W, fig_h))
     W, H = FIG_FULL_W, fig_h
     views = {}
-
-    def thresh(img):  # 99th percentile, clusters >= 50 voxels
-        try:
-            return threshold_img(img, "99%", cluster_threshold=50, two_sided=False, copy_header=True)
-        except Exception:
-            return img
-
     for gi, name in enumerate(GROUPS):
         true, pred = payload["sets"][name]["true"], payload["sets"][name]["pred"]
         y_group_top = H - 0.02 - gi * (group_h + group_gap)
@@ -176,19 +182,26 @@ def render(args, payload):
         views[name] = []
         for c in range(n_cols):
             x0 = left_in + c * (cell_w + gap_in)
-            pred_img = thresh(masker.inverse_transform(pred[c]))
+            pred_img = cluster_99(masker.inverse_transform(pred[c]))
             true_img = masker.inverse_transform(true[c])
             if name == "PubMed":
-                true_img = thresh(true_img)
-            z = axial_cut((true_img, pred_img))
+                true_img = cluster_99(true_img)
+            z = axial_cut(pred_img)
             views[name].append({"view": "z", "cut_mm": z})
-            for r, img in enumerate((true_img, pred_img)):
+            for r, (img, vmax) in enumerate(((true_img, None), (pred_img, 1.0))):
                 box = (x0 + pad, y_group_top - pad - r * (brain_h + pad) - brain_h, cell_w - 2 * pad, brain_h)
-                draw_brain_views(fig, img, box, views="z", cut_coords=[0.0, 0.0, z], threshold=1e-2, vmin=0.0, vmax=None)
+                draw_brain_views(fig, img, box, views="z", cut_coords=[0.0, 0.0, z], threshold=1e-6, vmin=0.0, vmax=vmax)
             fig.add_artist(Rectangle((x0 / W, (y_group_top - group_h) / H), cell_w / W, group_h / H,
                                      transform=fig.transFigure, fill=False, edgecolor="0.25", lw=0.6))
-    return fig, {"view_rule": "axial for every example; both maps of an example share the slice that maximises the "
-                              "product of their drawn activation summed over the slice (each map scaled to max 1)",
+    return fig, {"examples": "the submitted Fig. 6 (paper/figures_back/autoencoder_qual.png), assembled by hand from "
+                             "notebook 16's per-example plots (data_dir/ae_qual/ae_<k>_<set>_<orig|pred>.png): networks "
+                             "ae_04-07 then ae_00-03, NeuroVault and PubMed ae_00-07",
+                 "view_rule": "axial for every example, at z of nilearn's find_xyz_cut_coords of the thresholded "
+                              "reconstruction (the cut of the submitted figure's views); the true map is drawn at the "
+                              "same slice",
+                 "display": "reconstructions and PubMed true maps: voxels above their 99th percentile in clusters of "
+                            ">= 50 voxels; network and NeuroVault true maps as they are; reconstructions coloured on "
+                            "[0, 1], true maps on [0, their maximum] (as notebook 16)",
                  "views": views}
 
 

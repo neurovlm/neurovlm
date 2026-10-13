@@ -1,7 +1,8 @@
 #!/usr/bin/env python
-"""Fig. 2: atlas networks, their text-to-brain maps and brain-to-text captions (one page: maps and generated titles of
-the eight networks). The complete descriptions and generated texts go to a supplementary table, fig2_texts_table.{tex,md};
---text-pages also draws them as figure pages 2+ (the old layout).
+"""Fig. 2: atlas networks, their text-to-brain maps and brain-to-text captions (one page: the maps of the eight networks,
+the complete generated texts of the two with the cleanest generations, pick_full, and the generated network title and an
+ellipsis for the other six). The complete descriptions and generated texts of all eight go to a supplementary table,
+fig2_texts_table.{tex,md}; --text-pages also draws them as figure pages 2+ (the old layout).
 
     .venv/bin/python scripts/figures/main/fig2_network_examples.py
 """
@@ -23,6 +24,9 @@ log = get_logger(STEM)
 BASES = ("network", "region", "function")
 COMPONENTS = ("specter", "autoencoder", "proj_head_text_mse", "qformer_canonical", "canonical_semantic_banks", "neuroqwen")
 BASIS_LABEL = {"network": "Network", "region": "Anatomy", "function": "Cognition"}  # the three generated titles
+VIEWS = "xz"  # sagittal and axial, as Figs. 3 and S2
+N_FULL, N_COLS = 2, 3  # networks printed with their complete texts; columns of the others
+LINE_SPACING = 1.1  # page 1 text lines
 
 # (atlas, map name, display title): the reference rows of the paper figure
 REFS = [
@@ -173,56 +177,104 @@ def map_cuts(masker, true_vec, pred_vec, title):
     return coords or cut_coords_for(masker.inverse_transform(true_vec))
 
 
-def overview_page(refs, shown, coords, captions, masker, fs):
-    """Page 1: two columns x four rows of networks; atlas map, map generated from the description (``shown``: per
-    network the two drawn maps and their thresholds), generated titles."""
+def pick_full(refs, captions, n=N_FULL):
+    """The n networks with the cleanest generations, in figure order: most of the three generated titles named verbatim
+    in the input description, ties broken by the share of the description's word pairs that the generated texts repeat.
+    Returns (indices, per-network scores)."""
+    def pairs(s):
+        words = re.findall(r"[a-z']+", s.lower())
+        return set(zip(words, words[1:]))
+
+    scores = []
+    for (_, _, title), caps in zip(refs, captions):
+        desc = INPUT_TEXT[title]
+        named = sum(bool(t) and t.lower() in desc.lower() for t, _ in caps)
+        overlap = len(pairs(desc) & pairs(" ".join(str(b) for _, b in caps))) / len(pairs(desc))
+        scores.append((named, overlap))
+    order = sorted(range(len(refs)), key=lambda i: scores[i], reverse=True)
+    return sorted(order[:n]), [{"titles_named": a, "word_pair_overlap": round(b, 3)} for a, b in scores]
+
+
+def overview_page(refs, shown, coords, captions, full, masker, fs):
+    """Page 1: every network as its name above the atlas map | the map generated from its description. The networks
+    in ``full`` get a row each, with their complete generated texts run in beside and below the maps; the others sit in
+    three columns with the generated network title and an ellipsis (complete texts in fig2_texts_table). ``shown``: per
+    network the two drawn maps and their thresholds. Every map is drawn at the same scale."""
     import matplotlib.pyplot as plt
 
-    W, left, col_gap, map_gap = FIG_FULL_W, 0.02, 0.16, 0.06
-    col_w = (W - 2 * left - col_gap) / 2
+    W, left, top, col_gap, map_gap, text_gap, cell_gap = FIG_FULL_W, 0.02, 0.03, 0.1, 0.1, 0.12, 0.08
+    col_w = (W - 2 * left - (N_COLS - 1) * col_gap) / N_COLS  # one atlas | generated pair
     map_w = (col_w - map_gap) / 2
-    wmm, hmm = brain_views_mm("xyz")
-    map_h = hmm * (map_w - 0.04) / wmm  # draw_brain_views' height for this width (two 0.02 in gaps)
-    lh = fs * 1.15 / 72
-    head_h, name_h, cell_gap = 0.17, (fs + 1) * 1.2 / 72, 0.1
-    cell_h = name_h + map_h + 0.04 + len(BASES) * lh + cell_gap
-    n_rows = (len(refs) + 1) // 2
-    H = head_h + n_rows * cell_h - cell_gap + 0.03
+    wmm, hmm = brain_views_mm(VIEWS)
+    map_h = hmm * (map_w - 0.02 * (len(VIEWS) - 1)) / wmm  # draw_brain_views' height for this width
+    lh, name_h = fs * LINE_SPACING / 72, (fs + 1) * 1.2 / 72
+
+    def head(i):  # bold name, wrapped to the column (the atlas map is named in fig2_texts_table)
+        return rich_lines([(w, "head") for w in refs[i][2].split()], col_w, fs)
+
+    def gen_tokens(basis, t, body):  # "Network: <title>. <text>"
+        tokens = [(f"{BASIS_LABEL[basis]}:", "label")] + [(w, "title") for w in f"{t or '(no title)'}.".split()]
+        return tokens + [(w, "body") for w in str(body).split()]
+
+    def cell(i, x, y_maps):  # name lines just above the maps
+        hl = head(i)
+        return [("line", i, x, y_maps - (len(hl) - k) * name_h, line) for k, line in enumerate(hl)] + [("maps", i, x, y_maps, None)]
+
+    def short(i):  # the generated network title and an ellipsis
+        return rich_lines([(w, "body") for w in f"{captions[i][0][0] or '(no title)'} \u2026".split()], col_w, fs)
+
+    # layout: (kind, network, x, y from the top, line) items
+    items, y = [], top
+    x_text = left + col_w + text_gap
+    for i in full:  # left: name and maps; right: the three texts, continued below the maps at full width
+        y_maps = y + len(head(i)) * name_h
+        items += cell(i, left, y_maps)
+        n_beside = int(np.ceil((y_maps + map_h + 0.04 - y) / lh))  # lines that start beside the name and maps
+        tokens = [tok for basis, (t, body) in zip(BASES, captions[i]) for tok in gen_tokens(basis, t, body)]  # run-in
+        lines = rich_lines(tokens, lambda k: (W - left - x_text) if k < n_beside else (W - 2 * left), fs)
+        items += [("line", i, x_text if k < n_beside else left, y + k * lh, line) for k, line in enumerate(lines)]
+        y += max(y_maps + map_h - y, len(lines) * lh) + cell_gap
+    rest = [i for i in range(len(refs)) if i not in full]
+    for r0 in range(0, len(rest), N_COLS):
+        row = rest[r0:r0 + N_COLS]
+        y_maps = y + max(len(head(i)) for i in row) * name_h
+        y_title = y_maps + map_h + 0.03
+        for c, i in enumerate(row):
+            x = left + c * (col_w + col_gap)
+            items += cell(i, x, y_maps) + [("line", i, x, y_title + k * lh, line) for k, line in enumerate(short(i))]
+        y = y_title + max(len(short(i)) for i in row) * lh + cell_gap
+    H = y - cell_gap + 0.02
+
     fig = plt.figure(figsize=(W, H))
-    for c in range(2):  # column headers
-        x = left + c * (col_w + col_gap)
-        for dx, label in ((0, "Atlas map"), (map_w + map_gap, "Map from the description")):
-            fig.text((x + dx) / W, 1 - 0.02 / H, label, fontsize=fs, color="#52514e", va="top")
-    for i, (atlas, name, title) in enumerate(refs):
-        r, c = divmod(i, 2)
-        x, top = left + c * (col_w + col_gap), H - head_h - r * cell_h
-        fig.text(x / W, top / H, title, fontsize=fs + 1, fontweight="bold", va="top")
-        fig.text((x + text_width_in(title, fs + 1, "bold") + 0.08) / W, top / H, f"{atlas} {REF_SHORT.get(name, name)}",
-                 fontsize=fs, color="#52514e", va="top")
-        y_map = top - name_h - map_h
+    for kind, i, x, y_top, line in items:
+        if kind == "line":
+            draw_rich_line(fig, x, H - y_top, line, fs, W, H)
+            continue
         for k, (vec, thr) in enumerate(shown[i]):
-            draw_brain_views(fig, masker.inverse_transform(vec), (x + k * (map_w + map_gap), y_map, map_w, map_h),
-                             views="xyz", cut_coords=coords[i], threshold=thr, vmin=0.0, vmax=None)
-        y = y_map - 0.04
-        for k, basis in enumerate(BASES):
-            label = f"{BASIS_LABEL[basis]}: "
-            fig.text(x / W, y / H, label, fontsize=fs, color="#52514e", va="top")
-            fig.text((x + text_width_in(label, fs)) / W, y / H, captions[i][k][0] or "(no title)", fontsize=fs, va="top")
-            y -= lh
+            draw_brain_views(fig, masker.inverse_transform(vec), (x + k * (map_w + map_gap), H - y_top - map_h, map_w, map_h),
+                             views=VIEWS, cut_coords=coords[i], threshold=thr, vmin=0.0, vmax=None)
     return fig, round(H, 2)
 
 
 STYLE = {"name": dict(fontweight="bold", color=BLUE), "label": dict(color="#52514e"), "title": dict(fontweight="bold"),
-         "body": {}}
+         "body": {}, "head": dict(fontweight="bold", size=1)}  # size: pt above fs
+
+
+def _font(st, fs):
+    """(size, weight, fig.text keywords) of a token style."""
+    style = dict(STYLE[st])
+    return fs + style.pop("size", 0), style.get("fontweight", "normal"), style
 
 
 def rich_lines(tokens, width, fs):
-    """Greedy wrap of (word, style) tokens to width (inches); each line is a list of (word, style)."""
+    """Greedy wrap of (word, style) tokens to width (inches, or a function of the line index); each line is a list of
+    (word, style)."""
+    width_of = width if callable(width) else (lambda k: width)
     space = text_width_in(" ", fs)
     lines, cur, used = [], [], 0.0
     for word, st in tokens:
-        w = text_width_in(word, fs, STYLE[st].get("fontweight", "normal"))
-        if cur and used + space + w > width:
+        w = text_width_in(word, *_font(st, fs)[:2])
+        if cur and used + space + w > width_of(len(lines)):
             lines.append(cur)
             cur, used = [], 0.0
         used += (space if cur else 0.0) + w
@@ -240,8 +292,9 @@ def draw_rich_line(fig, x, y, line, fs, W, H):
             runs.append(([word], st))
     for k, (words, st) in enumerate(runs):
         text = " ".join(words) + (" " if k < len(runs) - 1 else "")
-        fig.text(x / W, y / H, text, fontsize=fs, va="top", **STYLE[st])
-        x += text_width_in(text, fs, STYLE[st].get("fontweight", "normal"))
+        size, weight, style = _font(st, fs)
+        fig.text(x / W, y / H, text, fontsize=size, va="top", **style)
+        x += text_width_in(text, size, weight)
 
 
 def text_pages(refs, captions, fs):
@@ -308,10 +361,20 @@ def render(args, payload):
     captions = [[split_caption(gen[b][i]) for b in BASES] for i in range(len(refs))]
     shown = [(display_vector(t), display_vector(p)) for t, p in zip(true, pred)]  # (atlas, generated): (map, threshold)
     coords = [map_cuts(masker, a[0], g[0], refs[i][2]) for i, (a, g) in enumerate(shown)]
-    fig1, h1 = overview_page(refs, shown, coords, captions, masker, fs)
+    full, scores = pick_full(refs, captions)
+    fig1, h1 = overview_page(refs, shown, coords, captions, full, masker, fs)
     pages = [(fig1, h1)] + (text_pages(refs, captions, fs) if args.text_pages else [])
-    text_dump = {"text_in_figure": "titles on page 1; complete texts in fig2_texts_table.{tex,md}"
+    text_dump = {"text_in_figure": "page 1: the complete generated texts of the full examples, the generated network "
+                                   "title and an ellipsis for the others; complete texts of all in fig2_texts_table.{tex,md}"
                                    + (" and on pages 2+" if args.text_pages else ""),
+                 "full_examples": {"networks": [refs[i][2] for i in full],
+                                   "rule": "the two networks with the most of their three generated titles (network, "
+                                           "anatomy, cognition) named verbatim in the input description, ties broken by "
+                                           "the share of the description's word pairs that the three generated texts "
+                                           "repeat (pick_full)",
+                                   "scores": {refs[i][2]: sc for i, sc in enumerate(scores)}},
+                 "views": "sagittal and axial (VIEWS = 'xz'); atlas map left, map generated from the description right; "
+                          "all maps at one scale",
                  "map_display": MAP_DISPLAY_RULE, "map_calibration": payload["map_calibration"], "pages": {}, "rows": []}
     for k, (_, h) in enumerate(pages):
         text_dump["pages"][f"{STEM if k == 0 else f'{STEM}_p{k + 1}'}.png"] = {"height_in": h}

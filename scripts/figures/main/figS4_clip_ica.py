@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 from _shared import (
-    BLUE, FIG_FULL_W, banner, cache_file, column_header, draw_brain_views, encode_texts,
+    FIG_FULL_W, banner, cache_file, column_header, draw_brain_views, encode_texts,
     fig_parser, finalize, finish, free_gpu, get_logger, load_models, load_network_list, load_pt, make_nvlm, mask_vector,
     save_pt, select_device, split_generated, text_cell, text_lines, timed, to_device_batches,
 )
@@ -247,9 +247,9 @@ def render(args, payload, cohort: str, title: str):
         ax = fig.add_axes([xs[1][0], (y_mid - bar_h / 2) / fig_h, xs[1][1], bar_h / fig_h])
         sims = np.clip(np.asarray(r["top_sims"]), 0, None)
         ypos = np.arange(len(sims))[::-1]
-        ax.barh(ypos, sims, height=0.62, color=BLUE, alpha=0.85)
-        for yv, lab in zip(ypos, r["top_labels"]):
-            ax.text(0.012, yv, lab, ha="left", va="center", fontsize=fs, color="black")
+        ax.barh(ypos, sims, height=0.85, color="C0", alpha=0.35)
+        for yv, lab in zip(ypos, r["top_labels"]):  # centred on the bar's midline (descenders hang below)
+            ax.text(0.012, yv, lab, ha="left", va="center_baseline", fontsize=fs, color="black")
         ax.set_xlim(0, x_max)
         ax.set_xticks(np.arange(0.0, x_max + 1e-9, 0.2))
         ax.set_ylim(-0.6, len(sims) - 0.4)

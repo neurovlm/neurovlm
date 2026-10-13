@@ -15,8 +15,9 @@ slices >= 0.9 in tall; two cases share a page where both fit with their complete
 brain-to-text 6 (every case needs ~4.5 in), worst text-to-brain 5, random 6, weakest networks 3, NeuroVault brain-to-text 4, NeuroVault
 text-to-brain 4. The letter shows only the worst brain-to-text set (2.12); the other sets are copied to `reviewer_02/` for the reviewers.
 `captions.tex` and `a7_example_percentiles.{md,csv}` (percentile = 100 x (#below + 0.5 #ties) / n), per-item scores in `*_items.parquet`.
-Result (final model): 16 % of test-set captions (474 of 2,971) have a negative cosine with the true text, 8 % of text-to-brain maps (226) a
-negative Pearson r; Fig. 3 rows lie at P88 / 87 / 46 / 45 / 18 / 17 (text to brain) and P96 / 82 / 50 / 51 / 17 / 8 (brain to text) of 305 papers.
+Result (final model): 16 % of test-set captions (482 of 2,971) have a negative cosine with the true text, 7 % of text-to-brain maps (222) a
+negative Pearson r; the rule-selected Fig. 3 rows (check6: High 30, 150, Medium 52, 117, Low 92, 74, `KEEP_TEXT_IDXS`) lie at
+P86 / 77 / 52 / 36 / 16 / 15 (text to brain) and P79 / 87 / 62 / 43 / 18 / 20 (brain to text) of 305 papers.
 Comment 2.m6 (`audit_names.py`, CPU, ~20 s; needs `../a6_steering_tokens/outputs/title_vocabulary.json`): titles outside the stage-14 bank of their
 level, and caption bodies with an anatomical-looking phrase (ending in cortex / network / gyrus / area / lobe / system) that is no Harvard-Oxford,
 AAL, Yeo, Du, Pauli, MNI-lobe or bank name. Test set (2,971): 827 [NETWORK] titles (28 %) and 300 [REGION] titles (10 %) are no bank title, 678 (23 %)
