@@ -231,7 +231,7 @@ def build_dot(c: dict[str, Any]) -> str:
         "anat": ("3 Anatomical projection head\n(NeuroAdapter in the code)", f"train {k(c.get('adapter_train'))} / val {k(c.get('adapter_val'))} synthetic pairs", "train"),
         "stage1": ("4 Stage-1 projector (MLP)\ngrounded on PubMed", f"train {k(c['qformer_pubmed_train'])} / val {k(c['qformer_pubmed_val'])}", "train"),
         "stage2": ("5 Stage-2 projector (MLP)\ncanonical", f"{k(c['qformer_canonical_rows'])} texts; {s2}", "train"),
-        "lm": ("NeuroQwen3-0.6B (frozen)", f"adapted on {c['qwen_dapt_records'] / 1e6:.2f} M titles and abstracts (test papers included)", "frozen"),
+        "lm": ("NeuroQwen3-0.6B (frozen)", f"adapted on {c['qwen_dapt_records'] / 1e6:.2f} M titles and abstracts (evaluation papers excluded by the training script)", "frozen"),
         # evaluation
         "eval": ("Held-out evaluation sets", f"PubMed test {k(te_ev)}{mk}; NeuroVault {k(nv_pubs)} / {k(nv_maps)}{mk};\n"
                  f"networks {k(c['network_maps_labelled'])} + {k(c['network_ica_components'])} ICA", "test"),

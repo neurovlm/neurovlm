@@ -11,5 +11,7 @@ summaries, `scripts/eval_exclusions/` (evaluation counts only). Arrows follow `s
 **Result:** split by paper 23,894 / 2,987 / 2,987; 2,971 test papers evaluated after the leakage audit. Anatomically centred head: 6,309 / 64 synthetic pairs built
 from training-split maps only (stage 11 `--splits train`; the notebook recipe pooled 1,596 test and 1,623 val papers, see `scripts/README.md`, "Stage 11 split
 leak (fixed)"). Stage 1 projector 22,547 / 2,837 papers with an LLM summary; stage 2 projector 972 / 134 of 1,338 curated texts. NeuroVault (305 papers, 3,154
-maps) and the network maps (145 labeled + 40 ICA) are evaluation only. The NeuroQwen3 corpus (1.23 M PubMed titles and abstracts, 1,219,296 train /
-12,317 val, from the DAPT notebook log) is not released and was not filtered for held-out papers: it holds 2,906 of the 2,971 evaluated test papers.
+maps) and the network maps (145 atlas maps, 119 of them with a network label, + 40 ICA) are evaluation only. The NeuroQwen3 box (1.23 M PubMed titles and abstracts, 1,219,296 train /
+12,317 val, from the DAPT notebook log) states the corpus rule of `scripts/models/00_neuroqwen_dapt.py`, whose training script excludes the
+validation, test, and NeuroVault evaluation papers. The shipped NeuroQwen3-0.6B (rev 23f50c9) predates that filter and holds 2,906 of the 2,971
+evaluated test papers, so the box (and the paper's sentence) holds only after the retrain (final_thoughts.md, open item 1).

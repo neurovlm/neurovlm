@@ -2,8 +2,8 @@
 """Fig. 3: NeuroVault text-to-brain and brain-to-text examples (docs/figures/12_neurovault_decoding.ipynb), six rows in
 the layout of the paper's original figure. Quality = the two cosines of a row; a row is High / Medium / Low when both
 rank in the top / middle / bottom third of all NeuroVault papers (the pool), whose densities are drawn on the left with
-the rows marked. select_rows picks the rows by a fixed rule: High and Medium rows have a title that names one domain and
-a clean true map, Low rows are the papers nearest the centre of their third and are labelled by low_check.
+the rows marked. select_rows picks the rows by a fixed rule: every row has a clean generated text (text_check), High and
+Medium rows also a title that names one domain and a clean true map; low_check says why a Low row scores low (caption).
 
     .venv/bin/python scripts/figures/main/fig3_newgen.py
 """
@@ -16,7 +16,7 @@ from _shared import (
     FIG_FULL_W, MAP_DISPLAY_RULE, NULL_COLOR, STATUS_BAD, STATUS_GOOD, STATUS_WARN, banner, brain_views_mm, cache_file,
     column_header, display_vector, display_vmin, draw_brain_views, encode_texts, fig_parser, finalize, finish, free_gpu,
     generate_brain_maps, get_logger, load_models, load_pt, make_nvlm, map_cal_tag, map_factor, neurovault_keep, save_pt,
-    select_device, split_generated, text_width_in, timed, wrap_measured,
+    select_device, split_generated, timed, wrap_measured,
 )
 
 STEM = "fig3_newgen"
@@ -50,12 +50,21 @@ DOMAINS = {
 }
 MIN_CLUSTER = 20  # voxels (160 mm3); smaller pieces of a drawn map are specks
 CLEAN = {"clusters": 2, "k50": 3, "speckle": 0.10}  # >= 2 clusters, half the mass in <= 3 pieces, <= 10 % in specks
+# a generated text is clean when it has no code-like character, no invented term (a word used fewer than twice in the
+# PubMed titles and abstracts and in no bank title, or an anatomical name with a word pair PubMed never uses), a title of
+# the stage-14 bank of its level and no content word used more than twice (title, stop and anatomical words aside)
+CODE_RE = re.compile(r"[\[\]{}<>_#\\|=*~^`@$]|[^\x00-\x7F‘’“”–—]")
+ANAT_HEADS = {"cortex", "cortices", "gyrus", "gyri", "sulcus", "lobule", "lobe", "nucleus", "nuclei", "area", "pole",
+              "operculum", "network", "stream"}
+VERBS = set("involves involve involving includes include including spans spanning links linking alongside engages engaging "
+            "connects connecting supports supporting extends extending encompasses encompassing comprises comprising "
+            "recruits recruiting covers covering engaged involved linked associated tied related commonly often typically "
+            "generally broadly mainly primarily particularly especially notably".split())
 MARKER_PT = 4.5  # density markers, diameter in pt
 LINE_SPACING = 1.0
-ABSTRACT_LINES = 3  # true abstract: at most its first lines, where the row has room, cut with '...' (as the original)
-# column widths, inches: density y-label, each density strip, the shared cosine axis between them, group bar, cosines
-# (Image above Text), true text, each map column (sagittal above axial); the generated text takes the rest of FIG_FULL_W
-YLAB_W, STRIP_W, AXIS_W, BAR_W, COS_W, TRUE_W, MAP_W = 0.12, 0.1, 0.16, 0.15, 0.28, 1.15, 0.4
+# column widths, inches: the shared y label with the tick labels, each density strip (gap between them), group bar, true
+# title, each map column (sagittal above axial); the generated text takes the rest of FIG_FULL_W
+YAXIS_W, STRIP_W, STRIP_GAP, BAR_W, TITLE_W, MAP_W = 0.37, 0.28, 0.06, 0.15, 1.15, 0.4
 MAP_VIEWS = "xz"
 COMPONENTS = ("specter", "proj_head_text_mse", "autoencoder", "proj_head_text_infonce", "proj_head_image_infonce",
               "qformer_canonical", "canonical_semantic_banks", "neuroqwen")
@@ -212,11 +221,67 @@ def mask_3d() -> np.ndarray:
     return np.asarray(load_masker().mask_img_.dataobj).astype(bool)
 
 
-def pool_checks(payload) -> list[dict]:
-    """Per pool paper: the domains its title names and the clusters of its true map."""
+def text_vocabulary(args) -> dict:
+    """What text_check compares a generated text with: the words used at least twice in the PubMed titles and abstracts
+    and the words of the bank titles, the word pairs PubMed uses, the bank titles per level and the anatomical words
+    (those of the region and network titles)."""
+    from collections import Counter
+
+    from _shared import load_dataset, title_vocabulary
+    from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
+
+    pm = load_dataset("pubmed_text")
+    counts, pairs = Counter(), set()
+    for t in (pm["name"].astype(str) + " " + pm["description"].astype(str)).str.lower():
+        w = re.findall(r"[a-z]+", t)
+        counts.update(w)
+        pairs.update(zip(w, w[1:]))
+    bank = title_vocabulary(args.model_dir, logger=log)["titles"]
+    bank_words = {w for names in bank.values() for t in names for w in re.findall(r"[a-z]+", t.lower())}
+    anat = {w for lv in ("region", "network") for t in bank[lv] for w in re.findall(r"[a-z]+", t.lower())} | ANAT_HEADS
+    return {"words": {w for w, c in counts.items() if c >= 2} | bank_words, "pairs": pairs, "n_papers": len(pm),
+            "bank": {lv: {t.lower() for t in v} for lv, v in bank.items()}, "anatomy": anat,
+            "stop": set(ENGLISH_STOP_WORDS) | VERBS}
+
+
+def text_check(text: str, voc: dict) -> dict:
+    """Junk in a generated text: a title outside the bank of its level, code-like characters, invented words, invented
+    anatomical names (the up to three words before an anatomical head, inside a clause, with an adjacent pair PubMed
+    never uses) and content words used more than twice. issues = the number of these findings, 0 = clean."""
+    m = re.match(r"\s*\[(NETWORK|REGION|FUNCTION)\]", text)
+    title, body = split_generated(text)
+    title = (title or "").strip()
+    words = re.findall(r"[a-z]+", body.lower())
+    out = {"title_canonical": bool(m) and title.lower() in voc["bank"].get(m.group(1).lower(), ()),
+           "code": sorted(set(CODE_RE.findall(title + " " + body))),
+           "invented_words": sorted({w for w in words if w not in voc["words"]}), "invented_names": []}
+    for clause in re.split(r"[.,;:()]|\band\b|\bor\b", body.lower()):
+        w = re.findall(r"[a-z]+", clause)
+        for j in range(len(w)):
+            if w[j] not in ANAT_HEADS:
+                continue
+            k = j
+            while k > 0 and j - k < 3 and w[k - 1] not in voc["stop"]:
+                k -= 1
+            if any(p not in voc["pairs"] for p in zip(w[k:j], w[k + 1:j])):
+                out["invented_names"].append(" ".join(w[k:j + 1]))
+    own = set(re.findall(r"[a-z]+", title.lower()))
+    n = {}
+    for x in words:
+        if len(x) > 3 and x not in voc["stop"] and x not in voc["anatomy"] and x not in own:
+            n[x] = n.get(x, 0) + 1
+    out["repeated_words"] = sorted(f"{x} x{c}" for x, c in n.items() if c > 2)
+    out["issues"] = int(not out["title_canonical"]) + sum(len(out[k]) for k in ("code", "invented_words", "invented_names",
+                                                                                 "repeated_words"))
+    out["clean"] = out["issues"] == 0
+    return out
+
+
+def pool_checks(payload, voc: dict) -> list[dict]:
+    """Per pool paper: the domains its title names, the clusters of its true map and the check of its generated text."""
     mask3d = mask_3d()
-    return [{"domains": title_domains(t), **map_clusters(payload["maps"]["true"][i].astype(np.float32), mask3d)}
-            for i, t in enumerate(payload["title"])]
+    return [{"domains": title_domains(t), **map_clusters(payload["maps"]["true"][i].astype(np.float32), mask3d),
+             "text": text_check(payload["generated_text"][i], voc)} for i, t in enumerate(payload["title"])]
 
 
 def low_check(c: dict, true_pair_pct: float) -> str:
@@ -227,18 +292,23 @@ def low_check(c: dict, true_pair_pct: float) -> str:
     return "Surprising pair" if true_pair_pct < 100 / 3 else "Model miss"
 
 
+def passes(c: dict, group: str) -> bool:
+    """The row rule: a clean generated text; High and Medium also a title naming one domain and a clean true map."""
+    return c["text"]["clean"] and (group == "Low" or (len(c["domains"]) == 1 and is_clean(c)))
+
+
 def select_rows(pool: dict, checks: list[dict], quality: str):
-    """Two rows per third, nearest the third's centre (percentile space) first. High and Medium: only papers whose
-    title names one domain and whose true map is clean, the second row of another domain. Low: no filter.
-    Returns [(group, pool position)], the percentiles [n, 2] and the candidates per group (nearest first)."""
+    """Two rows per third, nearest the third's centre (percentile space) first, among the papers that pass the row rule;
+    High and Medium: the second row of another domain. Returns [(group, pool position)], the percentiles [n, 2] and
+    the papers of each third (nearest first)."""
     pct = np.stack([percentiles(pool[k]) for k in QUALITY[quality]], axis=1)
     rows, cands = [], {}
     for group, _ in GROUPS:
         lo, hi = TERCILE[group]
         inside = np.flatnonzero(((pct >= lo) & (pct <= hi)).all(axis=1))
         order = sorted(inside.tolist(), key=lambda i: float(np.hypot(*(pct[i] - (lo + hi) / 2))))
-        ok = order if group == "Low" else [i for i in order if len(checks[i]["domains"]) == 1 and is_clean(checks[i])]
-        cands[group] = ok
+        ok = [i for i in order if passes(checks[i], group)]
+        cands[group] = order
         picked, seen = [], set()
         for i in ok:
             d = tuple(checks[i]["domains"])
@@ -257,37 +327,52 @@ def select_rows(pool: dict, checks: list[dict], quality: str):
 def build_rows(args, payload) -> tuple[list[dict], dict]:
     """The selected rows (texts, cosines, pool percentiles, group, checks, maps) and the selection log."""
     pool = payload["pool"]
-    checks = pool_checks(payload)
+    voc = text_vocabulary(args)
+    checks = pool_checks(payload, voc)
     sel, pct, cands = select_rows(pool, checks, args.quality)
     tp = percentiles(pool["true_pair_cos"])
     mask3d = mask_3d()
     rows = []
     for group, i in sel:
         gen, true = (payload["maps"][k][i].astype(np.float32) for k in ("generated", "true"))
-        c = {k: v for k, v in checks[i].items() if k != "domains"}
+        c = {k: v for k, v in checks[i].items() if k not in ("domains", "text")}
         rows.append({"text_idx": int(pool["text_idx"][i]), "image_idx": int(pool["image_idx"][i]), "doi": payload["doi"][i],
                      "title": payload["title"][i], "abstract": payload["abstract"][i],
                      "generated_text": payload["generated_text"][i], **{k: float(pool[k][i]) for k in COS_KEYS},
                      "group": group, "image_percentile": float(pct[i, 0]), "text_percentile": float(pct[i, 1]),
                      "checks": {"title_domains": checks[i]["domains"], "true_map": c, "true_map_clean": is_clean(c),
-                                "generated_map": map_clusters(gen, mask3d), "true_pair_percentile": round(float(tp[i]), 2),
+                                "generated_text": checks[i]["text"], "generated_map": map_clusters(gen, mask3d),
+                                "true_pair_percentile": round(float(tp[i]), 2),
                                 "low_check": low_check(c, tp[i]) if group == "Low" else None},
                      "true_map": true, "generated_map": gen})
     picked = {i for _, i in sel}
+    # every paper of each third, nearest its centre first, with the checks of the row rule
     log_ = {g: [{"text_idx": int(pool["text_idx"][i]), "title": payload["title"][i], "picked": i in picked,
-                 "image_percentile": round(float(pct[i, 0]), 2), "text_percentile": round(float(pct[i, 1]), 2),
-                 "title_domains": checks[i]["domains"], **{k: v for k, v in checks[i].items() if k != "domains"},
-                 "true_pair_percentile": round(float(tp[i]), 2)} for i in ids[: 40 if g != "Low" else 10]]
+                 "passes_rule": passes(checks[i], g), "image_percentile": round(float(pct[i, 0]), 2),
+                 "text_percentile": round(float(pct[i, 1]), 2), "title_domains": checks[i]["domains"],
+                 "true_map_clean": is_clean(checks[i]),
+                 **{k: v for k, v in checks[i].items() if k not in ("domains", "text")},
+                 "true_pair_percentile": round(float(tp[i]), 2),
+                 "generated_title": split_generated(payload["generated_text"][i])[0],
+                 "text_issues": checks[i]["text"]["issues"], "text_check": checks[i]["text"]} for i in ids]
             for g, ids in cands.items()}
     counts = {}
     for group, _ in GROUPS:
-        lo, hi = TERCILE[group]
-        inside = np.flatnonzero(((pct >= lo) & (pct <= hi)).all(axis=1))
-        clear = [i for i in inside if len(checks[i]["domains"]) == 1]
-        clean = [i for i in inside if is_clean(checks[i])]
-        counts[group] = {"in_third": len(inside), "clear_title": len(clear), "clean_true_map": len(clean),
-                         "both": len(set(clear) & set(clean))}
-    return rows, {"counts": counts, "nearest_first": log_}
+        ids = cands[group]
+        clear = {i for i in ids if len(checks[i]["domains"]) == 1}
+        clean = {i for i in ids if is_clean(checks[i])}
+        text = {i for i in ids if checks[i]["text"]["clean"]}
+        counts[group] = {"in_third": len(ids), "clear_title": len(clear), "clean_true_map": len(clean),
+                         "clean_text": len(text), "pass_rule": sum(passes(checks[i], group) for i in ids)}
+        log.info("%s: %s", group, counts[group])
+    for r in rows:
+        t = r["checks"]["generated_text"]
+        log.info("row %s %d: text issues %d, low_check %s, %s", r["group"], r["text_idx"], t["issues"],
+                 r["checks"]["low_check"], r["title"][:60])
+    return rows, {"counts": counts, "nearest_first": log_,
+                  "text_vocabulary": {"pubmed_papers": voc["n_papers"], "words": len(voc["words"]),
+                                      "word_pairs": len(voc["pairs"]),
+                                      "bank_titles": {k: len(v) for k, v in voc["bank"].items()}}}
 
 
 def shared_cuts(imgs, thresholds) -> list[float]:
@@ -309,11 +394,10 @@ def shared_cuts(imgs, thresholds) -> list[float]:
     return cuts
 
 
-def draw_density(axes, pool: dict, rows: list[dict], keys, fs, axis_in: float):
-    """Two strips back to back around their shared cosine axis (tick labels in the axis_in wide gap between them): the
-    density of each quality cosine over the pool (grey; Image rises to the left, Text to the right), the pool's thirds
-    (dashed) and one marker per row in its group colour next to the axis; markers that would overlap move outwards."""
-    from matplotlib.transforms import blended_transform_factory
+def draw_density(axes, pool: dict, rows: list[dict], keys, fs):
+    """Two strips side by side on one cosine axis (tick labels and the shared y label left of the first): the density
+    of each quality cosine over the pool (grey, rising to the right), the pool's thirds (dashed) and one marker per row
+    in its group colour, all on one vertical line next to the strip's axis."""
     from scipy.stats import gaussian_kde
 
     vals = [np.asarray(pool[k], dtype=float) for k in keys]
@@ -321,55 +405,25 @@ def draw_density(axes, pool: dict, rows: list[dict], keys, fs, axis_in: float):
     lo, hi = lo - 0.02 * (hi - lo), hi + 0.02 * (hi - lo)
     colour = dict(GROUPS)
     ticks = np.arange(np.ceil(lo / 0.2), np.floor(hi / 0.2) + 1) * 0.2
-    for ax, v, key, side in zip(axes, vals, keys, ("right", "left")):  # side = the strip's edge on the axis
+    for k, (ax, v, key) in enumerate(zip(axes, vals, keys)):
         grid = np.linspace(v.min(), v.max(), 300)  # the curve stops at the pool's extremes
         d = gaussian_kde(v)(grid)
-        ax.fill_betweenx(grid, 0, 0.92 * d / d.max(), color=NULL_COLOR, lw=0)
+        ax.fill_betweenx(grid, 0, 0.95 * d / d.max(), color=NULL_COLOR, lw=0)
         for q in np.percentile(v, [100 / 3, 200 / 3]):
             ax.plot([0, 1], [q, q], color="0.2", lw=0.6, ls=(0, (2.5, 1.5)))
-        ax.set_xlim(*((1, 0) if side == "right" else (0, 1)))  # x = distance from the axis
+        ax.set_xlim(0, 1)
         ax.set_ylim(lo, hi)
-        pos = ax.get_position()
-        w_in, h_in = pos.width * ax.figure.get_figwidth(), pos.height * ax.figure.get_figheight()
-        disc = MARKER_PT / 72.0  # marker diameter, inches
-        placed = []  # (y, x) in inches
-        for r in sorted(rows, key=lambda r: r[key]):
-            y_in = (r[key] - lo) / (hi - lo) * h_in
-            x_in = disc / 2
-            while any(abs(y_in - py) < disc and abs(x_in - px) < disc for py, px in placed):
-                x_in += disc
-            placed.append((y_in, x_in))
-            ax.plot([x_in / w_in], [r[key]], marker="o", ms=MARKER_PT, color=colour[r["group"]], mec="white", mew=0.5,
+        x = MARKER_PT / 72.0 * 0.7 / (ax.get_position().width * ax.figure.get_figwidth())  # just off the axis line
+        for r in sorted(rows, key=lambda r: -r[key]):
+            ax.plot([x], [r[key]], marker="o", ms=MARKER_PT, color=colour[r["group"]], mec="white", mew=0.5,
                     clip_on=False, zorder=3)
         ax.set_xticks([])
-        for s in ("top", "right", "bottom", "left"):
-            ax.spines[s].set_visible(s == side)
-        ax.spines[side].set_linewidth(0.6)
-        ax.set_yticks(ticks)
-        ax.yaxis.set_ticks_position(side)
-        ax.tick_params(axis="y", direction="in", length=2.5, width=0.6, labelleft=False, labelright=False)
-    tr = blended_transform_factory(axes[1].transAxes, axes[1].transData)
-    x_lab = -axis_in / 2 / (axes[1].get_position().width * axes[1].figure.get_figwidth())
-    for t in ticks:
-        axes[1].text(x_lab, t, f"{t + 0.0:.1f}", transform=tr, ha="center", va="center", fontsize=fs)
-    axes[0].yaxis.set_label_position("left")
-    axes[0].set_ylabel(f"Cosine, all {len(vals[0])} papers", fontsize=fs, labelpad=1.5)
-
-
-def true_text(title: str, abstract: str, n_lines: int, width_in: float, fs: float) -> tuple[list[str], list[str]]:
-    """Complete bold title and the abstract's first lines where the row has room (ABSTRACT_LINES at most, n_lines in
-    all); a cut abstract ends in '...'."""
-    tl = wrap_measured(title, width_in, fs, weight="bold", hyphens=True)
-    al = wrap_measured(abstract, width_in, fs, hyphens=True)
-    k = max(0, min(ABSTRACT_LINES, n_lines - len(tl)))
-    if len(al) > k:
-        al = al[:k]
-        if al:
-            words = al[-1].split()
-            while len(words) > 1 and text_width_in(" ".join(words) + "...", fs) > width_in:
-                words.pop()
-            al[-1] = " ".join(words).rstrip(".,;:") + "..."
-    return tl, al
+        for side in ("top", "right", "bottom"):
+            ax.spines[side].set_visible(False)
+        ax.spines["left"].set_linewidth(0.6)
+        ax.set_yticks(ticks, [f"{t + 0.0:.1f}" for t in ticks])
+        ax.tick_params(axis="y", direction="out", length=2.5, width=0.6, pad=1.5, labelsize=fs, labelleft=k == 0)
+    axes[0].set_ylabel("Cosine similarity", fontsize=fs, labelpad=2.0)
 
 
 def text_block(fig, x_in: float, top_in: float, parts: list[tuple[list[str], dict]], fs: float, pitch_in: float) -> int:
@@ -386,8 +440,8 @@ def text_block(fig, x_in: float, top_in: float, parts: list[tuple[list[str], dic
 
 
 def render(args, rows: list[dict], payload):
-    """The figure: header, density strips, then per row the group bar, cosines, true text, generated and true map (one
-    cut per view, shared) and the complete generated text. Returns the figure, the rows for the JSON and the layout."""
+    """The figure: header, density strips, then per row the group bar, true title, generated and true map (one cut per
+    view, shared) and the complete generated text. Returns the figure, the rows for the JSON and the layout."""
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
     from _shared import load_masker
@@ -399,25 +453,24 @@ def render(args, rows: list[dict], payload):
     keys = QUALITY[args.quality]
     fig_w = FIG_FULL_W
 
-    # (width, gap after) in inches: density Image | density Text (the shared cosine axis is the gap between them) | group
-    # bar | cosines | true text | generated maps | true maps | generated text (the rest; it sets the row heights)
-    widths = [(STRIP_W, AXIS_W), (STRIP_W, 0.03), (BAR_W, 0.02), (COS_W, 0.03), (TRUE_W, 0.05), (MAP_W, 0.04),
-              (MAP_W, 0.06)]
-    cols, x = [], YLAB_W
-    for w, gap in widths:
-        cols.append((x, w))
+    # (name, width, gap after) in inches, after the y label and tick labels; the generated text takes the rest and sets
+    # the row heights
+    widths = [("density_image", STRIP_W, STRIP_GAP), ("density_text", STRIP_W, 0.03), ("group_bar", BAR_W, 0.02),
+              ("true_title", TITLE_W, 0.05), ("generated_maps", MAP_W, 0.04), ("true_maps", MAP_W, 0.06)]
+    cols, x = {}, YAXIS_W
+    for name, w, gap in widths:
+        cols[name] = (x, w)
         x += w + gap
-    cols.append((x, fig_w - 0.02 - x))
+    cols["generated_text"] = (x, fig_w - 0.02 - x)
     lh_in = fs / 72.0 * LINE_SPACING
-    pad, group_gap, header_h = 0.04, 0.04, 0.47
+    pad, group_gap, header_h = 0.04, 0.04, 0.36
     gen = []  # (bold title lines, body lines) of the generated text, complete
     for r in rows:
         title, body = split_generated(r["generated_text"])
-        gen.append((wrap_measured(title, cols[7][1], fs, weight="bold", hyphens=True) if title else [],
-                    wrap_measured(body, cols[7][1], fs, hyphens=True) if body else []))
-    notes = [[r["checks"]["low_check"]] if r["checks"]["low_check"] else [] for r in rows]
-    title_lines = [len(wrap_measured(r["title"], cols[4][1], fs, weight="bold", hyphens=True)) for r in rows]
-    n_lines = [max(len(gt) + len(gb), k + len(m)) for (gt, gb), k, m in zip(gen, title_lines, notes)]
+        gen.append((wrap_measured(title, cols["generated_text"][1], fs, weight="bold", hyphens=True) if title else [],
+                    wrap_measured(body, cols["generated_text"][1], fs, hyphens=True) if body else []))
+    titles = [wrap_measured(r["title"], cols["true_title"][1], fs, weight="bold", hyphens=True) for r in rows]
+    n_lines = [max(len(gt) + len(gb), len(tl)) for (gt, gb), tl in zip(gen, titles)]
     map_wmm, map_hmm = brain_views_mm(MAP_VIEWS, vertical=True)
     map_h = MAP_W * map_hmm / map_wmm + 0.02  # the two stacked views and their gap
     row_h = [max(k * lh_in, map_h) + pad for k in n_lines]
@@ -433,57 +486,50 @@ def render(args, rows: list[dict], payload):
     def fy(y_in):
         return y_in / fig_h
 
-    y_top, y_sub = fy(fig_h - 0.15), fy(fig_h - 0.43)
-    column_header(fig, fx(0.02), fx(sum(cols[3])), y_top, "Quality", size_delta=1)
-    column_header(fig, fx(cols[4][0]), fx(sum(cols[5])), y_top, "Text-to-Brain", size_delta=1)
-    column_header(fig, fx(cols[6][0]), fx(sum(cols[7])), y_top, "Brain-to-Text", size_delta=1)
-    # sub-headers at the text size; the strips' labels are wider than the strips
-    column_header(fig, fx(0.02), fx(sum(cols[0]) + 0.06), y_sub, "Image", size_delta=-1.0)
-    column_header(fig, fx(cols[1][0] - 0.02), fx(sum(cols[1]) + 0.05), y_sub, "Text", size_delta=-1.0)
-    column_header(fig, fx(cols[3][0]), fx(sum(cols[3])), y_sub, "Image\nText", size_delta=-1.0)  # the stacked cosines
-    for ci, lab in ((4, "True"), (5, "Generation"), (6, "True"), (7, "Generation")):
-        column_header(fig, fx(cols[ci][0]), fx(sum(cols[ci])), y_sub, lab, size_delta=-1.0)
+    def right(name):
+        return sum(cols[name])
+
+    y_top, y_sub = fy(fig_h - 0.15), fy(fig_h - 0.32)
+    column_header(fig, fx(0.02), fx(right("group_bar")), y_top, "Quality", size_delta=1)
+    column_header(fig, fx(cols["true_title"][0]), fx(right("generated_maps")), y_top, "Text-to-Brain", size_delta=1)
+    column_header(fig, fx(cols["true_maps"][0]), fx(right("generated_text")), y_top, "Brain-to-Text", size_delta=1)
+    for name, lab in (("density_image", "Image"), ("density_text", "Text"), ("true_title", "True"),
+                      ("generated_maps", "Generation"), ("true_maps", "True"), ("generated_text", "Generation")):
+        column_header(fig, fx(cols[name][0]), fx(right(name)), y_sub, lab, size_delta=-1.0)
 
     axes = [fig.add_axes([fx(cols[c][0]), fy(rows_bot + 0.04), fx(cols[c][1]), fy(row_top[0] - rows_bot - 0.08)])
-            for c in (0, 1)]
-    draw_density(axes, payload["pool"], rows, keys, fs, AXIS_W)
+            for c in ("density_image", "density_text")]
+    draw_density(axes, payload["pool"], rows, keys, fs)
 
+    bar_x = cols["group_bar"][0]
     for group, col in GROUPS:  # one bar and name per group, over its rows
         idx = [i for i, r in enumerate(rows) if r["group"] == group]
         if not idx:
             continue
         top, bot = row_top[idx[0]] - pad / 2, row_top[idx[-1]] - row_h[idx[-1]] + pad / 2
-        fig.add_artist(Rectangle((fx(cols[2][0] + 0.1), fy(bot)), fx(0.05), fy(top - bot), transform=fig.transFigure,
+        fig.add_artist(Rectangle((fx(bar_x + 0.09), fy(bot)), fx(0.05), fy(top - bot), transform=fig.transFigure,
                                  facecolor=col, edgecolor="none"))
-        fig.text(fx(cols[2][0] + 0.04), fy((top + bot) / 2), group, rotation=90, ha="center", va="center", fontsize=fs + 1)
+        fig.text(fx(bar_x + 0.05), fy((top + bot) / 2), group, rotation=90, ha="center", va="center", fontsize=fs + 1)
     out = []
     for i, r in enumerate(rows):
         top, h = row_top[i], row_h[i]
-        y_mid = top - h / 2
-        x_cos = fx(cols[3][0] + cols[3][1] / 2)
-        fig.text(x_cos, fy(y_mid + 0.6 * lh_in), f"{r[keys[0]]:.2f}", ha="center", va="center", fontsize=fs)
-        fig.text(x_cos, fy(y_mid - 0.6 * lh_in), f"{r[keys[1]]:.2f}", ha="center", va="center", fontsize=fs)
-        tl, al = true_text(r["title"], r["abstract"], n_lines[i] - len(notes[i]), cols[4][1], fs)
-        text_block(fig, cols[4][0], top, [(tl, {"fontweight": "bold"}), (notes[i], {"fontstyle": "italic"}), (al, {})],
-                   fs, lh_in)
+        text_block(fig, cols["true_title"][0], top, [(titles[i], {"fontweight": "bold"})], fs, lh_in)
         shown = {k: display_vector(r[f"{k}_map"]) for k in ("generated", "true")}  # (drawn map, threshold)
         imgs = {k: masker.inverse_transform(v) for k, (v, _) in shown.items()}
         # the generated (text-to-brain) and the true (brain-to-text) map share the row's cuts
         coords = shared_cuts((imgs["generated"], imgs["true"]), (shown["generated"][1], shown["true"][1]))
-        for ci, k in ((5, "generated"), (6, "true")):
-            draw_brain_views(fig, imgs[k], (cols[ci][0], top - h + pad / 2, cols[ci][1], h - pad), views=MAP_VIEWS,
+        for name, k in (("generated_maps", "generated"), ("true_maps", "true")):
+            draw_brain_views(fig, imgs[k], (cols[name][0], top - h + pad / 2, cols[name][1], h - pad), views=MAP_VIEWS,
                              cut_coords=coords, vertical=True, threshold=shown[k][1],
                              vmin=display_vmin(shown[k][1], float(shown[k][0].max())), vmax=float(shown[k][0].max()))
-        n_gen = text_block(fig, cols[7][0], top, [(gen[i][0], {"fontweight": "bold"}), (gen[i][1], {})], fs, lh_in)
+        n_gen = text_block(fig, cols["generated_text"][0], top, [(gen[i][0], {"fontweight": "bold"}), (gen[i][1], {})],
+                           fs, lh_in)
         out.append({k: v for k, v in r.items() if not k.endswith("_map")} |
-                   {"true_text_in_figure": " ".join(tl + al), "abstract_lines_in_figure": len(al),
-                    "generated_lines_in_figure": n_gen, "cut_coords": coords,
+                   {"true_text_in_figure": " ".join(titles[i]), "generated_lines_in_figure": n_gen, "cut_coords": coords,
                     "map_display": {k: {"threshold": round(thr, 4), "voxels_drawn": int((v > 0).sum())}
                                     for k, (v, thr) in shown.items()}})
-    names = ("density_image", "density_text", "group_bar", "cosines", "true_text", "generated_maps", "true_maps",
-             "generated_text")
     layout = {"width_in": fig_w, "height_in": round(fig_h, 2), "font_pt": fs,
-              "column_widths_in": {k: round(w, 3) for k, (_, w) in zip(names, cols)}, "density_axis_gap_in": AXIS_W,
+              "column_widths_in": {"y_axis": YAXIS_W, **{k: round(w, 3) for k, (_, w) in cols.items()}},
               "line_spacing": LINE_SPACING, "row_heights_in": [round(h, 3) for h in row_h], "row_lines": n_lines}
     return fig, out, layout
 
@@ -500,25 +546,32 @@ def text_dump(args, payload, selection: dict) -> dict:
                                "of the generated and the true map's drawn activation summed over that slice (values "
                                "above the display threshold, each map scaled to max 1); both maps are drawn at the "
                                "same cuts, sagittal above axial (rows[].cut_coords)",
-            "text_in_figure": "generated text complete; true text = complete title + the abstract's first lines where "
-                              f"the row has room (at most {ABSTRACT_LINES}), cut with '...' (the complete abstract is in "
-                              "rows[].abstract); Low rows add their check (rows[].checks.low_check)",
-            "density": "left strips, back to back around their shared cosine axis: Gaussian KDE (Scott bandwidth) of "
-                       "each quality cosine over the pool, cut at its min / max; dashed = pool thirds; one marker per "
-                       "row in its group colour; the cosines column gives Image above Text",
+            "text_in_figure": "generated text complete; true text = the paper's complete title (the abstract is in "
+                              "rows[].abstract); each Low row's check is in rows[].checks.low_check (caption only)",
+            "density": "left strips on one cosine axis: Gaussian KDE (Scott bandwidth) of each quality cosine over the "
+                       "pool, cut at its min / max; dashed = pool thirds; one marker per row in its group colour, all on "
+                       "one vertical line (the rows' cosines are in rows[])",
             "selection": {
                 "rule": "per group, the papers whose two percentiles both lie in the group's third, nearest the third's "
-                        "centre (percentile space) first. High and Medium: only papers whose title names exactly one "
-                        "domain (title_domains) and whose true map is clean; the second row must name another domain. "
-                        "Low: the two nearest papers, no filter, each labelled by its check",
+                        "centre (percentile space) first, among those with a clean generated text (text_clean). High "
+                        "and Medium: also a title that names exactly one domain (title_domains) and a clean true map; "
+                        "the second row must name another domain",
+                "text_clean": "text_check of the generated text: issues = 1 if its title is not a name of the stage-14 "
+                              "bank of its level (title_vocabulary.json) + the distinct code-like characters "
+                              f"({CODE_RE.pattern}) + the invented words (used fewer than twice in the "
+                              f"{selection['text_vocabulary']['pubmed_papers']:,} PubMed titles and abstracts and in no "
+                              "bank title) + the invented anatomical names (the up to "
+                              "three words before an anatomical head, inside a clause, with an adjacent word pair "
+                              "PubMed never uses) + the content words used more than twice (stop, title and anatomical "
+                              "words aside); clean = 0 issues",
                 "domains": DOMAINS,
                 "clusters": f"the true map as drawn, cut into 26-connected pieces; clusters = pieces of >= {MIN_CLUSTER} "
                             "voxels (2 mm), k50 = pieces (largest mass first) holding half of the drawn mass, top3 = "
                             f"mass share of the three largest, speckle = mass share of pieces < {MIN_CLUSTER} voxels",
                 "clean": f"clusters >= {CLEAN['clusters']}, k50 <= {CLEAN['k50']}, speckle <= {CLEAN['speckle']}",
-                "low_check": "Poor input map = the true map is not clean; else Surprising pair = the paper's text and "
-                             "its own true map in the bottom third of the pool by their cosine (true_pair_cos); else "
-                             "Model miss",
+                "low_check": "why a Low row scores low (caption only): Poor input map = the true map is not clean; "
+                             "else Surprising pair = the paper's text and its own true map in the bottom third of the "
+                             "pool by their cosine (true_pair_cos); else Model miss",
                 "candidates": selection},
             "pool": {"n": len(pool["text_idx"]), "quality_keys": {"image": keys[0], "text": keys[1]},
                      "percentile": "100 x (#below + 0.5 #ties) / n among all n pool papers (the row's own paper included)",

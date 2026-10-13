@@ -27,29 +27,35 @@ panels, plus `model_sources`: the checkpoint file of each component) next to its
 
 | paper figure | script | files | model components (from `runs/final`) |
 |---|---|---|---|
-| Fig. 2 networks: text-to-brain and brain-to-text | `fig2_network_examples.py` | `fig2_network_examples.*` (the figure, one page: two networks with their complete generated texts, the network title and an ellipsis for the other six); `fig2_texts_table.{tex,md}` (supplementary table: complete input and generated texts; `--text-pages` also draws them as figure pages `_p2`-`_p4`) | autoencoder, text-to-brain head v2, stage 2 projector (MLP) |
+| Fig. 2 networks: text-to-brain and brain-to-text | `fig2_network_examples.py` | `fig2_network_examples.*` (the figure, one page: the true and generated maps of the eight networks in sagittal, coronal and axial views, the complete Network, Anatomy and Cognition texts of two networks in three columns, the three generated titles of the other six); `fig2_texts_table.{tex,md}` (supplementary table: complete input and generated texts; `--text-pages` also draws them as figure pages `_p2`-`_p4`) | autoencoder, text-to-brain head v2, stage 2 projector (MLP) |
 | Fig. 3 NeuroVault examples | `fig3_newgen.py` | `fig3_newgen.*` (one page, six rows) | text-to-brain head v2, autoencoder, InfoNCE heads, stage 2 projector |
 | Fig. 4 generative metrics (PubMed test) | `fig4_generative_metrics.py` | `fig4_generative_metrics.*` | row a: autoencoder + latents, head v2; row b: stage 2 projector, InfoNCE heads; deberta-xlarge-mnli / MiniLM scorers |
 | Fig. 5 contrastive / autoencoder / networks | `fig5_perf_quant.py` | `fig5_perf_quant.*` | CV folds, autoencoder, InfoNCE heads; b: read from the a3 bounds analysis (same final components, checked) |
 | Fig. 6 autoencoder reconstructions | `fig6_autoencoder_qual.py` | `fig6_autoencoder_qual.*` | autoencoder, split |
 | Fig. S2 Gaussian kernel vs DiFuMo | `figS2_difumo_v_ale.py` | `figS2_difumo_v_ale.*` | none (data only) |
 | Fig. S3 model comparison | `figS3_recall_comparison.py` | `figS3_recall_comparison.*` | autoencoder, InfoNCE heads; NiCLIP / NeuroConText from their own checkpoints |
-| Fig. S4 ICA components (HCP, UK Biobank) | `figS4_clip_ica.py` | `figS4_clip_ica.*` (UK Biobank), `figS4_clip_ica_p2.*` (HCP) | autoencoder, InfoNCE heads, stage 2 projector |
+| Fig. S4 ICA components (HCP, UK Biobank) | `figS4_clip_ica.py` | `figS4_clip_ica.*` (one page: UK Biobank above, HCP below) | autoencoder, InfoNCE heads, stage 2 projector |
 
-**Fig. 3 layout and labels.** One page, 5.15 x 6.45 in at 7 pt (the original, 6.7 x 3.9 in, used ~3.5 pt text).  The
+**Fig. 3 layout and labels.** One page, 5.15 x 6.73 in at 7 pt (the original, 6.7 x 3.9 in, used ~3.5 pt text).  The
 six complete generated texts need about 5.7 in at this width, so Fig. 3 is the one figure above `FIG_MAX_H` (4.59 in);
-it fits the 7.67 in text height with its caption.  Columns: the densities of both quality cosines over all 305
-NeuroVault papers (dashed: thirds; each row marked in its group colour), one bar per group, the row's two cosines (Image
-above Text; Image: paper text vs generated map, Text: generated text vs true map, shared space), the true text (complete
-title and the abstract's first lines where the row has room), the generated and the true map (sagittal above axial),
-and the complete generated text.  High / Medium / Low means both cosines lie in the top / middle / bottom third.  Rows
-(`select_rows`): per third, nearest the third's centre in percentile space first; High and Medium rows need a title that
-names exactly one domain of a fixed word list (`DOMAINS`) and a clean true map (as drawn: >= 2 clusters of >= 20 voxels,
-half of the drawn mass in <= 3 pieces, <= 10 % of it in specks), the second row of another domain; Low rows are the two
-nearest papers, labelled under their title by `low_check` (poor input map = true map not clean; surprising pair = the
-paper's text and its own map in the pool's bottom third by cosine; else model miss).  Rows: 30, 150 (High), 52, 117
-(Medium), 92 (poor input map: 12 % of its drawn mass in specks), 74 (surprising pair: true-pair cosine at P19); the
-candidates and the per-third counts are in the JSON `selection`.  The pool is generated in batches of six, like the
+it fits the 7.67 in text height with its caption.  Columns (check7): the densities of both quality cosines over all 305
+NeuroVault papers side by side on one axis labelled "Cosine similarity" (Image: paper text vs generated map, Text:
+generated text vs true map, shared space; dashed: thirds; each row one marker in its group colour, all markers on one
+vertical line, the cosines themselves are in the JSON), one bar per group, the paper's title (no abstract), the
+generated and the true map (sagittal above axial), and the complete generated text.  High / Medium / Low means both
+cosines lie in the top / middle / bottom third.  Rows (`select_rows`): per third, nearest the third's centre in
+percentile space first, among the papers whose generated text is clean (`text_check`: a title of the stage-14 bank of
+its level, no code-like character, no word used fewer than twice in the 30,826 PubMed titles and abstracts and in no
+bank title, no anatomical name with a word pair PubMed never uses, no content word used more than twice; it rejects
+e.g. "[ROOT]" titles, "Placebinding", "angular orbitofrontal cortex", "facial x5"); High and Medium rows also need a
+title that names exactly one domain of a fixed word list (`DOMAINS`) and a clean true map (as drawn: >= 2 clusters of
+>= 20 voxels, half of the drawn mass in <= 3 pieces, <= 10 % of it in specks), the second row of another domain.
+`low_check` says why a Low row scores low (poor input map = true map not clean; surprising pair = the paper's text and
+its own map in the pool's bottom third by cosine; else model miss); it goes in the caption, not the figure.  Rows: 30,
+150 (High), 52, 117 (Medium), 92 (poor input map: 12 % of its drawn mass in specks), 53 (model miss: clean true map,
+true-pair cosine at P57); clean texts per third 46 / 24 / 25 of 53 / 34 / 42, and Medium has exactly two papers that
+pass its rule.  Every paper of each third with its checks and text issues is in the JSON `selection.candidates`.  The
+pool is generated in batches of six, like the
 rows, because the bf16 generation depends on the batch size (~3 min on a GPU).  Its captions use basis "all": the model
 writes the level tag itself, and a [NETWORK] / [REGION] title after a written tag is held to the canonical names, as
 after a prompt tag (`_common_models.install_title_constraint`).  The generated and the true map of a row share their
@@ -64,7 +70,9 @@ caches were byte-identical to them, `scripts/REPRODUCTION.md`); Figs. 2, 4, 5, 6
 caches on 2026-10-13 (CPU) for the recall-axis label, the axial views of Figs. 6 / S4 and the Fig. 2 text table.  Later on 2026-10-13, Figs. 2, 3, 4 and S4 were regenerated with canonical [NETWORK] / [REGION] titles and calibrated maps, and Figs. 2 and 3 drew every map at 50 % of its own maximum (since check6: its top 5 % of voxels).  Figs. 2, 5, S2 and S4 were redrawn
 from the caches on 2026-10-13 (CPU) for the author's check6 items: the Fig. 2 layout, Fig. 5c's key and 5d's title,
 Fig. S2's "Gaussian kernel" label and Fig. S4's bars.  For check6, Fig. 3 was regenerated on one page with rule-picked rows
-(GPU, ~3 min) and Fig. 6 redrawn with the submitted figure's order, slices and NeuroVault maps (CPU).  `cache/` holds the panel data of Figs. 2, 3, 4, S2 and S4; Figs. 5, 6
+(GPU, ~3 min) and Fig. 6 redrawn with the submitted figure's order, slices and NeuroVault maps (CPU).  For check7, Fig. 3
+was redrawn from its cache (CPU) with titles only, wider densities on one shared axis, aligned markers, no cosine column
+and no Low labels, and rows that also need a clean generated text.  Also for check7, Figs. 4, S3 and S4 were redrawn from their caches (CPU): Fig. 4 with a paired-difference box under each box panel and no n in the titles, S3 without n in the title, S4 with both cohorts on one page (smaller maps, generated titles run in) instead of a second `_p2` page; the Fig. 4 text reference pairs (`cache/fig4_text_reference*.pt`) took 15 min on CPU.  `cache/` holds the panel data of Figs. 2, 3, 4, S2 and S4; Figs. 5, 6
 and S3 recompute theirs once (~3 min on a GPU).  Fig. 5b reads `../review/core/a3_neurovault_bounds/outputs/`
 (`recall_curves.csv`, `bounds_metrics.csv`; `--bounds-dir`), the a3 run on the published map tensor (variant
 `released`) with the final autoencoder, InfoNCE heads and exclusions; another model needs its own a3 run.
@@ -117,9 +125,9 @@ of n = 2,987, before the 16 leakage-audit papers were dropped, which move its me
 | figure / panel | released | **final** | note |
 |---|---|---|---|
 | Fig. 2 network titles, exact network name | 7/8 | **7/8** | 8/8 name the right system (released and final); not exact: released Somatomotor "Somatosensory Network", final Visual "Object Perception Network"; table below |
-| Fig. 3 brain-to-text quality (text cosine), mean of 6 rows | 0.243 | **0.246** | rows 30, 150, 52, 117, 92, 74 (check6 rule), both models |
-| Fig. 3 text-to-brain quality (image cosine), mean of 6 rows | 0.256 | **0.336** | calibrated head v2 maps |
-| Fig. 3 generated vs true map (shared-space cosine), mean of 6 rows | 0.600 | 0.523 | JSON `image_cos_same`; the release pairs row 52 with another same-DOI map |
+| Fig. 3 brain-to-text quality (text cosine), mean of 6 rows | 0.243 | **0.246** | released: check6 rows 30, 150, 52, 117, 92, 74; final: check7 rows 30, 150, 52, 117, 92, 53 (check6 rows 0.246) |
+| Fig. 3 text-to-brain quality (image cosine), mean of 6 rows | 0.256 | **0.339** | calibrated head v2 maps; check6 rows 0.336 |
+| Fig. 3 generated vs true map (shared-space cosine), mean of 6 rows | 0.600 | 0.528 | JSON `image_cos_same`; check6 rows 0.523; the release pairs row 52 with another same-DOI map |
 | Fig. 4a generated-image retrieval AUC (n) | 0.850 (2,987) | **0.953** (2,971) | uncalibrated 0.887 |
 | Fig. 4a contrastive / Dice top 30 % / Pearson, match vs null | 0.297/0.088, 0.495/0.408, 0.321/0.184 | **0.345/-0.004, 0.531/0.408, 0.319/0.123** | |
 | Fig. 4a spin test, fraction p < 0.05 (cortical maps) | 0.61 (1,337) | 0.58 (1,332) | |
@@ -166,7 +174,8 @@ the model wrote, released -> final): 30 (High) 0.37 -> 0.44, 0.38 -> 0.31, [NETW
 0.29 -> 0.35, 0.19 -> 0.26, [REGION] "Parahippocampal Gyrus" -> [FUNCTION] "Contextual Scene Memory"; 117 (Medium) 0.27
 -> 0.31, 0.18 -> 0.22, [REGION] "Fusiform Gyrus" (both); 92 (Low) 0.23 -> 0.25, 0.20 -> 0.17, [REGION] "Superior
 Temporal Gyrus" -> [NETWORK] "Speech Perception Network"; 74 (Low) 0.12 -> 0.24, 0.20 -> 0.17, [REGION] "Posterior
-Cingulate Cortex" -> [FUNCTION] "Autobiographical Memory".  Rows from the final model's rule (the released pool's own
+Cingulate Cortex" -> [FUNCTION] "Autobiographical Memory".  check7 replaces 74 (its caption names an "angular
+orbitofrontal cortex") with 53 (Low, final 0.27, 0.17, [FUNCTION] "Salience-Guided Reorienting").  Rows from the final model's rule (the released pool's own
 rule would pick 175, 136, 100, 117, 103, 127).  Before check6 the rows were 189, 149 (hand-picked) and 101, 110, 92, 74;
 the rule drops 149 (its title names two domains, spoken and manual) and 110 (no domain).
 
@@ -199,6 +208,28 @@ Boxes compare matched pairs (blue) with shuffled pairs (gray). Dice uses each ma
 Welch $t$-tests of matched against shuffled pairs in the box panels and one-sided binomial tests of the share of maps
 below $p = 0.05$ in the two $p$ panels. One, two and three stars mark $p < 0.05$, $0.01$ and $0.001$, and no star marks
 a non-significant difference."
+
+Paired differences (check7, `paired_differences` in the JSON; Δ = match − null of the same map or caption, n = 2,971;
+median with bootstrap 95 % CI, d_z = mean / SD of Δ, paired t and sign test):
+
+| panel | Δ > 0 | median Δ [95 % CI] | d_z | paired t p | sign test p |
+|---|---|---|---|---|---|
+| a Contrastive | 95 % | 0.346 [0.334, 0.355] | 1.60 | 3e-819 | 2e-638 |
+| a Dice | 74 % | 0.118 [0.108, 0.128] | 0.63 | 1e-220 | 2e-158 |
+| a Pearson | 76 % | 0.193 [0.179, 0.207] | 0.71 | 1e-265 | 4e-187 |
+| b Contrastive | 96 % | 0.269 [0.262, 0.278] | 1.75 | 6e-904 | 5e-670 |
+| b BERTScore | 57 % | 0.0048 [0.0034, 0.0063] | 0.18 | 3e-22 | 3e-13 |
+| b Semantic (MiniLM) | 66 % | 0.062 [0.055, 0.069] | 0.42 | 6e-108 | 1e-68 |
+
+Why the BERTScore gap is narrow (`text_score_reference`, 200 test papers, seed 13, deberta-xlarge-mnli rescored on
+CPU; 20 cached matched pairs reproduce to 4e-4).  Unrescaled F1 has a high floor: two random test papers' texts (title
++ LLM summary) score 0.579, a paper and its nearest test paper by MiniLM 0.623, a paper's summary and its own abstract
+0.684.  The captions describe the map in another register (network, region, function), so they sit below even random
+paper pairs: 0.553 matched, 0.548 shuffled.  bert_score's baseline for this model and layer (random Common Crawl pairs,
+F1 0.515; `rescale_with_baseline`) maps these to 0.132, 0.222, 0.349, 0.078 and 0.068; rescaling is linear, so Δ
+doubles (0.0107) while d and every p stay the same.  MiniLM: random 0.37, nearest paper 0.73 (selected by MiniLM),
+same paper 0.84, captions 0.46 matched and 0.40 shuffled.  The small effect is real: Δ > 0 for 57 % of captions and
+the mean Δ is 9.8 standard errors from 0, which n = 2,971 resolves (Welch p = 9e-19, paired p = 3e-22).
 
 BERTScore gap.  The submitted figure drew null 0.520 against match 0.557, but notebook 24 reused a cached null
 (`null_bert_f1_seed0.pt`, 26 May 17:12, accepted on length alone) from an earlier generation run after the captions
@@ -236,11 +267,14 @@ text's 0.975) and 0.939 on NeuroVault (the caption's 0.94).
 ## Deviations from the paper panels
 
 * Fig. 2 "Interoception" reference is `Laird/Emo/Interoception4` (`--laird-map` to change).  The text-to-brain input
-  descriptions are transcribed from the paper figure (they are not stored in the repository).  Page 1 (5.15 x 4.57 in)
-  draws every network as its name above the atlas map | the map generated from its description (sagittal and axial,
-  one scale for all maps).  The two networks with the cleanest generations get their complete generated texts, run in
-  (Network, Anatomy, Cognition) beside and below their maps; the other six get the generated network title and an
-  ellipsis.  The two are chosen by rule (`pick_full`): most of the three generated titles named verbatim in the input
+  descriptions are transcribed from the paper figure (they are not stored in the repository).  Page 1 (5.15 x 6.45 in,
+  redrawn from the cache for check7) follows the author's sketch.  The two networks with the cleanest generations get a
+  row each: name, true map ("True") and the map generated from the description ("Generated (text-to-brain)") on the
+  left, the complete generated texts in Network | Anatomy | Cognition columns under one header ("Generated
+  (brain-to-text)", a thin rule under each column name; column widths chosen for the fewest lines, `column_widths`).
+  The other six sit in two rows of three cells: name, the two maps side by side with the same labels, and the three
+  generated titles, labelled in a left gutter.  Every map shows sagittal, coronal and axial views; figure names are in
+  sentence case (`NAMES`; the table keeps the titles).  The two are chosen by rule (`pick_full`): most of the three generated titles named verbatim in the input
   description, ties broken by the share of the description's word pairs that the three generated texts repeat
   (Default Mode Network 3 titles, Auditory 2 titles and overlap 0.42 over Frontoparietal and Salience; JSON
   `full_examples`).  The atlas map names and all complete texts are in `fig2_texts_table`.
@@ -260,15 +294,18 @@ text's 0.975) and 0.939 on NeuroVault (the caption's 0.94).
   them Gaussian-kernel maps.
 * Fig. S4 "input image" is the thresholded, smoothed map fed to the model, not the raw two-sided ICA component.  Bars
   are matplotlib "C0" at alpha 0.35, each label on its bar's midline (`va="center_baseline"`) from the bar's left end.
+  Both cohorts share one 5.15 x 6.13 in page (check7; the page also holds the section heading and the caption, a
+  test build of the manuscript has no overfull page): UK Biobank above, HCP below, each named on the left; maps 0.44 in
+  wide; the complete generated text at 7 pt with 1.05 line spacing and its title run in bold.
 
 ## Layout conventions
 
 Drawn at the journal template's text width, `FIG_FULL_W` = 5.15 in (`scripts/common.py`; S3 at half width, 2.57 in),
 at most `FIG_MAX_H` = 4.59 in tall per page, every text >= 7 pt at print size; the figures in the response letter are
-printed at 6.5 in.  Generated and input texts are printed in full, wrapped by measured width, except Fig. 3's true
-abstracts (first lines only, as in the original) and Fig. 2's six short examples (network title and an ellipsis); Fig.
-2's complete input and generated texts are a table (`fig2_texts_table.{tex,md}`).  Pages after the first (`_p2`): Fig. S4's HCP cohort.  Brain maps: one colormap (`Reds`), each
-map scaled to its own maximum, views per figure (Figs. 2, 3 and S2: sagittal and axial; Fig. 6 and S4: axial only, Fig. 6 at the submitted figure's slice (z of nilearn's cut for the thresholded
+printed at 6.5 in.  Generated and input texts are printed in full, wrapped by measured width, except Fig. 3's papers
+(title only since check7; the abstracts are in its JSON) and Fig. 2's six short examples (the three generated titles); Fig.
+2's complete input and generated texts are a table (`fig2_texts_table.{tex,md}`).  Brain maps: one colormap (`Reds`), each
+map scaled to its own maximum, views per figure (Fig. 2: sagittal, coronal and axial; Figs. 3 and S2: sagittal and axial; Fig. 6 and S4: axial only, Fig. 6 at the submitted figure's slice (z of nilearn's cut for the thresholded
 reconstruction), S4 at the slice with the most activation).  Figs. 2 and 3 draw every map (generated, atlas and true
 alike) at its top 5 % of in-mask voxels, ties at the cut drawn, no cluster threshold (`_shared.display_vector`; the rule
 and each map's threshold and drawn voxels are in the `_text.json`, `map_display`), about the extent of the submitted Fig.
@@ -280,7 +317,9 @@ candidates)" (Fig. 4: "k/n", defined in its caption, so five columns fit); null 
 blue.  Fig. 4 marks each pair with stars (* p < 0.05, ** p < 0.01, *** p < 0.001, no star = not significant;
 the p-values are in `fig4_generative_metrics_text.json`), writes Match / Null under every pair and the legend below
 the figure, and fits each box panel's y range to the whiskers (outliers are not drawn); its columns are spaced
-from the measured y-axis labels (`place_columns`).
+from the measured y-axis labels (`place_columns`).  Under each box panel a white box shows the per-item paired
+difference Δ = Match − Null (same map or caption) with zero dashed (check7: the BERTScore gap is visible as a
+median just above zero, not hidden in two overlapping boxes); the retrieval titles no longer print n (caption).
 
 ## External inputs for Fig. S3
 

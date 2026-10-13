@@ -29,7 +29,7 @@ STYLE = {  # box kind -> (fill, edge, linestyle)
     "frozen": ("#f1f0ed", "#8a8984", "--"),
     "eval": ("#fdeee7", "#eb6834", "-"),
 }
-W, H = FIG_LETTER_W, 4.78
+W, H = FIG_LETTER_W, 4.92
 FS = 8.0  # every text (pt)
 LH = FS * 1.25 / 72  # line height (inches)
 plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"], "savefig.dpi": 300})
@@ -48,7 +48,7 @@ def main() -> None:
     args = p.parse_args()
     out, paper = args.out, args.paper
     if paper:  # 7 pt, narrower columns, long lines broken
-        W, H, FS = FIG_FULL_W, 4.4, 7.0
+        W, H, FS = FIG_FULL_W, 4.52, 7.0
         LH = FS * 1.25 / 72
     c = json.loads((out / "dataflow_counts.json").read_text())
     ex = c["eval_exclusions"]
@@ -111,7 +111,7 @@ def main() -> None:
     st1 = box(xr, R[0], wr, "model", "Stage-1 projector", tv(c["qformer_pubmed_train"], c["qformer_pubmed_val"]), step=4)
     st2 = box(xr, R[1], wr, "model", "Stage-2 projector", tv(c["stage2_train"], c["stage2_val"]), step=5)
     lm = box(xr, R[2], wr, "frozen", "NeuroQwen3-0.6B", ["frozen language model,", f"{c['qwen_dapt_records'] / 1e6:.2f} M titles + abstracts",
-                                                        "test papers included"])
+                                                        "evaluation papers", "excluded"])
 
     pub = box(xs, L[0], ws, "data", "PubMed", [f"{k(c['pubmed_publications'])} papers", "split by paper:", f"train {k(c['split_train'])}",
                                                f"val {k(c['split_val'])}", f"test {k(c['split_test'])}"])
@@ -127,10 +127,10 @@ def main() -> None:
 
     section(st1["t"] - 0.05 - (LH if paper else 0), "PubMed test",
             [f"{k(c['split_test_eval'])} papers", f"({ex['pubmed_test_dropped']} near-duplicates", "removed)"])
-    net = [f"{k(c['network_maps_labelled'])} labeled + {k(c['network_ica_components'])} ICA"]
+    net = [f"{k(c['network_maps_labelled'])} atlas + {k(c['network_ica_components'])} ICA"]
     nv = [f"{k(c['neurovault_publications_eval'])} papers, {k(c['neurovault_maps_eval'])} maps"]
     if paper:
-        net = [f"{k(c['network_maps_labelled'])} labeled +", f"{k(c['network_ica_components'])} ICA"]
+        net = [f"{k(c['network_maps_labelled'])} atlas +", f"{k(c['network_ica_components'])} ICA"]
         nv = [f"{k(c['neurovault_publications_eval'])} papers,", f"{k(c['neurovault_maps_eval'])} maps"]
     net_top = ev["b"] + 0.1 + (1 + len(net)) * LH
     section(net_top, "Network maps", net)
@@ -160,7 +160,7 @@ def main() -> None:
           label="test papers: evaluation only", lpos=((xl + xr + wr) / 2, y_test), lbg=True)
     arrow([(ext["r"], ext["cy"]), (ev["l"], ext["cy"])], held=True, label="evaluation only", lpos=((xl + xr + wr) / 2, ext["cy"]), lbg=True)
 
-    leg = "Gray arrows: training data or weights. Orange dashed: evaluation only.\nCounts are papers, text–map pairs or texts."
+    leg = "Gray arrows: training data or weights. Orange dashed: evaluation only.\nCounts are papers, text–map pairs, or texts."
     leg_t = ax.text(xs, ext["b"] - 0.08, leg, ha="left", va="top", fontsize=FS, color=INK2)
 
     # fit check: every text block inside its box, legend inside the figure

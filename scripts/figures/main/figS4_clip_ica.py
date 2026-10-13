@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""Fig. S4: contrastive and generative labels of HCP and UK Biobank ICA components (docs/figures/19_ica_networks.ipynb),
-one cohort per page (UK Biobank: figS4_clip_ica, HCP: figS4_clip_ica_p2).
+"""Fig. S4: contrastive and generative labels of UK Biobank and HCP ICA components (docs/figures/19_ica_networks.ipynb),
+both cohorts on one page.
 
     .venv/bin/python scripts/figures/main/figS4_clip_ica.py
 """
@@ -10,7 +10,7 @@ import numpy as np
 from _shared import (
     FIG_FULL_W, banner, cache_file, column_header, draw_brain_views, encode_texts,
     fig_parser, finalize, finish, free_gpu, get_logger, load_models, load_network_list, load_pt, make_nvlm, mask_vector,
-    save_pt, select_device, split_generated, text_cell, text_lines, timed, to_device_batches,
+    save_pt, select_device, split_generated, text_width_in, timed, to_device_batches, wrap_measured,
 )
 
 STEM = "figS4_clip_ica"
@@ -200,74 +200,107 @@ def axial_cut(img) -> float:
     return float(img.affine[2, 2] * k + img.affine[2, 3])  # diagonal affine (the masker's MNI grid)
 
 
-def render(args, payload, cohort: str, title: str):
-    """One cohort's page: per network row the input map (axial, the slice with the most activation),
-    the top-5 contrastive labels and the complete generated text. The bar axis is shared by both pages."""
+def run_in_lines(title: str | None, body: str, *, font_pt: float, width_in: float) -> tuple[str | None, float, list[str]]:
+    """Bold run-in title ('Title.') followed by the wrapped body: (head, indent of the first body line in inches,
+    body lines). Never truncates."""
+    if not title:
+        return None, 0.0, wrap_measured(body, width_in, font_pt)
+    head = f"{title}."
+    indent = text_width_in(head, font_pt, "bold") + text_width_in("x x", font_pt) - text_width_in("xx", font_pt)
+    words, first = body.split(), ""
+    while words and text_width_in(f"{first} {words[0]}".strip(), font_pt) <= width_in - indent:
+        first = f"{first} {words.pop(0)}".strip()
+    return head, indent, [first] + wrap_measured(" ".join(words), width_in, font_pt)
+
+
+def render(args, payload):
+    """Both cohorts on one page: per network row the input map (axial, the slice with the most activation), the
+    top-5 contrastive labels and the complete generated text with its title run in."""
     import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
     from _shared import load_masker
 
     plt.rcParams["savefig.bbox"] = "standard"  # the saved figure is exactly FIG_FULL_W wide
     masker = load_masker()
     fs = args.font_size
-    rows = payload["cohorts"].get(cohort, [])
-    # inches: input map | bars | text (the rest)
+    # inches: cohort label | input map | bars | text (the rest)
     fig_w = FIG_FULL_W
-    widths, col_gaps = [0.7, 1.2], [0.06, 0.1]
-    x0 = 0.03  # left margin
-    widths.append(fig_w - x0 - 0.03 - sum(widths) - sum(col_gaps))
-    line_spacing = 1.1
+    x0, label_w = 0.02, 0.14
+    widths, col_gaps = [0.44, 0.93], [0.03, 0.07]
+    widths.append(fig_w - x0 - label_w - 0.02 - sum(widths) - sum(col_gaps))
+    line_spacing = 1.05  # the page also holds the section heading and the caption
     lh_in = fs / 72.0 * line_spacing
-    pad, header_h, axis_h, min_h = 0.06, 0.44, 0.33, 0.62
-    gen = [split_generated(r["generated"]) for r in rows]
-    row_h = [max(text_lines(*g, font_pt=fs, width_in=widths[2]) * lh_in, min_h) + pad for g in gen]
-    fig_h = header_h + sum(row_h) + axis_h
+    pad, header_h, group_gap, axis_h, min_h = 0.02, 0.3, 0.08, 0.35, 0.5  # min_h: the five bars
+    cohorts = [(c, t, payload["cohorts"].get(c, [])) for c, t in COHORTS]
+    texts = {c: [run_in_lines(*split_generated(r["generated"]), font_pt=fs, width_in=widths[2]) for r in rows]
+             for c, _, rows in cohorts}
+    row_h = {c: [max(len(t[2]) * lh_in, min_h) + pad for t in texts[c]] for c, _, _ in cohorts}
+    fig_h = header_h + sum(sum(h) for h in row_h.values()) + group_gap * (len(cohorts) - 1) + axis_h
     fig = plt.figure(figsize=(fig_w, fig_h))
     # one bar axis for both cohorts, wide enough for the largest similarity
-    all_sims = [s for rs in payload["cohorts"].values() for r in rs for s in r["top_sims"]]
+    all_sims = [s for _, _, rs in cohorts for r in rs for s in r["top_sims"]]
     x_max = max(0.5, float(np.ceil(max(all_sims, default=0.5) / 0.1 - 1e-9)) * 0.1)
-    xs, x = [], x0
+    xs, x = [], x0 + label_w
     for w, g in zip(widths, col_gaps + [0.0]):
         xs.append((x / fig_w, w / fig_w))
         x += w + g
-    column_header(fig, xs[0][0], xs[2][0] + xs[2][1], 1 - 0.17 / fig_h, title, size_delta=1)
-    for ci, lab in enumerate(("Input image", "Contrastive prediction", "Generative prediction")):
-        column_header(fig, xs[ci][0], xs[ci][0] + xs[ci][1], 1 - 0.38 / fig_h, lab, size_delta=0)
-    dump = []
-    y_top_in = fig_h - header_h
-    for ri, r in enumerate(rows):
-        h_in = row_h[ri]
-        y_mid = y_top_in - h_in / 2
-        img = masker.inverse_transform(r["input_map"])
-        coords = [0.0, 0.0, axial_cut(img)]
-        view = "z"
-        draw_brain_views(fig, img, (x0, y_top_in - h_in + pad / 2, widths[0], h_in - pad), views=view,
-                         cut_coords=coords, threshold=1e-3, vmin=0.0, vmax=1.0)
-        # bars (centred in the row)
-        bar_h = min(0.8 * h_in, 0.8)
-        ax = fig.add_axes([xs[1][0], (y_mid - bar_h / 2) / fig_h, xs[1][1], bar_h / fig_h])
-        sims = np.clip(np.asarray(r["top_sims"]), 0, None)
-        ypos = np.arange(len(sims))[::-1]
-        ax.barh(ypos, sims, height=0.85, color="C0", alpha=0.35)
-        for yv, lab in zip(ypos, r["top_labels"]):  # centred on the bar's midline (descenders hang below)
-            ax.text(0.012, yv, lab, ha="left", va="center_baseline", fontsize=fs, color="black")
-        ax.set_xlim(0, x_max)
-        ax.set_xticks(np.arange(0.0, x_max + 1e-9, 0.2))
-        ax.set_ylim(-0.6, len(sims) - 0.4)
-        ax.set_yticks([])
-        ax.spines["left"].set_visible(False)
-        ax.tick_params(axis="x", labelsize=fs)
-        if ri == len(rows) - 1:
-            ax.set_xlabel("Cosine similarity")
-        else:
-            ax.set_xticklabels([])
-            ax.spines["bottom"].set_visible(False)
-            ax.tick_params(axis="x", length=0)
-        # complete generated text (top-aligned)
-        ax = fig.add_axes([xs[2][0], (y_top_in - h_in) / fig_h, xs[2][1], h_in / fig_h])
-        n_lines = text_cell(ax, *gen[ri], font_pt=fs, width_in=widths[2], line_spacing=line_spacing)
-        dump.append({k: v for k, v in r.items() if k != "input_map"} |
-                    {"generated_lines_in_figure": n_lines, "view": view, "cut_coords": [float(c) for c in coords]})
-        y_top_in -= h_in
+    for ci, lab in enumerate(("Input\nimage", "Contrastive\nprediction", "Generative prediction")):
+        x_lo = x0 / fig_w if ci == 0 else xs[ci][0]
+        column_header(fig, x_lo, xs[ci][0] + xs[ci][1], 1 - (header_h - 0.05) / fig_h, lab, size_delta=-1)
+    dump, y_top_in = {}, fig_h - header_h
+    last = max(i for i, (_, _, rs) in enumerate(cohorts) if rs)
+    for gi, (cohort, title, rows) in enumerate(cohorts):
+        if not rows:
+            continue
+        group_h = sum(row_h[cohort])
+        fig.text((x0 + 0.05) / fig_w, (y_top_in - group_h / 2) / fig_h, title, rotation=90, ha="center", va="center",
+                 fontsize=fs + 1)
+        fig.add_artist(Line2D([(x0 + 0.12) / fig_w] * 2, [(y_top_in - group_h + pad) / fig_h, (y_top_in - pad) / fig_h],
+                              transform=fig.transFigure, color="black", lw=0.8))
+        dump[cohort] = []
+        for ri, r in enumerate(rows):
+            h_in = row_h[cohort][ri]
+            y_mid = y_top_in - h_in / 2
+            img = masker.inverse_transform(r["input_map"])
+            coords = [0.0, 0.0, axial_cut(img)]
+            # map and bars the same size in every row, centred in it
+            draw_brain_views(fig, img, (x0 + label_w, y_mid - min_h / 2, widths[0], min_h), views="z",
+                             cut_coords=coords, threshold=1e-3, vmin=0.0, vmax=1.0)
+            bar_h = min_h
+            ax = fig.add_axes([xs[1][0], (y_mid - bar_h / 2) / fig_h, xs[1][1], bar_h / fig_h])
+            sims = np.clip(np.asarray(r["top_sims"]), 0, None)
+            ypos = np.arange(len(sims))[::-1]
+            ax.barh(ypos, sims, height=0.85, color="C0", alpha=0.35)
+            for yv, lab in zip(ypos, r["top_labels"]):  # centred on the bar's midline (descenders hang below)
+                ax.text(0.012, yv, lab, ha="left", va="center_baseline", fontsize=fs, color="black")
+            ax.set_xlim(0, x_max)
+            ax.set_xticks(np.arange(0.0, x_max + 1e-9, 0.2))
+            ax.set_ylim(-0.6, len(sims) - 0.4)
+            ax.set_yticks([])
+            ax.spines["left"].set_visible(False)
+            ax.tick_params(axis="x", labelsize=fs)
+            if gi == last and ri == len(rows) - 1:
+                ax.set_xlabel("Cosine similarity")
+            else:
+                ax.set_xticklabels([])
+                ax.spines["bottom"].set_visible(False)
+                ax.tick_params(axis="x", length=0)
+            # complete generated text, top-aligned, one baseline per line
+            head, indent, lines = texts[cohort][ri]
+            ax = fig.add_axes([xs[2][0], (y_top_in - h_in) / fig_h, xs[2][1], h_in / fig_h])
+            ax.set_axis_off()
+            ax.set_xlim(0, widths[2])
+            ax.set_ylim(-h_in, 0)
+            base = -0.8 * fs / 72.0
+            if head:
+                ax.text(0, base, head, ha="left", va="baseline", fontsize=fs, fontweight="bold")
+            for li, line in enumerate(lines):
+                ax.text(indent if li == 0 else 0, base - li * lh_in, line, ha="left", va="baseline", fontsize=fs)
+            dump[cohort].append({k: v for k, v in r.items() if k != "input_map"} |
+                                {"generated_lines_in_figure": len(lines), "view": "z",
+                                 "cut_coords": [float(c) for c in coords]})
+            y_top_in -= h_in
+        y_top_in -= group_gap
     return fig, dump
 
 
@@ -277,17 +310,9 @@ def main():
     device = select_device(args.device)
     payload = compute(args, device)
     with timed("render", log, args.cache_dir, stage=STEM):
-        dump = {"text_in_figure": "complete (no truncation)", "cohorts": {}, "pages": {}}
-        figs = []
-        for page, (cohort, title) in enumerate(COHORTS):  # one cohort per page
-            fig, rows = render(args, payload, cohort, title)
-            stem = STEM if page == 0 else f"{STEM}_p{page + 1}"
-            dump["cohorts"][cohort] = rows
-            dump["pages"][stem] = cohort
-            figs.append((fig, stem))
-        for fig, stem in figs[1:]:
-            finish(fig, stem, args, log, components=COMPONENTS)
-        finish(figs[0][0], STEM, args, log, text_dump=dump, components=COMPONENTS)
+        fig, rows = render(args, payload)
+        finish(fig, STEM, args, log, components=COMPONENTS,
+               text_dump={"text_in_figure": "complete (no truncation)", "cohorts": rows})
 
 
 if __name__ == "__main__":

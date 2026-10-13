@@ -8,10 +8,10 @@ review/
                            links between comments, figures Fig. R1, R2, ... at the full 6.5 in text width and tables
                            Table R1, R2, ..., each with its caption (written here only)
   response_letter_with_manuscript.tex
-                           the letter followed by the revised manuscript twice, first with the changes marked
+                           the letter followed by the revised manuscript with the changes marked
                            (../../../../paper/sn-article-diff.pdf, latexdiff from the submitted version: additions in
-                           blue, deletions in red), then clean (../../../../paper/sn-article.pdf), one page per page,
-                           with every line and page reference of the changes lines linked to its clean page
+                           blue, deletions in red), one page per page, with every line and page reference of the
+                           changes lines linked to the marked page that holds it
   check_letter_sync.py     checks that the letter carries the RESPONSE.md text, tables, figure numbers and comment links
                            (--counts: words and numbers per answer)
   reviewer_01/ .. 03/      per reviewer: README.md (comment -> response -> figure with its letter caption -> files) + the
@@ -42,14 +42,14 @@ bash scripts/figures/review/core/run_all.sh a3_neurovault_bounds             # o
 .venv/bin/python scripts/figures/review/build_reviewer_dirs.py               # after editing RESPONSE.md or a figure
 .venv/bin/python scripts/figures/review/check_letter_sync.py                 # letter = RESPONSE.md (0 mismatches)
 cd scripts/figures/review && pdflatex response_letter.tex && pdflatex response_letter.tex   # two passes: contents, Fig. R refs
-cd scripts/figures/review && pdflatex response_letter_with_manuscript.tex && pdflatex response_letter_with_manuscript.tex
-                                                         # after the paper and marked-paper builds; a third pass if no .aux exists yet
+cd scripts/figures/review && for i in 1 2 3; do pdflatex response_letter_with_manuscript.tex; done
+                                                         # after the paper and marked-paper builds (three passes: contents, refs, links)
 ```
 
 The letter is set on US letter paper with 1 in margins (text block 6.5 x 9 in).  Each figure is shown at the full text
 width unless it would be taller than 0.8 of the text height, floats (here, at the top of a page or on a page of its own)
 but never past the end of its comment (`\FloatBarrier`); a figure with several pages (`<name>_p2`, ...) is shown one
-page per letter page (only the figures RESPONSE.md shows; 2.12's other failure-case sets are in reviewer_02/ only).  Figures are numbered in order of use; a figure a later comment needs is repeated with its full caption
+page per letter page (only the figures RESPONSE.md shows; 2.12's other failure-case sets are in reviewer_02/ only).  The redrawn paper Figs. 2, 3, S3, and S4 are shown from the reviewer folders and Fig. 4 (Fig. R2, comment 1.1) from `../main/`, since build_reviewer_dirs.py copies no Fig. 4 into reviewer_01/.  Figures are numbered in order of use; a figure a later comment needs is repeated with its full caption
 (one `\cap...` macro) followed by "(Fig. Rn, repeated.)".  RESPONSE.md names each figure in its image alt text
 (`![Fig. R7](...)`) and refers to it in the text as "Fig. R7"; the letter uses `\ref`, and the checker compares both.
 Tables work the same way: "Table R7" in RESPONSE.md, `Table~\ref{tab:...}` in the letter (the `\label` sits in the `\rtab`
@@ -58,13 +58,14 @@ box of the letter (same words), and Markdown list items match the letter's `\ite
 A comment named in a response links to it: `[2.4](#2.4)` in RESPONSE.md (anchors `<a id="2.4"></a>` above the
 headings), `\cmt{2.4}` in the letter; the checker requires the same links in both.  Figure and table captions are
 written in the letter only; `build_reviewer_dirs.py` copies the figure captions into the reviewer READMEs.
-Each "Changes to the manuscript" line names the paper section and its lines in the clean manuscript PDF
-(`../../../../manuscript_changes.md`): `\msl{359}{363}` prints "l. 359–363", `\msp{14}` "p. 14" and
+Each "Changes to the manuscript" line names the paper section and its lines in the marked manuscript PDF
+(`../../../../paper/sn-article-diff.pdf`, the copy the editor reads; `../../../../manuscript_changes.md`): `\msl{359}{363}` prints "l. 359–363", `\msp{14}` "p. 14" and
 `\mspp{11}{12}` "pp. 11–12".  The standalone letter prints them as text.  `response_letter_with_manuscript.tex` reads
-the letter unchanged, appends the marked and then the clean manuscript with pdfpages (each clean page gets the target
-`ms.<page>`, each marked page `msd.<page>`, opened to fit the window) and defines `\mslink`, so each reference links to the page that holds it (46 numbered lines per manuscript
-page, so line l is on page (l + 22) / 46 as `\numexpr` rounds it).  After a paper edit moves text, re-measure the line
-numbers, update manuscript_changes.md and the changes lines, and rebuild both PDFs.  Facts only the authors can supply
+the letter unchanged, appends the marked manuscript with pdfpages (each page gets the target `ms.<page>`, opened to
+fit the window) and defines `\mslink`, so each reference links to the page that holds it (46 numbered lines per manuscript
+page in the marked PDF as in the clean one, so line l is on page (l + 22) / 46 as `\numexpr` rounds it).  After a paper
+edit, rebuild the marked copy, re-measure the line numbers on it (words of the old and new marked PDFs aligned, as in
+scratchpad z94/marked_map.py), update manuscript_changes.md and the changes lines, and rebuild both PDFs.  Facts only the authors can supply
 stay as `[AUTHOR: ...]` placeholders, bold in the text with a red-on-yellow note (`\authornote`) in the letter and
 red on yellow in the paper (`\authorfact`).
 

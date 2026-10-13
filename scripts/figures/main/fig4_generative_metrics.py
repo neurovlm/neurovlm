@@ -1,9 +1,13 @@
 #!/usr/bin/env python
-"""Fig. 4: text-to-brain (row a) and brain-to-text (row b) metrics on the PubMed test set, matched vs deranged null.
+"""Fig. 4: text-to-brain (row a) and brain-to-text (row b) metrics on the PubMed test set, matched vs deranged null,
+with the paired difference under each box panel. The JSON also gives paired statistics and reference levels of the
+two text scores (random, same-topic and same-paper text pairs; BERTScore rescaled with bert_score's baseline).
 
     .venv/bin/python scripts/figures/main/fig4_generative_metrics.py [--rows a|b|ab] [--no-spin]
 """
 from __future__ import annotations
+
+from pathlib import Path
 
 import numpy as np
 from _shared import (
@@ -385,6 +389,100 @@ def compute_b2t(args, device):
     return payload
 
 
+def compute_text_reference(args, device, b, n_pairs=200):
+    """Reference levels of the two text scores for row b, on n_pairs test papers (seed 13): two random papers, a paper
+    and its nearest test paper by MiniLM (same topic, another study), and a paper's LLM summary against its abstract
+    (one study described twice); plus 20 matched pairs rescored as a check against the cached BERTScore."""
+    cache = cache_file(args, "fig4_text_reference", excl=True)
+    if cache.exists() and not args.force:
+        log.info("cache hit %s", cache)
+        return load_pt(cache)
+    import pandas as pd
+    from _shared import load_dataset
+    from bert_score import score as bert_score
+    from bert_score.utils import model2layers
+    from sentence_transformers import SentenceTransformer
+
+    gen = pd.read_parquet(cache_file(args, "fig4_b2t_generation", "parquet", excl=True))
+    if gen["pmid"].astype(str).tolist() != list(b["pmids"]):
+        raise RuntimeError("fig4_b2t_generation does not match the fig4_b2t cache; rerun with --force")
+    truth = gen["truth"].astype(str).to_numpy()
+    df = load_dataset("pubmed_text").drop_duplicates("pmid")
+    abstract = df.set_index(df["pmid"].astype(str))["description"].astype(str).loc[gen["pmid"].astype(str)].to_numpy()
+    summary = np.array([t.split(" [SEP] ", 1)[-1] for t in truth])
+    n = len(truth)
+    n_pairs = min(n_pairs, n)
+    with timed("b) reference pairs", log, args.cache_dir, stage=STEM, n_pairs=n_pairs):
+        minilm = "sentence-transformers/all-MiniLM-L6-v2"
+        st = SentenceTransformer(minilm, revision=hf_pinned(minilm), device=str(device))
+
+        def embed(x):
+            return st.encode(list(x), batch_size=32, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False)
+
+        e = embed(truth)
+        sim = e @ e.T
+        np.fill_diagonal(sim, -np.inf)
+        rng = np.random.default_rng(13)
+        idx = np.sort(rng.choice(n, n_pairs, replace=False))
+        rand = deranged_perm(n, rng)
+        pairs = {"random papers": (truth[idx], truth[rand[idx]]),
+                 "same topic": (truth[idx], truth[sim[idx].argmax(1)]),
+                 "same paper": (summary[idx], abstract[idx]),
+                 "match check": (gen["text"].astype(str).to_numpy()[idx[:20]], truth[idx[:20]])}
+        cands = [x for c, _ in pairs.values() for x in c]
+        refs = [x for _, r in pairs.values() for x in r]
+        deberta = {"model_type": str(hf_pinned_dir("microsoft/deberta-xlarge-mnli")),
+                   "num_layers": model2layers["microsoft/deberta-xlarge-mnli"]}
+        _, _, f1 = bert_score(cands=cands, refs=refs, lang="en", **deberta, batch_size=args.bert_batch_size,
+                              device=str(device), verbose=False)
+        cos = np.einsum("ij,ij->i", embed(cands), embed(refs))
+        out, s = {"n_pairs": n_pairs, "rows": idx}, 0
+        for k, (c, _) in pairs.items():
+            out[k] = {"bertscore": f1[s:s + len(c)].float().numpy(), "semantic": cos[s:s + len(c)]}
+            s += len(c)
+        out["match check"]["cached_bertscore"] = np.asarray(b["bertscore"]["match"])[idx[:20]]
+        del st
+        free_gpu()
+    save_pt(cache, out)
+    return out
+
+
+def bert_baseline() -> float:
+    """bert_score's rescale baseline F1 of deberta-xlarge-mnli at its layer (random Common Crawl sentence pairs);
+    rescale_with_baseline maps F to (F - b) / (1 - b)."""
+    import bert_score
+    import pandas as pd
+    from bert_score.utils import model2layers
+
+    f = Path(bert_score.__file__).parent / "rescale_baseline" / "en" / "microsoft" / "deberta-xlarge-mnli.tsv"
+    return float(pd.read_csv(f).iloc[model2layers["microsoft/deberta-xlarge-mnli"]]["F"])
+
+
+def _t_log10p(t: float, df: float) -> float:
+    """Two-sided log10 p of Student's t (mpmath, below 1e-300 too)."""
+    import mpmath as mp
+
+    mp.mp.dps = 60
+    p = mp.betainc(mp.mpf(df) / 2, mp.mpf("0.5"), 0, mp.mpf(df) / (mp.mpf(df) + mp.mpf(str(t)) ** 2), regularized=True)
+    return float(mp.log10(p)) if p > 0 else -np.inf
+
+
+def paired_stats(match, null, *, n_boot=2000, seed=13) -> dict:
+    """Per-item difference match - null (same map or caption): share above 0 with a sign test, median with a bootstrap
+    95% CI, mean, d_z (mean / SD of the differences) and a paired t-test."""
+    d = np.asarray(match, dtype=float) - np.asarray(null, dtype=float)
+    d = d[np.isfinite(d)]
+    n, k = len(d), int((d > 0).sum())
+    meds = np.median(d[np.random.default_rng(seed).integers(0, n, (n_boot, n))], axis=1)
+    sd = d.std(ddof=1)
+    t = d.mean() / (sd / np.sqrt(n))
+    lt, ls = _t_log10p(t, n - 1), binom_log10_sf(k, n, 0.5)
+    return {"n": n, "frac_gt_0": k / n, "sign_test_log10_p": ls, "sign_test_p": format_p(ls),
+            "median": float(np.median(d)), "median_ci95": [float(v) for v in np.percentile(meds, [2.5, 97.5])],
+            "mean": float(d.mean()), "sd": float(sd), "d_z": float(d.mean() / sd),
+            "paired_t": float(t), "paired_t_log10_p": lt, "paired_t_p": format_p(lt)}
+
+
 def stars(log10_p: float) -> str:
     """'***' p < 0.001, '**' p < 0.01, '*' p < 0.05, '' otherwise (and for nan)."""
     for cut, s in ((-3.0, "***"), (-2.0, "**"), (np.log10(0.05), "*")):
@@ -420,6 +518,29 @@ def box_pair(ax, match, null, *, ylabel, title, star, star_size):
         top = y + 0.2 * span
     ax.set_ylim(lo - 0.05 * span, top + 0.04 * span)
     ax.set_xlim(-0.42, 1.42)  # room for the Match / Null tick labels in narrow panels
+
+
+def diff_box(ax, match, null):
+    """Paired difference (match - null of the same map or caption) under a box panel: one box (whiskers at 1.5 IQR,
+    no outliers, as wide as the boxes above) and the zero line; y ticks at 0 and the smallest round step at least a
+    fraction of the axis away (labels apart)."""
+    d = np.asarray(match, dtype=float) - np.asarray(null, dtype=float)
+    d = d[np.isfinite(d)]
+    ax.axhline(0, color="0.3", ls=(0, (2, 1.5)), lw=0.9, zorder=3)
+    ax.boxplot([d], positions=[0], widths=0.25, tick_labels=["Δ"], showfliers=False, patch_artist=True,
+               medianprops=dict(color="black", lw=1.0), whiskerprops=dict(lw=0.8), capprops=dict(lw=0.8),
+               boxprops=dict(lw=0.6, facecolor="white"))
+    lo, hi = _whiskers(d)
+    lo, hi = min(lo, 0.0), max(hi, 0.0)
+    span = max(hi - lo, 1e-6)
+    top = hi + 0.06 * span
+    ax.set_ylim(lo - 0.06 * span, top)
+    ax.set_xlim(-0.42, 0.42)
+    steps = [v for v in (0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0) if v <= top]
+    step = min([v for v in steps if v >= span / 3.5] or [max(steps or [hi])])
+    ax.set_yticks([0.0, step], ["0", f"{step:g}"])
+    ax.tick_params(axis="x", length=0, pad=2)
+    ax.tick_params(axis="y", pad=1.5, length=2.5)
 
 
 def place_columns(fig, grid, W, ax_h, *, left=0.17, gap=0.04, right=0.02):
@@ -464,13 +585,14 @@ def render(args, a, b):
     plt.rcParams["savefig.bbox"] = "standard"  # the saved figure is exactly FIG_FULL_W wide
     fs = args.font_size
     W = FIG_FULL_W
-    # inches: per row a title band, the axes (the recall panel square) and the tick labels / k/n label below;
-    # the legend (Match / Null / p = 0.05) at the bottom
-    ax_h, title_h, below_h, row_gap, legend_h = 0.8, 0.36, 0.28, 0.06, 0.2
+    # inches: per row a title band, the axes (the recall panel square), the tick labels / k/n label and under each
+    # box panel its paired difference (diff_gap below the axes, diff_h tall, Δ under it); the legend at the bottom
+    ax_h, title_h, below_h, row_gap, legend_h = 0.8, 0.36, 0.74, 0.06, 0.2
+    diff_gap, diff_h = 0.17, 0.42
     rows = [(kind, d) for kind, d in (("a", a), ("b", b)) if d is not None]
     H = len(rows) * (title_h + ax_h + below_h) + (len(rows) - 1) * row_gap + legend_h
     fig = plt.figure(figsize=(W, H))
-    stats, null_tests = {}, {}
+    stats, null_tests, paired = {}, {}, {}
 
     def p_panel(ax, pvals, n_grid, title, note, key):
         """Per-map permutation p-values (blue) next to their exact null (grey, p uniform on {1/n_grid, ..., 1});
@@ -505,7 +627,7 @@ def render(args, a, b):
         axes = [fig.add_axes([0, y0 / H, ax_h / W, ax_h / H]) for _ in range(5)]  # x: place_columns
         ax = axes[0]
         # two-line title: the square panel is narrower than the one-line title
-        recall_axes(ax, title=("Generated-image" if kind == "a" else "Generated-text") + f"\nretrieval (n={data['n']})")
+        recall_axes(ax, title=("Generated-image" if kind == "a" else "Generated-text") + "\nretrieval")
         ax.set_xlabel(r"$k/n$")  # short form of recall_axes' label; the caption defines it
         ax.set_xticks([0, 0.5, 1])
         ax.set_yticks([0, 0.5, 1])
@@ -529,6 +651,7 @@ def render(args, a, b):
             d = data["dice"][data["dice_pct"]] if key == "dice" else data[key]
             w = welch_log10p(d["match"], d["null"])
             stats[f"{kind}:{key}"] = w
+            paired[f"{kind}:{key}"] = paired_stats(d["match"], d["null"]) | {"pair": (d["match"], d["null"])}
             box_pair(ax, d["match"], d["null"], ylabel=ylab, title=title, star=stars(w["log10_p"]), star_size=fs + 2)
         if kind == "a":
             sp = data["spin"]
@@ -547,12 +670,18 @@ def render(args, a, b):
 
     grid = [row(ridx, kind, data) for ridx, (kind, data) in enumerate(rows)]
     place_columns(fig, grid, W, ax_h)
+    for (kind, _), axes in zip(rows, grid):
+        for ax, key in zip(axes[1:4], [k for k in paired if k.startswith(kind + ":")]):
+            pos = ax.get_position()
+            diff_box(fig.add_axes([pos.x0, pos.y0 - (diff_gap + diff_h) / H, pos.width, diff_h / H]),
+                     *paired[key].pop("pair"))
     fig.legend(handles=[Patch(facecolor=MATCH_COLOR, alpha=0.8, label="Match"),
                         Patch(facecolor=NULL_COLOR, alpha=0.8, label="Null"),
+                        Patch(facecolor="white", edgecolor="black", lw=0.6, label="Δ = Match − Null"),
                         Line2D([], [], color=STATUS_BAD, ls="--", lw=0.9, label="p = 0.05")],
-               loc="lower center", bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=fs, handlelength=1.4,
+               loc="lower center", bbox_to_anchor=(0.5, 0.0), ncol=4, fontsize=fs, handlelength=1.4,
                columnspacing=1.6, borderaxespad=0.1)
-    return fig, stats, null_tests
+    return fig, stats, null_tests, paired
 
 
 def main():
@@ -561,8 +690,9 @@ def main():
     device = select_device(args.device)
     a = compute_t2b(args, device) if "a" in args.rows else None
     b = compute_b2t(args, device) if "b" in args.rows else None
+    ref = compute_text_reference(args, device, b) if b is not None else None
     with timed("render", log, args.cache_dir, stage=STEM):
-        fig, stats, null_tests = render(args, a, b)
+        fig, stats, null_tests, paired = render(args, a, b)
         names = {"a:contrastive": "a Contrastive", "a:dice": "a Dice", "a:correlation": "a Pearson/Spearman",
                  "a:spin": "a Spin test", "b:contrastive": "b Contrastive", "b:bertscore": "b BERTScore",
                  "b:semantic": "b Semantic", "b:null_test": "b Contrastive null test"}
@@ -570,7 +700,8 @@ def main():
                                 "test": "Welch t (match vs deranged null)" if k in stats else "exact binomial vs uniform-p null",
                                 "stars": stars(v["log10_p"])}
                      for k, v in {**stats, **null_tests}.items()}
-        dump = {"p_values_per_panel": per_panel, "welch_tests": stats, "null_tests": null_tests}
+        dump = {"p_values_per_panel": per_panel, "welch_tests": stats, "null_tests": null_tests,
+                "paired_differences": {names[k]: v for k, v in paired.items()}}
         if a is not None:
             sp = a["spin"]
             pv = sp["p"][np.isfinite(sp["p"])]
@@ -586,6 +717,18 @@ def main():
             pv = np.asarray(b["null_test"]["p"])
             dump["brain_to_text"] = {"n": b["n"], "n_total": b["n_total"], "retrieval_auc": b["retrieval"]["auc"],
                                      "frac_p_lt_0_05": float((pv < 0.05).mean()), "generation": b["generation"]}
+            # reference levels of the two text scores, and BERTScore rescaled as rescale_with_baseline would
+            base = bert_baseline()
+            levels = {k: {m: float(np.mean(ref[k][m])) for m in ("bertscore", "semantic")}
+                      for k in ("random papers", "same topic", "same paper")}
+            levels |= {f"caption {k}": {m: float(np.mean(b[m][k])) for m in ("bertscore", "semantic")}
+                       for k in ("match", "null")}
+            chk = ref["match check"]
+            dump["text_score_reference"] = {
+                "n_pairs": ref["n_pairs"], "mean": levels,
+                "bertscore_rescaled": {"baseline_f1": base, **{k: (v["bertscore"] - base) / (1 - base) for k, v in levels.items()},
+                                       "paired_mean_diff": paired["b:bertscore"]["mean"] / (1 - base)},
+                "match_check_max_abs_diff": float(np.abs(chk["bertscore"] - chk["cached_bertscore"]).max())}
         finish(fig, STEM, args, log, text_dump=dump,
                components=COMPONENTS + (("pmids_split",) if args.model_dir else ()))
 

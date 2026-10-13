@@ -2,9 +2,9 @@
 scripts change."""
 
 # the six rows of the final Fig. 3, top to bottom (scripts/figures/main/fig3_newgen_text.json), picked by fig3_newgen's
-# select_rows: High 30, 150 and Medium 52, 117 (title naming one domain, clean true map, nearest the third's centre),
-# Low 92 (poor input map) and 74 (surprising pair), the two papers nearest the bottom third's centre
-KEEP_TEXT_IDXS = [30, 150, 52, 117, 92, 74]
+# select_rows (check7): nearest the third's centre among the papers with a clean generated text; High 30, 150 and
+# Medium 52, 117 also with a title naming one domain and a clean true map; Low 92 (poor input map) and 53 (model miss)
+KEEP_TEXT_IDXS = [30, 150, 52, 117, 92, 53]
 
 # from scripts/figures/main/figS4_clip_ica.py
 COHORTS = (("UKBICA", "UK Biobank"), ("HCPICA", "Human Connectome Project"))

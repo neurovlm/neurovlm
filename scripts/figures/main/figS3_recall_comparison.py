@@ -331,7 +331,7 @@ def render(args, payload):
     side = w - bottom - top  # square axes
     fig = plt.figure(figsize=(w, w))
     ax = fig.add_axes([left / w, bottom / w, side / w, side / w])
-    recall_axes(ax, title=f"PubMed contrastive recall (n={payload['n']})")
+    recall_axes(ax, title="PubMed contrastive recall")
     order = [m for m in MODELS if m in payload["curves"]] + [m for m in payload["curves"] if m not in MODELS]
     rows = []
     for k, name in enumerate(order):
