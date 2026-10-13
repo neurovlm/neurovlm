@@ -54,12 +54,13 @@ jobs:
         run: >-
           pytest tests/ -v
           -m "not network and not requires_data and not requires_pretrained and not requires_specter and not slow"
-          --cov=neurovlm --cov-report=xml --cov-report=term --tb=short
+          --cov=neurovlm --cov-config=.coveragerc --cov-report=xml --cov-report=term --tb=short
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage.xml
+          flags: unit
           fail_ci_if_error: false
           verbose: true

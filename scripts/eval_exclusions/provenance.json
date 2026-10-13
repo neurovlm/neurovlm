@@ -1,0 +1,59 @@
+{
+  "generated": "2026-10-07T10:09:33",
+  "generator": "docs/figures_review/a4_leakage_audit/run_analysis.py --write-exclusions scripts/eval_exclusions",
+  "audit_outputs": "/home/rph/neurovlm_reviews/neurovlm/docs/figures_review/a4_leakage_audit/outputs",
+  "thresholds": {
+    "title_token_set_ratio": 95,
+    "title_strict_token_sort_ratio": 90,
+    "title_strict_min_chars": 25,
+    "minilm_cosine": 0.95,
+    "coordinate_jaccard": 0.8,
+    "coordinate_min_peaks": 5,
+    "minilm_model": "sentence-transformers/all-MiniLM-L6-v2 (title + '. ' + abstract, max_seq_length 256)"
+  },
+  "pubmed": {
+    "test": 16,
+    "val": 26,
+    "split_sizes": {
+      "test": 2987,
+      "val": 2987,
+      "train": 23894
+    }
+  },
+  "neurovault": {
+    "neurovault_publications": {
+      "total": 333,
+      "released": 312,
+      "local_only": 21,
+      "released_images": 3183
+    },
+    "train_publications_compared": 23894,
+    "collections_with_pubmed_links": 4,
+    "neurovault_publications_with_resolved_pmid": 4,
+    "neurovault_resolved_pmids_by_split": {
+      "train": 0,
+      "val": 0,
+      "test": 0,
+      "unsplit": 0
+    },
+    "title_candidate_pairs_token_set_ge_thr": 12,
+    "max_cos_quantiles": {
+      "0.5": 0.755882740020752,
+      "0.9": 0.820936918258667,
+      "0.99": 0.9995685815811157,
+      "1.0": 1.0000001192092896
+    },
+    "excluded_publications": {
+      "total": 7,
+      "released": 7,
+      "local_only": 0,
+      "released_images": 29,
+      "by_reason": {
+        "f_nv_exact_doi_vs_train": 0,
+        "f_nv_exact_pmid_vs_train": 0,
+        "f_nv_title_vs_train": 7,
+        "f_nv_minilm_vs_train": 6
+      }
+    }
+  }
+}

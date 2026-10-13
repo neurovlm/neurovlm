@@ -1,0 +1,18 @@
+% Response letter followed by the revised manuscript, in one PDF.  Build the paper first (paper/sn-article.pdf), then here,
+% twice (contents and links):  pdflatex response_letter_with_manuscript.tex
+% The letter is read unchanged from response_letter.tex (its own \documentclass line is skipped).  Every manuscript page
+% gets the target ms.<page>, and each "l. 359--363", "p. 14" or "pp. 11--12" in a "Changes to the manuscript" line
+% (\msl, \msp, \mspp in the letter) links to the manuscript page that holds it; the standalone letter prints them as text.
+\documentclass[11pt]{article}
+\renewcommand{\documentclass}[2][]{}
+\usepackage{pdfpages}
+\newcommand{\mslink}[2]{\hyperlink{ms.#1}{#2}}
+\newcounter{mspage}
+\AtBeginDocument{\hypersetup{pdftitle={NeuroVLM: response to the reviewers and revised manuscript}}}
+\AtEndDocument{\clearpage
+  \phantomsection\addcontentsline{toc}{section}{Revised manuscript}%
+  \begingroup\hypersetup{pdfview=Fit}%
+  \includepdf[pages=-,pagecommand={\thispagestyle{empty}\stepcounter{mspage}\hypertarget{ms.\arabic{mspage}}{}}]%
+    {../../../../paper/sn-article.pdf}%
+  \endgroup}
+\input{response_letter}
