@@ -15,7 +15,8 @@ Inputs follow the model's device instead of CUDA whenever a GPU is visible; maps
 `predict.py`. Its 46x55x46 4 mm output grid is the mask grid. On 100 test texts the maps match the unmodified upstream code run under Python 3.8, torch 1.5.1 and
 transformers 3.3.1 (r > 0.999999, differences below 4e-6 of the map peak, identical 70th-percentile masks), and two CPU runs give byte-identical maps.
 **Method:** PubMed test set (2,971 papers). Each method maps title + abstract to a brain map, scored against the autoencoder reconstruction of the paper's map:
-Dice of 70th-percentile masks and voxel Pearson r. Ridge = SPECTER2 -> latent, alpha chosen on validation Dice, same decoder. Domain mean = k-means (k = 10) on
+Dice of 70th-percentile masks and voxel Pearson r. NeuroVLM (linear head) = ridge SPECTER2 -> latent, alpha chosen on validation Dice,
+same decoder, i.e. NeuroVLM with a linear text head; NeuroVLM (non-linear head) = `proj_head_text_mse.pt` (768 -> 512, ReLU, -> 384). Domain mean = k-means (k = 10) on
 training latents, query -> nearest domain by SPECTER2. Atlas = union of the Harvard-Oxford regions named in the text (2,597 queries), else the mean map.
 Null = NeuroVLM map vs a shuffled paper. Nearest training paper (SPECTER2) and the submitted head are in the csv only. Training-corpus overlap: 1,295 test papers
 are in the NeuroQuery corpus (NeuroQuery's training set and the pool of Text2Brain's unreleased training split), 1,386 in the Neurosynth v7 database (PMID match);
@@ -23,5 +24,5 @@ are in the NeuroQuery corpus (NeuroQuery's training set and the pool of Text2Bra
 table no longer mark the published models; their caption (printed by `make_figure.py` as `[caption] ...`, and in `text_to_brain_baselines_table.tex`) states the
 overlap and that NeuroVLM still beats all three on the 1,157 papers in neither corpus (asserted from the data).
 **Outputs** (`outputs/`): `text_to_brain_baselines.{png,svg}`, `text_to_brain_baselines_table.{csv,tex}`, `text_to_brain_baselines_subsets.csv`, `results_table_full.csv`, `ordering_tests.csv`, `per_query_metrics.parquet`, `run_config.json`.
-**Result:** Dice / r: NeuroVLM 0.531 / 0.322, ridge 0.526 / 0.311, submitted head 0.492 / 0.321, Text2Brain 0.485 / 0.293, every other baseline <= 0.448 / 0.251.
-Outside the NeuroQuery corpus (n = 1,676): NeuroVLM 0.525 / 0.300, ridge 0.521 / 0.288, Text2Brain 0.472 / 0.264, NeuroQuery 0.406 / 0.167.
+**Result:** Dice / r: NeuroVLM (non-linear head) 0.531 / 0.322, NeuroVLM (linear head) 0.526 / 0.311, submitted head 0.492 / 0.321, Text2Brain 0.485 / 0.293, every other baseline <= 0.448 / 0.251.
+Outside the NeuroQuery corpus (n = 1,676): non-linear head 0.525 / 0.300, linear head 0.521 / 0.288, Text2Brain 0.472 / 0.264, NeuroQuery 0.406 / 0.167.

@@ -65,7 +65,7 @@ stage (`--smoke` also skips the fetch).  `--only 01 06`, `--skip 03`, `--skip-op
 | 06 | `06_n_grams.py` | `ngram_matrix.npy`, `ngram_labels.npy`, `ngram_emb.pt`, `ngram_cache/` | 4.6 s | 25 s (measured) |
 | 07 | `07_transform_text.py` | `neuro_summaries.{jsonl,parquet}`, `neuro_summaries_sample.csv` | 2.6 s | 2.2 s release (measured); LLM see below |
 | 08 | `08_synthetic_texts.py` (LLM proof) | `synthetic_texts.parquet` in `--out`, `examples/synthetic_texts_examples.md` | n/a | 12 requests, 6 s |
-| 09 | `09_summaries.py` (LLM proof) | `summaries.parquet` in `--out`, `examples/summaries_examples.md` | n/a | 6 requests, 3 s |
+| 09 | `09_summaries.py` (LLM proof) | `summaries.parquet` in `--out`, `examples/summaries_examples.md` | n/a | 6 requests, 4 s |
 
 ¹ `run_all.py --smoke --force` on an RTX 5090 / 16 cores with HF caches populated.  Per-block timings are logged
 in `scripts/outputs/data_0N_*/timing*/timings.jsonl`.  Only 05, 06
@@ -139,8 +139,8 @@ graph; the 300 nodes with the highest degree centrality; SPECTER2 of `term[SEP]d
 ### 07 — LLM topic summaries
 * Default (`--from-release`): writes the released `load_dataset("pubmed_summaries")` (30,826 rows, this notebook's
   output) to the notebook's three files.
-* The released summaries were made with Llama-3.3-70B-Instruct (dataset card of `neurovlm/pubmed_summary_qa`). `--regenerate`
-  keeps the notebook's local model. `09_summaries.py` calls Llama-3.3-70B-Instruct through the Hugging Face router.
+* The released summaries were made with Qwen3.5-27B. `--regenerate` keeps the notebook's local model.
+  `09_summaries.py` calls Qwen3.5-27B through the Hugging Face router.
 * `--regenerate`: `meta-llama/Meta-Llama-3.1-8B-Instruct` (gated, ~16 GB, needs `HF_TOKEN`) in bf16, left padding,
   chat template with the notebook's system prompt, `temperature=0.3, top_p=0.9, top_k=50`, 256 new tokens, batch 16.
   Prompts run longest first; the jsonl is appended after every batch and a rerun resumes from it.  `--model`,
@@ -179,11 +179,14 @@ was not kept. This script repeats the process and is not run by `run_all.py` (it
 
 ### 09 — PubMed summaries (LLM proof of concept)
 * The summary prompt of `docs/02_data/07_transform_text.ipynb` (cell 3) as system message, `title[SEP]abstract` of the
-  pinned `publications.parquet` as user message, `meta-llama/Llama-3.3-70B-Instruct` through the router (`--model`),
-  `temperature 0.3, top_p 0.9, max_tokens 256` and `top_k 50` sent as an extra field (`--top-k 0` leaves it out).
-  Decoding samples, so the text differs on each run. Not run by `run_all.py`.
+  pinned `publications.parquet` as user message, `Qwen/Qwen3.5-27B` through the router as in 08 (`--model`), thinking
+  off (`chat_template_kwargs`), `temperature 0.3, top_p 0.9, max_tokens 256` and `top_k 50` sent as an extra field
+  (`--top-k 0` leaves it out). Decoding samples, so the text differs on each run. Not run by `run_all.py`.
 * `--limit N` (default 6): random test-set papers (`--seed`) that have both released summaries. The run writes
   `examples/summaries_examples.md` with the new summary next to `neuro_summaries.parquet` and `pubmed_summary_qa.parquet`
-  and their MiniLM cosine. `--limit 0` summarizes every paper. Output `--out/summaries.parquet`.
-* Proof (2026-10-13): mean cosine 0.91 to the released `neuro_summaries.parquet` text of the same paper, against 0.39
-  for other papers. New summaries are longer (180 words against 128). `pubmed_summary_qa.parquet` (59 words) gives 0.83.
+  and their MiniLM cosine and a format check (paragraphs, words, digits, non-Latin characters, finish reason).
+  `--limit 0` summarizes every paper. Output `--out/summaries.parquet`.
+* Proof (2026-10-14, Qwen/Qwen3.5-27B): mean cosine 0.88 to the released `neuro_summaries.parquet` text of the same
+  paper, against 0.39 for other papers. Every summary is one paragraph of five sentences in Latin script, stops before
+  the token limit and names no sample size, statistic or coordinate. New summaries are longer (153 words against 128).
+  `pubmed_summary_qa.parquet` (59 words) gives 0.79.

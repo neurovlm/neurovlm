@@ -6,7 +6,8 @@
 
 Per section (the editor letter and every ``### <id>:`` comment) the letter's text after removing the quoted comment,
 figures, tables, "Changes to the manuscript" and LaTeX comments must equal the RESPONSE.md text (hidden comments,
-anchors, image lines and the **Comment:** paraphrase removed; a link counts as its text).  Also checked: every
+anchors, image lines and the **Comment:** paraphrase removed; a link counts as its text, and the letter's manuscript
+links \\msfig{S8}, \\mstab{S5} and \\msfign{S4} read as "Fig. S8", "Table S5" and "S4").  Also checked: every
 RESPONSE.md table row is in the letter's section, every RESPONSE.md image ``![Fig. Rn](path)`` is figure Rn of the
 letter with the same file, and the comment links of each section (``[2.4](#2.4)`` in RESPONSE.md, ``\\cmt{2.4}`` in
 the letter) name the same comments, each of which exists.  Figures are numbered by the order of the ``\\rfig`` calls,
@@ -56,6 +57,9 @@ def norm(s: str, labels: dict[str, int] | None = None) -> str:
     labels = labels or {}
     s = re.sub(r"\\ref\{([^{}]*)\}", lambda m: f"R{labels[m.group(1)]}" if m.group(1) in labels else "R??", s)
     s = re.sub(r"\\cmt\{([^{}]*)\}", r"\1", s)  # letter: link to a comment
+    s = re.sub(r"\\msfig\{([^{}]*)\}", r"Fig. \1", s)  # letter: manuscript figure or table, linked in the combined PDF
+    s = re.sub(r"\\mstab\{([^{}]*)\}", r"Table \1", s)
+    s = re.sub(r"\\ms(?:fig|tab)n\{([^{}]*)\}", r"\1", s)  # its number alone, after "Figs." or "Tables"
     s = re.sub(r"\\hyperref\[[^\]]*\]\{([^{}]*)\}", r"\1", s)
     s = re.sub(r"\[([^\]]+)\]\(#[^)]*\)", r"\1", s)  # RESPONSE.md: anchor link
     for cmd in ("textbf", "emph", "textit", "mbox"):

@@ -32,3 +32,15 @@ frontal cortex, inferior frontal cortex) and 16 % one with a word found in no na
 is the [NETWORK] title of PMID 32595302 and "Medial Personal Relevance Cortex" the [REGION] title of PMID 21715612 (worst cases 2 and 3; the
 complete caption joins the three captions).
 
+**Failure decomposition** (2.12, `failure_decomposition.py`, CPU, ~10 s, after `run_analysis.py`): separates data failures from model failures
+among the 482 failing test maps (caption cosine with the paper's text < 0, `outputs/pubmed_items.parquet`) and 482 random non-failing maps
+(seed 0). a = poor input map (the Fig. 3 rule fails on the input map, or the coordinate table has <= 3 foci); b = text-map mismatch in the data
+(the paper's own title + abstract and its own map have a contrastive cosine below the test-set 10th percentile, 0.051; stored SPECTER2
+embedding and autoencoder latent through the two contrastive heads, nothing generated; the ranks match `a1_retrieval_metrics_table`);
+c = neither (model miss). Check without any NeuroVLM part: Neurosynth's map for the same text (`../a1_text_to_brain_baselines`) against the
+paper's map, Pearson r below its 10th percentile. Outputs: `failure_decomposition.{csv,md}`, `failure_decomposition_items.parquet`.
+Result: failures a 20.1 %, b 28.6 %, a+b 8.7 %, c 42.5 % (205 maps, 6.9 % of the test set); control 27.0 %, 2.9 %, 1.7 %, 68.5 %. Mismatched
+pairs (b or a+b) are 37 % of failures against 5 % of the control, and 61 % of the 297 mismatched test pairs fail against 11 % of clean,
+consistent ones. Poor input maps are as common among failures as in the control (29 % each). Neurosynth r below its 10th percentile: 31 % of
+failures against 5 %. Failing captions on mismatched pairs still match their own map (median cosine 0.26 against 0.29 for non-failures);
+model misses do not (0.21).

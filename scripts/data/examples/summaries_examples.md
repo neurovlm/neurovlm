@@ -3,22 +3,24 @@
 Written by `scripts/data/09_summaries.py`. The summary prompt (`docs/02_data/07_transform_text.ipynb`, cell 3) is the
 system message and the paper's title and abstract, joined by `[SEP]`, the user message. Decoding samples, so each
 run gives a new wording. Each new summary is shown next to the two released summaries of the same test-set paper,
-`neuro_summaries.parquet` (neurovlm/neuro_image_papers) and `pubmed_summary_qa.parquet` (neurovlm/pubmed_summary_qa,
-whose card names Llama-3.3-70B-Instruct), with their MiniLM cosine.
+`neuro_summaries.parquet` (neurovlm/neuro_image_papers) and `pubmed_summary_qa.parquet` (neurovlm/pubmed_summary_qa),
+with their MiniLM cosine and a format check (paragraphs, words, digits, non-Latin characters).
 
-Mean cosine to neuro_summaries: 0.91 (same paper) against 0.39 (other papers of this set).
-Mean cosine to pubmed_summary_qa: 0.83. Mean length: new 180 words,
+Mean cosine to neuro_summaries: 0.88 (same paper) against 0.39 (other papers of this set).
+Mean cosine to pubmed_summary_qa: 0.79. Mean length: new 153 words,
 neuro_summaries 128, pubmed_summary_qa 59.
 
-Settings: `{"model": "meta-llama/Llama-3.3-70B-Instruct", "provider": "hf-router", "router": "https://router.huggingface.co/v1", "temperature": 0.3, "top_p": 0.9, "top_k": 50, "max_tokens": 256}`
+Settings: `{"model": "Qwen/Qwen3.5-27B", "provider": "hf-router", "router": "https://router.huggingface.co/v1", "temperature": 0.3, "top_p": 0.9, "top_k": 50, "max_tokens": 256, "enable_thinking": false}`
 
 ## PMID 15820711: Brain activation of patients with obsessive-compulsive disorder during neuropsychological and symptom provocation tasks before and after symptom improvement: a functional magnetic resonance imaging st
 
-Reading: approximately similar: same topic, different wording (cosine 0.90 to neuro_summaries, 0.80 to pubmed_summary_qa).
+Reading: approximately similar: same topic, different wording (cosine 0.86 to neuro_summaries, 0.77 to pubmed_summary_qa).
+
+Check: 1 paragraph(s), 151 words, 0 digits, 0 non-Latin characters, finish reason stop.
 
 **New summary**
 
-Obsessive-compulsive disorder (OCD) is a complex neuropsychiatric condition characterized by hyperactivity in the frontal cortex, which has been implicated in the pathophysiology of the disorder. Research has shown that OCD is associated with abnormal brain activity in regions such as the orbitofrontal, dorsolateral-prefrontal, and anterior cingulate cortices, which are involved in executive control, emotion regulation, and error detection. Studies have also suggested that changes in brain activity in these regions can influence cognitive processes, including working memory and attention. As symptoms of OCD improve, either through pharmacological or behavioral interventions, there tends to be a decrease in hyperactivation of the frontal lobe in response to symptom-provoking stimuli, and an increase in activity in posterior brain regions, such as the parietal cortex and cerebellum, which are involved in action monitoring and cognitive control. This shift in brain activity patterns is thought to reflect changes in the neural circuits underlying OCD, and may be related to improvements in cognitive function and symptom reduction. Overall, the neural mechanisms underlying OCD involve a complex interplay between frontal and posterior brain regions, and understanding these relationships is essential for developing effective treatments for the disorder.
+Obsessive-compulsive disorder (OCD) is characterized by distinct alterations in brain function, particularly involving hyperactivity within the frontal cortex and the cortico-striato-thalamo-cortical loops. Research indicates that the pathophysiology of OCD is closely linked to dysregulated activity in the orbitofrontal cortex, dorsolateral prefrontal cortex, and anterior cingulate cortex during states of symptom provocation, reflecting deficits in emotion regulation and error monitoring. Conversely, cognitive processes such as executive control and action monitoring, which engage parietal and cerebellar regions, often show compensatory or distinct activation patterns that may be impaired in the untreated state. Clinical interventions, including pharmacotherapy and behavioral therapy, have been associated with a normalization of these neural circuits, specifically reducing pathological frontal hyperactivation while enhancing posterior brain activity related to cognitive control. These findings suggest that symptom improvement in OCD corresponds to a rebalancing of functional connectivity between frontal regions involved in obsessive thoughts and posterior networks responsible for adaptive behavioral regulation.
 
 **Released, neuro_summaries.parquet**
 
@@ -30,11 +32,13 @@ Obsessive-compulsive disorder (OCD) is a complex neuropsychiatric condition char
 
 ## PMID 19745020: BDNF val66met polymorphism influences motor system function in the human brain.
 
-Reading: approximately similar: same topic, different wording (cosine 0.91 to neuro_summaries, 0.93 to pubmed_summary_qa).
+Reading: approximately similar: same topic, different wording (cosine 0.86 to neuro_summaries, 0.83 to pubmed_summary_qa).
+
+Check: 1 paragraph(s), 149 words, 2 digits, 0 non-Latin characters, finish reason stop.
 
 **New summary**
 
-The brain-derived neurotrophic factor (BDNF) val66met polymorphism has been associated with changes in brain function, particularly in the motor system. This polymorphism affects the release of BDNF, a growth factor crucial for brain plasticity and repair, which can influence motor learning and short-term plasticity. Research has shown that variations in BDNF can impact the function of sensorimotor networks, leading to differences in brain activation patterns and motor performance. Studies have found that individuals with the val66met polymorphism tend to exhibit altered brain activity, including reduced activation volume in certain brain regions, which can affect motor learning and retention. The BDNF val66met polymorphism has been linked to impaired motor system function, characterized by decreased plasticity and increased error during short-term learning, highlighting the importance of BDNF in motor cognition. Overall, the val66met polymorphism is a significant factor in understanding individual differences in motor system function and learning, with potential implications for the development of novel therapeutic strategies.
+The BDNF val66met polymorphism represents a significant genetic factor influencing the efficiency of motor system function and neuroplasticity in the human brain. This single nucleotide variation affects activity-dependent release of brain-derived neurotrophic factor, a protein critical for synaptic plasticity and neuronal repair, thereby modulating the brain's capacity for motor learning and adaptation. Research in this area suggests that individuals carrying the met allele often exhibit altered functional responses within the sensorimotor network, including differences in activation magnitude and the ability to reorganize neural circuits following practice. These genetic differences are frequently associated with distinct patterns of short-term plasticity, where the typical expansion or refinement of motor-related brain activity may be attenuated or altered compared to non-carriers. Consequently, the presence of this polymorphism has been linked to measurable variations in motor skill acquisition and retention, highlighting the role of genetic variability in shaping the neural mechanisms underlying human motor behavior.
 
 **Released, neuro_summaries.parquet**
 
@@ -46,11 +50,13 @@ The brain-derived neurotrophic factor (BDNF) val66met polymorphism has been asso
 
 ## PMID 21172325: I remember you: a role for memory in social cognition and the functional neuroanatomy of their interaction.
 
-Reading: approximately similar: same topic, different wording (cosine 0.92 to neuro_summaries, 0.77 to pubmed_summary_qa).
+Reading: approximately similar: same topic, different wording (cosine 0.89 to neuro_summaries, 0.81 to pubmed_summary_qa).
+
+Check: 1 paragraph(s), 148 words, 0 digits, 0 non-Latin characters, finish reason stop.
 
 **New summary**
 
-The interaction between memory and social cognition is a complex phenomenon that has been explored in the context of autobiographical memory and mentalizing, which is the ability to infer the thoughts and feelings of others. Research has shown that these processes share a common neural substrate, involving brain regions such as the hippocampus, temporal parietal junction, and prefrontal cortex. The overlap between these two processes is thought to facilitate the integration of personal and interpersonal information, allowing individuals to draw upon past experiences to inform their understanding of others and guide social behavior. Studies have consistently found that brain regions involved in autobiographical memory and mentalizing, such as the superior temporal sulcus and posterior cingulate cortex, exhibit functional connectivity and overlap in their activity patterns. This functional overlap is believed to enable the transformation of personal experiences into social conceptual knowledge, which can in turn support strategic social behavior and goal-directed actions. Overall, the relationship between memory and social cognition is a critical area of research, highlighting the importance of memory in shaping our understanding of others and navigating complex social situations.
+The intersection of autobiographical memory and social cognition, particularly mentalizing, represents a critical area of inquiry in neuroscience, highlighting how the brain integrates personal past experiences with the understanding of others' minds. Research indicates that these distinct cognitive processes share a common functional neuroanatomy, relying heavily on a distributed network that includes the medial prefrontal cortex, posterior cingulate cortex, angular gyrus, and temporal regions. Functional connectivity studies suggest that while specific hubs like the hippocampus and the temporal parietal junction may operate independently, they both engage this broader system to facilitate the seamless integration of self-referential and interpersonal information. This neural overlap is thought to support the transformation of individual episodic memories into social conceptual knowledge, which subsequently guides strategic social behavior aligned with personal goals. Consequently, contemporary perspectives in social cognitive neuroscience increasingly emphasize the foundational role of memory systems in constructing and navigating complex social interactions.
 
 **Released, neuro_summaries.parquet**
 
@@ -62,11 +68,13 @@ The interaction between memory and social cognition is a complex phenomenon that
 
 ## PMID 23140909: Quantitative cerebral blood flow mapping and functional connectivity of postherpetic neuralgia pain: a perfusion fMRI study.
 
-Reading: approximately similar: same topic, different wording (cosine 0.89 to neuro_summaries, 0.81 to pubmed_summary_qa).
+Reading: approximately similar: same topic, different wording (cosine 0.88 to neuro_summaries, 0.77 to pubmed_summary_qa).
+
+Check: 1 paragraph(s), 150 words, 0 digits, 0 non-Latin characters, finish reason stop.
 
 **New summary**
 
-Postherpetic neuralgia (PHN) is a chronic pain condition that has been associated with changes in brain activity and connectivity, particularly in regions involved in pain processing, emotion regulation, and sensory perception. Research in this area has focused on understanding the neural mechanisms underlying PHN pain, including the role of the default mode network, salience network, and reward circuitry. Studies have shown that PHN can influence functional connectivity between brain regions, such as the striatum, thalamus, insula, and amygdala, which are involved in pain modulation, emotional processing, and sensory integration. Increased activity in these regions, particularly in the somatosensory cortex and insula, has been linked to pain intensity, suggesting a complex interplay between sensory, emotional, and cognitive processes. The condition has also been associated with altered cerebral blood flow patterns, with increases in regions involved in pain processing and decreases in areas related to executive control and cognitive regulation. Overall, investigating the neural correlates of PHN pain can provide valuable insights into the central mechanisms underlying this condition and inform the development of novel therapeutic strategies.
+Postherpetic neuralgia (PHN) represents a chronic pain condition that induces distinct alterations in both cerebral perfusion and functional connectivity within the brain's pain-processing networks. Research in this area highlights that persistent neuropathic pain is associated with increased blood flow in key subcortical and cortical regions, including the thalamus, striatum, insula, and primary somatosensory cortex, which are integral to the sensory-discriminative and affective dimensions of pain. Conversely, these conditions often involve reduced perfusion in frontal cortical areas, potentially reflecting deficits in top-down pain modulation or executive control. Furthermore, the functional coupling between the reward circuitry, limbic structures like the amygdala, and sensory hubs appears to be significantly reorganized, suggesting that chronic pain reshapes the communication pathways underlying emotional and sensory integration. Collectively, these findings indicate that PHN is not merely a peripheral phenomenon but involves widespread central nervous system adaptations that link altered hemodynamics with the subjective experience of pain intensity.
 
 **Released, neuro_summaries.parquet**
 
@@ -78,11 +86,13 @@ Postherpetic neuralgia (PHN) is a chronic pain condition that has been associate
 
 ## PMID 23322403: Neurocognitive Brain Response to Transient Impairment of Wernicke's Area.
 
-Reading: approximately similar: same topic, different wording (cosine 0.90 to neuro_summaries, 0.79 to pubmed_summary_qa).
+Reading: approximately similar: same topic, different wording (cosine 0.89 to neuro_summaries, 0.80 to pubmed_summary_qa).
+
+Check: 1 paragraph(s), 143 words, 0 digits, 0 non-Latin characters, finish reason stop.
 
 **New summary**
 
-The topic of neurocognitive brain response to transient impairment of Wernicke's Area is concerned with understanding how the brain adapts and compensates for damage to key language processing centers. Research in this area focuses on the cognitive processes of language comprehension and the brain systems involved, including the left posterior superior temporal gyrus (LSTGp) and its role in the primary language network. Studies have shown that when this region is impaired, the brain can reconfigure its information processing capabilities to maintain cognitive performance, often through increased synchronization between compensatory regions and decreased synchronization within the primary language network. This adaptation can involve the recruitment of additional brain areas, such as the contralateral homolog of the impaired region, adjacent areas, and regions involved in discourse monitoring, like the medial frontal gyrus. Overall, this line of research has implications for understanding how the brain responds to trauma, including traumatic brain injury, stroke, and seizure, and can inform the development of new treatments and therapies. By exploring the neural mechanisms of adaptation and compensation, researchers can gain insights into the complex interactions between different brain regions and networks that underlie language processing and other cognitive functions.
+Research into the neurocognitive response to transient impairment of Wernicke's area explores how the brain dynamically reconfigures its functional networks to preserve language comprehension following focal disruption. When the left posterior superior temporal gyrus, a critical hub for auditory processing and semantic integration, is compromised, the system often recruits compensatory mechanisms involving the contralateral homolog in the right hemisphere and adjacent cortical regions. This adaptive process is characterized by a shift in functional connectivity, where synchronization increases between these compensatory centers while coherence within the primary language network may temporarily decrease. Additionally, higher-order regions involved in discourse monitoring, such as the medial frontal gyrus, are frequently engaged to support executive control over the degraded linguistic input. Such network-level adaptations highlight the brain's inherent plasticity and provide a framework for understanding recovery trajectories in clinical conditions like stroke, traumatic brain injury, and seizure disorders.
 
 **Released, neuro_summaries.parquet**
 
@@ -94,11 +104,13 @@ The topic of neurocognitive brain response to transient impairment of Wernicke's
 
 ## PMID 24825504: Imagining triadic interactions simultaneously activates mirror and mentalizing systems.
 
-Reading: approximately similar: same topic, different wording (cosine 0.93 to neuro_summaries, 0.89 to pubmed_summary_qa).
+Reading: approximately similar: same topic, different wording (cosine 0.89 to neuro_summaries, 0.79 to pubmed_summary_qa).
+
+Check: 1 paragraph(s), 175 words, 0 digits, 0 non-Latin characters, finish reason stop.
 
 **New summary**
 
-The ability to engage in triadic interactions, which involves coordinating interactions between oneself, another person, and an external object, is a complex social cognitive process that has been associated with the activation of multiple brain systems. Research in this area suggests that triadic interactions simultaneously engage the mirror system, which is involved in empathy and understanding other's actions, and the mentalizing system, which is responsible for attributing mental states to oneself and others. The mentalizing system, including regions such as the medial prefrontal cortex and temporoparietal junction, plays a crucial role in self-referential and other-referential processing, while the mirror system, including areas such as the inferior frontal gyrus and inferior parietal lobe, is thought to be involved in simulating others' actions and intentions. Studies have shown that triadic interactions can influence the functional connectivity between these systems, leading to a more complex neural network involved in social cognition. Overall, the neural mechanisms underlying triadic interactions are thought to be distinct from those involved in purely self-referential or other-referential processing, and are associated with changes in brain activity and connectivity in key social cognitive networks.
+Triadic interactions, which involve the dynamic coordination between oneself, another individual, and an external object, represent a uniquely human social capability that engages a complex neural architecture. Research in this domain highlights the simultaneous recruitment of two distinct but interacting systems: the mentalizing network, responsible for inferring the intentions and mental states of others, and the mirror neuron system, which supports the simulation of actions and shared experiences. While self-referential and other-referential processing primarily activate core mentalizing regions such as the medial prefrontal cortex and temporoparietal junction, the specific demand of imagining a joint interaction with an object uniquely recruits classical mirror areas in the inferior frontal gyrus and inferior parietal lobe. This dual engagement suggests that understanding triadic scenarios requires an integration of cognitive perspective-taking with action simulation, a process reflected in enhanced functional connectivity between these networks. Consequently, the neural processing of such social contexts appears to rely on a more intricate interplay of brain systems than that required for simpler forms of social cognition, underscoring the specialized nature of human collaborative behavior.
 
 **Released, neuro_summaries.parquet**
 
