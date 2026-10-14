@@ -297,14 +297,34 @@ class Hub:
 
         self.api, self.errors = HfApi(), []
 
+    def retry(self, call, *args, tries: int = 4, **kwargs):
+        """Call a Hub read, retrying dropped connections and 5xx answers (2, 4, 8 s apart)."""
+        import time
+
+        from huggingface_hub.utils import HfHubHTTPError, RepositoryNotFoundError
+
+        for attempt in range(tries):
+            try:
+                return call(*args, **kwargs)
+            except RepositoryNotFoundError:
+                raise
+            except HfHubHTTPError as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", 0) or 0
+                if status < 500 or attempt == tries - 1:
+                    raise
+            except Exception:  # connection reset, timeout, ...
+                if attempt == tries - 1:
+                    raise
+            time.sleep(2 ** (attempt + 1))
+
     def head(self, repo: str, repo_type: str) -> str | None:
         from huggingface_hub.utils import RepositoryNotFoundError
 
         try:
-            return self.api.repo_info(repo, repo_type=repo_type).sha
+            return self.retry(self.api.repo_info, repo, repo_type=repo_type).sha
         except RepositoryNotFoundError:
             return None
-        except Exception as exc:  # offline, ...
+        except Exception as exc:  # offline after four attempts
             self.errors.append(f"{repo}: {type(exc).__name__}: {exc}")
             return "?"
 
@@ -691,7 +711,7 @@ def remote_files(hub: Hub, rel: Release, revision: str, manifest: dict) -> tuple
     planned file differs from the local one or an unchanged file differs from its pin."""
     from huggingface_hub import hf_hub_download
 
-    info = (hub.api.model_info if rel.repo_type == "model" else hub.api.dataset_info)(rel.repo, revision=revision, files_metadata=True)
+    info = hub.retry(hub.api.model_info if rel.repo_type == "model" else hub.api.dataset_info, rel.repo, revision=revision, files_metadata=True)
     sib = {s.rfilename: s for s in info.siblings}
     pinned = {e["path"]: e for e in manifest["files"] if e["repo"] == rel.repo}
     out, errors = {}, []
@@ -822,7 +842,7 @@ def run(args, run_dir: Path, stage: Path) -> int:
     if any(r.repo == CORPUS_REPO for r in releases) and not args.yes:
         blockers.append("the corpus upload publishes 1.23 M PubMed records: pass --yes")
     try:
-        who = hub.api.whoami()
+        who = hub.retry(hub.api.whoami)
         orgs, role = [o.get("name") for o in who.get("orgs", [])], who.get("auth", {}).get("accessToken", {}).get("role")
         print(f"  Hub token: {who.get('name')} (orgs {', '.join(orgs) or '-'}, role {role})")
         if "neurovlm" not in orgs or role == "read":
