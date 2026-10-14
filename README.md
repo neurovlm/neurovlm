@@ -124,6 +124,22 @@ Analyses are organized as Jupyter notebooks:
 4. `docs/figures`: Preprint-v3 evaluation and figure reproduction
 5. `docs/experimental`: Retained exploratory evaluation, atlas-free CNN, and data-preparation research
 
+## Reproducing the paper
+
+Every figure of the paper and of the response to reviewers is reproducible from [`scripts/`](scripts/README.md).
+The inputs are fetched from Hugging Face at pinned revisions and checked by sha256, and training is deterministic. On a
+Linux machine with an NVIDIA GPU (driver >= 580) and [uv](https://docs.astral.sh/uv/), run from the repository root:
+
+```bash
+bash scripts/pipeline/reproduce.sh --run-name final   # environment, data, training, validation, paper figures (~2.5 h, one RTX 5090)
+bash scripts/figures/review/core/run_all.sh           # response analyses and figures (~2.5 h)
+```
+
+`bash scripts/pipeline/reproduce.sh --smoke` runs every stage at smoke scale in about 5 minutes.
+[`scripts/README.md`](scripts/README.md) explains the layout, the options, the validation and the proof that repeated
+runs give byte-identical models. CI runs the offline test suite (`.github/workflows/tests.yml`) and the pipeline smoke
+test (`.github/workflows/smoke.yml`).
+
 ## License
 
 Apache-2.0 (`LICENSE`).

@@ -1,0 +1,9 @@
+,label,label_re,top,score,score_min
+17,visual,Visual,visual,tensor(0.4388),tensor(0.0281)
+21,language,Language,language,tensor(0.3044),tensor(0.0180)
+23,auditory,Auditory,auditory,tensor(0.4458),tensor(0.)
+69,attention,Attention,attention,tensor(0.2827),tensor(0.0345)
+107,default_mode,Default Mode,default_mode,tensor(0.3881),tensor(0.)
+119,motor,Motor,motor,tensor(0.4318),tensor(0.)
+127,cingulo_opercular,Cingulo-Opercular,cingulo_opercular,tensor(0.2069),tensor(0.)
+137,frontoparietal_control,Frontoparietal Control,frontoparietal_control,tensor(0.1040),tensor(0.)

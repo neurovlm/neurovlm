@@ -1,0 +1,94 @@
+# Coverage counts only the code that trains the paper's models and draws its figures: the pinned-input fetch, the
+# training stages (00, 08, 09, 11, 12, 13, 14, 20) with their helpers, the pipeline driver, validation, the reproduction
+# check, the main and supplementary figure scripts, and the library modules those scripts import ([report] include).
+# Everything else is left out ([run] omit): the CNN, the atlas-free data, the notebook-era trainers and evaluators, the
+# runtime and retrieval API, the data stages 01-07 (they regenerate the released inputs), the review analyses, notebooks,
+# docs and tutorials.
+# Used by tests.yml (pytest --cov) and smoke.yml (scripts/pipeline/smoke_pipeline.sh under coverage, subprocesses
+# included).
+[run]
+# the script directories have no __init__.py, so each is listed for unrun files to count
+source =
+    neurovlm
+    scripts/pipeline
+    scripts/data
+    scripts/models
+    scripts/figures/main
+omit =
+    # CNN models (not in the paper), the runtime and the retrieval API
+    */neurovlm/cnn/*
+    */neurovlm/core/runtime.py
+    */neurovlm/retrieval/*
+    # atlas-free data and coordinate helpers
+    */neurovlm/data/atlas_free_dataset.py
+    */neurovlm/data/atlas_free_text.py
+    */neurovlm/data/coordinates.py
+    # notebook-era trainers, evaluators and brain-to-text metrics (the scripts use training/mlp.py and evaluation/mlp.py)
+    */neurovlm/training/autoencoder.py
+    */neurovlm/training/brain_to_text.py
+    */neurovlm/training/contrastive.py
+    */neurovlm/training/text_to_brain.py
+    */neurovlm/evaluation/brain_to_text.py
+    */neurovlm/evaluation/comparison.py
+    */neurovlm/evaluation/contrastive.py
+    */neurovlm/evaluation/spatial.py
+    */neurovlm/evaluation/text_to_brain.py
+    */neurovlm/metrics/brain_to_text.py
+    # data stages 01-07 and their helpers (the pipeline fetches their released outputs at pinned revisions instead)
+    scripts/data/0*.py
+    scripts/data/run_all.py
+    scripts/data/data_utils.py
+    # review analyses, run outputs
+    scripts/figures/review/*
+    */outputs/*
+patch = subprocess
+relative_files = true
+disable_warnings = module-not-imported, no-data-collected
+
+[report]
+include =
+    # pinned inputs from Hugging Face
+    scripts/data/fetch_hf.py
+    # training: shared helpers, pipeline driver, stages and their helpers, validation, reproduction check
+    scripts/pipeline/common.py
+    scripts/pipeline/train_pipeline.py
+    scripts/models/00_neuroqwen_dapt.py
+    scripts/models/08_autoencoder.py
+    scripts/models/09_projection_head.py
+    scripts/models/11_anatomical_atlases.py
+    scripts/models/12_neuroadapter.py
+    scripts/models/13_qformer_pubmed.py
+    scripts/models/14_qformer_anat.py
+    scripts/models/20_pubmed_cv.py
+    scripts/models/_common_models.py
+    scripts/models/_qformer_anat_data.py
+    scripts/models/_anatomical_atlases_lib.py
+    scripts/pipeline/validate_models.py
+    scripts/pipeline/verify_reproduction.py
+    # figures: Figs. 2-6 and S2-S4, their shared helpers and make_all.py
+    scripts/figures/main/*.py
+    # library: package entry, NeuroVLM client (figures, validation), data and pinned-resource loaders
+    */neurovlm/__init__.py
+    */neurovlm/core/__init__.py
+    */neurovlm/core/client.py
+    */neurovlm/data/__init__.py
+    */neurovlm/data/loaders.py
+    */neurovlm/resources/*.py
+    # library: models (autoencoder, projection heads, projector, NeuroAdapter, losses, registry, serialization)
+    */neurovlm/models/*.py
+    # library: MLP trainer of stages 08, 09 and 20 with its run bookkeeping
+    */neurovlm/training/__init__.py
+    */neurovlm/training/mlp.py
+    */neurovlm/pipelines/*.py
+    */neurovlm/utils/*.py
+    # library: evaluation and metrics used by the trainer, validate_models.py and the figures
+    */neurovlm/evaluation/__init__.py
+    */neurovlm/evaluation/mlp.py
+    */neurovlm/evaluation/notebook_utils.py
+    */neurovlm/metrics/__init__.py
+    */neurovlm/metrics/common.py
+    */neurovlm/metrics/retrieval.py
+    */neurovlm/metrics/semantic.py
+    */neurovlm/metrics/text_to_brain.py
+skip_empty = true
+precision = 1

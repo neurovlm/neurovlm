@@ -1,0 +1,299 @@
+{
+ "about": "Primary (PASS/FAIL) validation metrics of runs/final (the revision's paper model) and of the released checkpoints, PubMed test n = 2,971 with the leakage-audit exclusions, maps calibrated (max). scripts/pipeline/verify_reproduction.py compares a reproduction's validate_models.py metrics.json against 'final'.",
+ "sources": {
+  "final": "scripts/outputs/validation/final/metrics.json (validate_models.py --run scripts/outputs/runs/final, 2026-10-13T03:12:01; Latin-script captions, canonical [NETWORK] / [REGION] titles; generated maps calibrated by the global factor of runs/final/map_calibration.json)",
+  "released": "scripts/outputs/validation/final/released_reference/metrics.json (= validation/released_excl, with text_to_brain and the adapter rescored with --map-calibration global and the released models' own factors, scripts/outputs/released_map_calibration.json; the reference runs/final is validated against, 2026-10-13T03:16)",
+  "cv_fold0": "components.cv.folds['0'] of validation/final (for one-fold reproductions, train stage 20 with --folds 0)"
+ },
+ "exclusions": {
+  "enabled": true,
+  "pubmed_test": {
+   "before": 2987,
+   "dropped": 16,
+   "kept": 2971
+  },
+  "neurovault_local_publications": {
+   "before": 312,
+   "dropped": 7,
+   "kept": 305
+  },
+  "neurovault_local_images": {
+   "before": 3183,
+   "dropped": 29,
+   "kept": 3154
+  },
+  "neurovault_hf_publications": {
+   "before": 312,
+   "dropped": 7,
+   "kept": 305
+  },
+  "neurovault_hf_images": {
+   "before": 3182,
+   "dropped": 29,
+   "kept": 3153
+  },
+  "cv_pool": {
+   "before": 29868,
+   "dropped": 42,
+   "kept": 29826
+  }
+ },
+ "tolerance_classes": {
+  "deterministic": {
+   "abs": 0.0001,
+   "stages": [
+    "08",
+    "09",
+    "12",
+    "20"
+   ],
+   "why": "fp32 training with fixed seeds and fixed data order; identical inputs give bit-identical weights"
+  },
+  "bf16": {
+   "auc": 0.01,
+   "cos": 0.02,
+   "acc": 0.02,
+   "frac": 0.05,
+   "stages": [
+    "13",
+    "14"
+   ],
+   "why": "bf16 autocast training and batched bf16 caption generation; stage 14 also selects 1 of 5 seeds by validation loss"
+  }
+ },
+ "components": {
+  "ae": {
+   "stage": "08",
+   "class": "deterministic",
+   "metrics": {
+    "pubmed_voxel_auroc": {
+     "kind": "auc",
+     "final": 0.9739997216726866,
+     "released": 0.9748667755651097
+    },
+    "pubmed_bpp_gain_pct_median": {
+     "kind": "bpp",
+     "final": 29.67341029283802,
+     "released": 30.10664697916074
+    },
+    "neurovault_voxel_auroc": {
+     "kind": "auc",
+     "final": 0.9386690237070694,
+     "released": 0.9389723690960812
+    },
+    "networks_voxel_auroc": {
+     "kind": "auc",
+     "final": 0.9127996255907609,
+     "released": 0.9152847309355427
+    }
+   }
+  },
+  "heads": {
+   "stage": "09",
+   "class": "deterministic",
+   "metrics": {
+    "pubmed_t2i_auc": {
+     "kind": "auc",
+     "final": 0.8355765342712402,
+     "released": 0.8364487290382385
+    },
+    "pubmed_i2t_auc": {
+     "kind": "auc",
+     "final": 0.8331068158149719,
+     "released": 0.8334317803382874
+    },
+    "pubmed_mean_recall@10": {
+     "kind": "acc",
+     "final": 0.0878492072224617,
+     "released": 0.09020531550049782
+    },
+    "pubmed_mean_mrr": {
+     "kind": "acc",
+     "final": 0.04247192293405533,
+     "released": 0.04097382910549641
+    },
+    "neurovault_t2i_auc": {
+     "kind": "auc",
+     "final": 0.8446975350379944,
+     "released": 0.8341735601425171
+    },
+    "neurovault_i2t_auc": {
+     "kind": "auc",
+     "final": 0.7852513194084167,
+     "released": 0.7756838798522949
+    }
+   }
+  },
+  "networks": {
+   "stage": "09",
+   "class": "deterministic",
+   "metrics": {
+    "accuracy": {
+     "kind": "acc",
+     "final": 0.8319327731092437,
+     "released": 0.8067226890756303
+    },
+    "macro_auc": {
+     "kind": "auc",
+     "final": 0.9619357015337175,
+     "released": 0.9634085005500992
+    }
+   }
+  },
+  "text_to_brain": {
+   "stage": "09",
+   "class": "deterministic",
+   "metrics": {
+    "dice_matched": {
+     "kind": "cos",
+     "final": 0.5307676734293205,
+     "released": 0.4948730850751397
+    },
+    "pearson_matched": {
+     "kind": "cos",
+     "final": 0.3199920058250427,
+     "released": 0.32075953483581543
+    },
+    "dice90_vs_raw_matched": {
+     "kind": "cos",
+     "final": 0.2808805826589669,
+     "released": 0.2580641963560394
+    },
+    "recall_auc": {
+     "kind": "auc",
+     "final": 0.9525464177131653,
+     "released": 0.8648420572280884
+    },
+    "contrastive_sim_matched": {
+     "kind": "cos",
+     "final": 0.3448965847492218,
+     "released": 0.2299427092075348
+    }
+   }
+  },
+  "adapter": {
+   "stage": "12",
+   "class": "deterministic",
+   "metrics": {
+    "recall_auc": {
+     "kind": "auc",
+     "final": 0.9447144269943237,
+     "released": 0.792151927947998
+    },
+    "contrastive_sim_matched": {
+     "kind": "cos",
+     "final": 0.3112860321998596,
+     "released": 0.15666726231575012
+    },
+    "dice_matched": {
+     "kind": "cos",
+     "final": 0.5287845198992565,
+     "released": 0.4690095296137929
+    },
+    "pearson_matched": {
+     "kind": "cos",
+     "final": 0.3373297452926636,
+     "released": 0.27477607131004333
+    }
+   }
+  },
+  "qformer_pubmed": {
+   "stage": "13",
+   "class": "bf16",
+   "metrics": {
+    "recall_auc": {
+     "kind": "auc",
+     "final": 0.8957022428512573,
+     "released": 0.8186289072036743
+    },
+    "contrastive_sim_matched": {
+     "kind": "cos",
+     "final": 0.23386584222316742,
+     "released": 0.18672055006027222
+    },
+    "bertscore_f1_matched": {
+     "kind": "cos",
+     "final": 0.5770239233970642,
+     "released": 0.5730204582214355
+    },
+    "semantic_sim_matched": {
+     "kind": "cos",
+     "final": 0.43101173639297485,
+     "released": 0.3987712860107422
+    },
+    "validity_frac_degenerate": {
+     "kind": "frac",
+     "final": 0.0,
+     "released": 0.0
+    },
+    "validity_frac_non_latin": {
+     "kind": "frac",
+     "final": 0.0,
+     "released": null
+    }
+   }
+  },
+  "qformer": {
+   "stage": "14",
+   "class": "bf16",
+   "metrics": {
+    "recall_auc": {
+     "kind": "auc",
+     "final": 0.9526649713516235,
+     "released": 0.9396039843559265
+    },
+    "contrastive_sim_matched": {
+     "kind": "cos",
+     "final": 0.2806948125362396,
+     "released": 0.26582831144332886
+    },
+    "bertscore_f1_matched": {
+     "kind": "cos",
+     "final": 0.5529701709747314,
+     "released": 0.5566627979278564
+    },
+    "semantic_sim_matched": {
+     "kind": "cos",
+     "final": 0.46331584453582764,
+     "released": 0.46806326508522034
+    },
+    "validity_frac_degenerate": {
+     "kind": "frac",
+     "final": 0.0,
+     "released": 0.0
+    },
+    "validity_frac_non_latin": {
+     "kind": "frac",
+     "final": 0.0,
+     "released": null
+    },
+    "validity_frac_noncanonical_title": {
+     "kind": "frac",
+     "final": 0.0,
+     "released": null
+    }
+   }
+  },
+  "cv": {
+   "stage": "20",
+   "class": "deterministic",
+   "metrics": {
+    "contrastive_mean_auc": {
+     "kind": "auc",
+     "final": 0.8239334166049957,
+     "released": 0.8230372726917267
+    },
+    "t2b_generated_mean_auc": {
+     "kind": "auc",
+     "final": 0.7415360152721405,
+     "released": 0.7393014907836915
+    }
+   },
+   "n_folds": 5,
+   "fold0": {
+    "contrastive_mean_auc": 0.8228989839553833,
+    "t2b_generated_mean_auc": 0.742056131362915
+   }
+  }
+ }
+}

@@ -1,5 +1,10 @@
 name: Tests
 
+# Offline test suite (tests/) in the locked environment of the revision: CPython 3.12.12, scripts/config/requirements.lock
+# with the CPU build of torch. Tests marked network, requires_data, requires_pretrained, requires_specter or slow
+# (Hugging Face downloads, released weights, notebooks) are deselected, and the Hugging Face libraries run offline, so
+# the job downloads no data and needs no secrets. The coverage report is uploaded as the artifact coverage-tests.
+
 on:
   pull_request:
     branches:
@@ -9,57 +14,68 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-
+    name: pytest (Python 3.12, locked CPU environment)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CUDA_VISIBLE_DEVICES: ""
+      PYTHONHASHSEED: "0"
+      CUBLAS_WORKSPACE_CONFIG: ":4096:8"
+      TOKENIZERS_PARALLELISM: "false"
+      HF_HUB_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'pip'
+          version: "0.9.26"
+          enable-cache: true
+          cache-dependency-glob: |
+            scripts/config/requirements.lock
+            pyproject.toml
 
-      - name: Cache HuggingFace models
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/huggingface
-            ~/.cache/neurovlm
-          key: ${{ runner.os }}-hf-models-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-hf-models-
-
-      - name: Install dependencies
+      - name: Environment (scripts/config/requirements.lock with the CPU build of torch)
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[metrics]"
-          pip install pytest pytest-cov
+          uv venv .venv --python 3.12.12
+          grep -vE '^(nvidia-|cuda-|triton==)' scripts/config/requirements.lock > "$RUNNER_TEMP/requirements-cpu.txt"
+          uv pip install --python .venv/bin/python --torch-backend cpu -r "$RUNNER_TEMP/requirements-cpu.txt" -e ".[full,test]"
+          .venv/bin/python -c "import torch, transformers, neurovlm; print('torch', torch.__version__, 'cuda', torch.version.cuda, '| transformers', transformers.__version__)"
 
-      - name: Verify installation
-        run: |
-          python -c "import neurovlm; print('neurovlm version:', neurovlm.__version__ if hasattr(neurovlm, '__version__') else 'unknown')"
-          python -c "import torch; print('torch version:', torch.__version__)"
-          python -c "import transformers; print('transformers version:', transformers.__version__)"
-
-      - name: Run offline tests
+      - name: Offline test suite
         run: >-
-          pytest tests/ -v
+          .venv/bin/python -m pytest tests/ -v
           -m "not network and not requires_data and not requires_pretrained and not requires_specter and not slow"
-          --cov=neurovlm --cov-report=xml --cov-report=term --tb=short
+          --cov=neurovlm --cov-config=.coveragerc --cov-report=xml --cov-report=html --cov-report=term --tb=short
 
-      - name: Upload coverage to Codecov
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-tests
+          path: |
+            coverage.xml
+            htmlcov/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload coverage to Codecov (optional, never fails the job)
+        if: always()
+        continue-on-error: true
         uses: codecov/codecov-action@v4
         with:
-          file: ./coverage.xml
+          files: ./coverage.xml
+          flags: unit
           fail_ci_if_error: false
-          verbose: true

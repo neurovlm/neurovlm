@@ -1,0 +1,33 @@
+% Response letter followed by the revised manuscript with the changes marked (latexdiff from the submitted version,
+% paper/sn-article-diff.pdf: additions in blue, deletions in red), in one PDF.  Build the paper and the marked paper
+% first, then here, three times (contents, figure numbers, links):  pdflatex response_letter_with_manuscript.tex
+% The letter is read unchanged from response_letter.tex (its own \documentclass line is skipped).  Every marked manuscript
+% page gets the target ms.<page>, and each "l. 359--363", "p. 14" or "pp. 11--12" in a "Changes to the manuscript" line
+% (\msl, \msp, \mspp in the letter) links to the marked page that holds it, since its line numbers are the marked PDF's
+% (46 per page).  The clean manuscript is submitted on its own and is not appended.  The standalone letter prints the
+% references as text.
+\documentclass[11pt]{article}
+\renewcommand{\documentclass}[2][]{}
+\usepackage{pdfpages}
+\newcommand{\mslink}[2]{\hyperlink{ms.#1}{#2}}
+% \mspg{Fig.S8}: the marked page that holds the caption of Fig. S8 (0 if unknown), for \msfig, \mstab, \msfign and
+% \mstabn in the letter.  The table between the BEGIN and END lines is rewritten by mspages.py from the marked PDF after
+% each paper build.
+\newcommand{\mscaption}[2]{\expandafter\def\csname mspg@#1\endcsname{#2}}
+\newcommand{\mspg}[1]{\ifcsname mspg@#1\endcsname\csname mspg@#1\endcsname\else0\fi}
+% BEGIN caption pages (mspages.py)
+\mscaption{Fig.1}{6}\mscaption{Fig.2}{11}\mscaption{Fig.3}{12}\mscaption{Fig.4}{15}\mscaption{Fig.5}{16}\mscaption{Fig.6}{18}
+\mscaption{Fig.S1}{23}\mscaption{Fig.S2}{24}\mscaption{Fig.S3}{33}\mscaption{Fig.S4}{34}\mscaption{Fig.S5}{39}\mscaption{Fig.S6}{43}
+\mscaption{Fig.S7}{46}\mscaption{Fig.S8}{47}\mscaption{Fig.S9}{48}\mscaption{Fig.S10}{49}\mscaption{Table.S1}{27}\mscaption{Table.S2}{29}
+\mscaption{Table.S3}{32}\mscaption{Table.S4}{32}\mscaption{Table.S5}{35}\mscaption{Table.S6}{40}\mscaption{Table.S7}{41}\mscaption{Table.S8}{44}
+\mscaption{Table.S9}{45}\mscaption{Table.S10}{50}
+% END caption pages
+\newcounter{mspage}
+\AtBeginDocument{\hypersetup{pdftitle={NeuroVLM: response to the reviewers and revised manuscript}}}
+\AtEndDocument{\clearpage
+  \phantomsection\addcontentsline{toc}{section}{Revised manuscript}%
+  \begingroup\hypersetup{pdfview=Fit}%
+  \includepdf[pages=-,pagecommand={\thispagestyle{empty}\stepcounter{mspage}\hypertarget{ms.\arabic{mspage}}{}}]%
+    {../../../../paper/sn-article-diff.pdf}%
+  \endgroup}
+\input{response_letter}

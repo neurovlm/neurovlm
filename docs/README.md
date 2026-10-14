@@ -6,7 +6,7 @@ Edit and commit the `.ipynb` notebooks. Generate Python scripts on demand with
 Jupytext (included in `pip install -e ".[test]"`):
 
 ```bash
-python scripts/export_notebook.py docs/01_tutorials/00_quickstart.ipynb
+python tests/notebooks/export_notebook.py docs/01_tutorials/00_quickstart.ipynb
 ```
 
 The script prints the output path under `docs/generated/notebooks/`, which is
@@ -20,7 +20,7 @@ Smoke tests generate temporary scripts automatically; no committed `.py`
 duplicates are needed. Test one notebook with:
 
 ```bash
-scripts/smoke_notebooks.sh -k 00_quickstart
+python -m pytest tests/notebooks -v -k 00_quickstart
 ```
 
 See `../tests/README.md` for test requirements and limitations.
