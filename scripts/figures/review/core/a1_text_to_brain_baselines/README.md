@@ -17,9 +17,11 @@ transformers 3.3.1 (r > 0.999999, differences below 4e-6 of the map peak, identi
 **Method:** PubMed test set (2,971 papers). Each method maps title + abstract to a brain map, scored against the autoencoder reconstruction of the paper's map:
 Dice of 70th-percentile masks and voxel Pearson r. Ridge = SPECTER2 -> latent, alpha chosen on validation Dice, same decoder. Domain mean = k-means (k = 10) on
 training latents, query -> nearest domain by SPECTER2. Atlas = union of the Harvard-Oxford regions named in the text (2,597 queries), else the mean map.
-Null = NeuroVLM map vs a shuffled paper. Nearest training paper (SPECTER2) and the submitted head are in the csv only. Training-corpus overlap (dagger): 1,295 test papers
+Null = NeuroVLM map vs a shuffled paper. Nearest training paper (SPECTER2) and the submitted head are in the csv only. Training-corpus overlap: 1,295 test papers
 are in the NeuroQuery corpus (NeuroQuery's training set and the pool of Text2Brain's unreleased training split), 1,386 in the Neurosynth v7 database (PMID match);
-`text_to_brain_baselines_subsets.csv` scores every method again on the 1,676 papers outside the NeuroQuery corpus and the 1,157 outside both.
+`text_to_brain_baselines_subsets.csv` scores every method again on the 1,676 papers outside the NeuroQuery corpus and the 1,157 outside both. The figure and the
+table no longer mark the published models; their caption (printed by `make_figure.py` as `[caption] ...`, and in `text_to_brain_baselines_table.tex`) states the
+overlap and that NeuroVLM still beats all three on the 1,157 papers in neither corpus (asserted from the data).
 **Outputs** (`outputs/`): `text_to_brain_baselines.{png,svg}`, `text_to_brain_baselines_table.{csv,tex}`, `text_to_brain_baselines_subsets.csv`, `results_table_full.csv`, `ordering_tests.csv`, `per_query_metrics.parquet`, `run_config.json`.
 **Result:** Dice / r: NeuroVLM 0.531 / 0.322, ridge 0.526 / 0.311, submitted head 0.492 / 0.321, Text2Brain 0.485 / 0.293, every other baseline <= 0.448 / 0.251.
 Outside the NeuroQuery corpus (n = 1,676): NeuroVLM 0.525 / 0.300, ridge 0.521 / 0.288, Text2Brain 0.472 / 0.264, NeuroQuery 0.406 / 0.167.

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -34,7 +35,9 @@ RULES = {  # rule -> (label, colour, definition per direction)
 }
 DIRECTIONS = {"text_to_brain": "a  Text → brain", "brain_to_text": "b  Brain → text"}
 MAP_TYPE_SHORT = {"univariate-beta map": "beta (univariate)", "multivariate-beta map": "beta (multivariate)",
-                  "P map (given null hypothesis)": "p map", "1-P map (\"inverted\" probability)": "1 − p map"}
+                  "P map (given null hypothesis)": "p map", "1-P map (\"inverted\" probability)": "1 − p map",
+                  "other: t, z, or F": "Other (t, z, or F)", "other: effect estimate": "Other (effect estimate)",
+                  "other: component or gradient": "Other (component or gradient)"}
 
 
 def markdown(df: pd.DataFrame) -> str:
@@ -74,9 +77,10 @@ def figure(curves: pd.DataFrame, out: Path, paper: bool = False) -> None:
     print(f"[figure] {out / 'neurovault_bounds.png'}")
 
 
-def map_type_table(per_type: pd.DataFrame, counts: pd.DataFrame, out: Path) -> None:
+def map_type_table(per_type: pd.DataFrame, counts: pd.DataFrame, cfg: dict, out: Path) -> None:
+    """Per-map-type AUCs: declared NeuroVault types first, then the maps labelled 'other' by their inferred kind."""
     pt = per_type[per_type["variant"] == VARIANT].pivot_table(index="map_type", columns="direction", values="recall_curve_auc")
-    c = counts.set_index("map_type").sort_values("n_images", ascending=False)
+    c = counts.assign(other=counts["map_type"].str.startswith("other")).sort_values(["other", "n_images"], ascending=[True, False]).set_index("map_type")
     pt = pt.reindex(index=c.index, columns=["text_to_brain", "brain_to_text"])
     df = pd.DataFrame({
         "Map type": [MAP_TYPE_SHORT.get(t, t) for t in c.index],
@@ -86,8 +90,16 @@ def map_type_table(per_type: pd.DataFrame, counts: pd.DataFrame, out: Path) -> N
         "AUC text → brain": ["–" if pd.isna(pt.loc[t, 'text_to_brain']) else f"{pt.loc[t, 'text_to_brain']:.2f}" for t in c.index],
         "AUC brain → text": ["–" if pd.isna(pt.loc[t, 'brain_to_text']) else f"{pt.loc[t, 'brain_to_text']:.2f}" for t in c.index],
     })
+    kinds = cfg.get("other_map_kinds", {})
+    if cfg.get("other_maps") == "infer":
+        other = (f"Other = maps their uploaders labelled Other in NeuroVault, typed from names, descriptions and values (other_maps.csv); "
+                 f"{kinds.get('mean or variance image', 0)} mean or variance images and {kinds.get('unresolved', 0)} maps that could not be typed are excluded.")
+    elif cfg.get("other_maps") == "exclude":
+        other = f"The {sum(kinds.values())} maps labelled Other in NeuroVault are excluded."
+    else:
+        other = "'other' = maps their uploaders labelled Other in NeuroVault."
     note = ("Every image is its own target (chance AUC 0.50). Parcellations, anatomical maps, ROI masks and variance maps "
-            "are excluded before evaluation; 'other' = maps without a declared type.")
+            f"are excluded before evaluation. {other}")
     df.to_csv(out / "map_type_table.csv", index=False)
     (out / "map_type_table.md").write_text(markdown(df) + "\n" + note + "\n")
     tex = ["% written by a3_neurovault_bounds/make_figure.py", "\\begin{table}[ht]", "\\centering", "\\footnotesize",
@@ -110,18 +122,19 @@ def main() -> None:
         figure(pd.read_csv(out / "recall_curves.csv"), out, paper=True)
         return
     metrics = pd.read_csv(out / "bounds_metrics.csv")
+    cfg = json.loads((out / "config.json").read_text())
     figure(pd.read_csv(out / "recall_curves.csv"), out)
-    map_type_table(pd.read_csv(out / "per_map_type_metrics.csv"), pd.read_csv(out / "map_type_counts.csv"), out)
+    map_type_table(pd.read_csv(out / "per_map_type_metrics.csv"), pd.read_csv(out / "map_type_counts.csv"), cfg, out)
     shown = {(k[d], d): rule for rule, (_, _, k) in RULES.items() for d in DIRECTIONS}
     metrics = metrics[[(d, r) in shown for d, r in zip(metrics["definition"], metrics["direction"])]].copy()
     metrics.insert(0, "rule", [shown[(d, r)] for d, r in zip(metrics["definition"], metrics["direction"])])
     cols = ["rule", "variant", "direction", "definition", "n_queries", "mean_pool_size", "recall@1", "recall@5", "recall@10", "mrr",
             "median_rank", "recall_curve_auc", "chance_recall_curve_auc"]
     metrics[cols].to_csv(out / "bounds_table.csv", index=False, float_format="%.3f")
-    bounds_tex(metrics[metrics["variant"] == VARIANT], out)
+    bounds_tex(metrics[metrics["variant"] == VARIANT], cfg, out)
 
 
-def bounds_tex(m: pd.DataFrame, out: Path) -> None:
+def bounds_tex(m: pd.DataFrame, cfg: dict, out: Path) -> None:
     """outputs/bounds_table.tex: the three target rules of the figure, both directions."""
     names = {"upper": "upper bound: best image per paper", "lower": "lower bound: worst image per paper",
              "multi": "multi-target: every image a target"}
@@ -133,7 +146,7 @@ def bounds_tex(m: pd.DataFrame, out: Path) -> None:
                          *(f"{r[k]:.3f}" for k in ("recall@1", "recall@5", "recall@10", "mrr")), f"{r['median_rank']:.0f}",
                          f"{r['recall_curve_auc']:.3f}", f"{r['chance_recall_curve_auc']:.3f}"])
     tex = ["% written by a3_neurovault_bounds/make_figure.py", "\\begin{table}[ht]", "\\centering", "\\scriptsize",
-           "\\caption{NeuroVault retrieval (305 papers, 3,154 maps) with three choices of target per paper. Positive-tail "
+           f"\\caption{{NeuroVault retrieval ({cfg['n_publications']} papers, {cfg['n_images']:,} maps) with three choices of target per paper. Positive-tail "
            "preprocessing with p-maps inverted; pool = mean number of candidates per query; chance: texts shuffled across papers, "
            "then the same best- or worst-map selection. Every preprocessing variant is in bounds\\_table.csv.}", "\\label{tab:neurovault_bounds}",
            "\\begin{tabular}{llrrrrrrrrr}", "\\toprule",

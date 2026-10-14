@@ -4,9 +4,9 @@
 review/
   RESPONSE.md              the response: letter to the editor, then one short answer per comment with its figure or table
   response_letter.tex      the LaTeX response letter: title page with linked contents, each reviewer from a new page,
-                           comments one after another (quoted verbatim in a shaded box), the RESPONSE.md answers with
-                           links between comments, figures Fig. R1, R2, ... at the full 6.5 in text width and tables
-                           Table R1, R2, ..., each with its caption (written here only)
+                           comments one after another (quoted verbatim in a small shaded box), the RESPONSE.md answers
+                           with links between comments, figures Fig. R1, R2, ... and tables Table R1, R2, ..., each
+                           with its caption (written here only)
   response_letter_with_manuscript.tex
                            the letter followed by the revised manuscript with the changes marked
                            (../../../../paper/sn-article-diff.pdf, latexdiff from the submitted version: additions in
@@ -47,10 +47,13 @@ cd scripts/figures/review && for i in 1 2 3; do pdflatex response_letter_with_ma
 ```
 
 The letter is set on US letter paper with 1 in margins (text block 6.5 x 9 in).  Each figure is shown at the full text
-width unless it would be taller than 0.8 of the text height, floats (here, at the top of a page or on a page of its own)
+width, or at the fraction of it that `\rfigwidth{label}{fraction}` sets in the preamble (paper figures at their 5.15 in
+print width, letter plots drawn 6.5 in wide at the width their content needs), and never taller than 0.8 of the text
+height.  Reviewer comments and the changes lines are set in small type, captions in footnote size.  A reviewer's general
+remarks (comment x.0) follow the reviewer heading directly, without a heading or contents entry.  Figures float (here, at the top of a page or on a page of its own)
 but never past the end of its comment (`\FloatBarrier`); a figure with several pages (`<name>_p2`, ...) is shown one
-page per letter page (only the figures RESPONSE.md shows; 2.12's other failure-case sets are in reviewer_02/ only).  The redrawn paper Figs. 2, 3, S3, and S4 are shown from the reviewer folders and Fig. 4 (Fig. R2, comment 1.1) from `../main/`, since build_reviewer_dirs.py copies no Fig. 4 into reviewer_01/.  Figures are numbered in order of use; a figure a later comment needs is repeated with its full caption
-(one `\cap...` macro) followed by "(Fig. Rn, repeated.)".  RESPONSE.md names each figure in its image alt text
+page per letter page (only the figures RESPONSE.md shows; 2.12's other failure-case sets are in reviewer_02/ only).  The redrawn paper Figs. 2, 3, S3, and S4 are shown from the reviewer folders and Fig. 4 (Fig. R2, comment 1.1) from `../main/`, since build_reviewer_dirs.py copies no Fig. 4 into reviewer_01/.  Figures are numbered in order of use; each is shown once, and a later comment that needs it links to it ("Fig. R3",
+with the comment it belongs to); a table is not repeated either (2.7 points to the 1.5 table).  RESPONSE.md names each figure in its image alt text
 (`![Fig. R7](...)`) and refers to it in the text as "Fig. R7"; the letter uses `\ref`, and the checker compares both.
 Tables work the same way: "Table R7" in RESPONSE.md, `Table~\ref{tab:...}` in the letter (the `\label` sits in the `\rtab`
 caption; tables are numbered by the order of the `\rtab` calls).  A fenced code block of RESPONSE.md must equal a verbatim
@@ -88,7 +91,7 @@ The same table opens [`RESPONSE.md`](RESPONSE.md).
 | Latent dimensions, figure with 2 panels | 3.5, 3.1 | supplement | `a6_latent_interpretation` |
 | Perturbation probes, figure with 3 panels and a table. Loss ablation, table | 3.5 | probes in the reviewer letter, loss ablation in the supplement (Table S10) | `a6_perturbation_probes`, `a5_loss_ablation` |
 | [NETWORK] / [REGION] / [FUNCTION] correctness, figure; network-, anatomy- or cognition-only text to brain, table | 3.6 | reviewer letter | `a6_steering_tokens`, `a6_modality_restricted_t2b` |
-| Failure cases (six sets; the letter shows the worst brain-to-text set, 6 pages) and example percentiles | 2.12, 3.9 | reviewer letter (the other five sets as separate files); percentiles in the Fig. 2, 3 and S4 captions and a letter table | `a7_failure_cases_percentiles` |
+| Failure cases (six sets of 3 pages, two cases per page; the letter shows the worst brain-to-text set) and example percentiles | 2.12, 3.9 | reviewer letter (the other five sets as separate files); percentiles in the Fig. 2, 3 and S4 captions and a letter table | `a7_failure_cases_percentiles` |
 | Out-of-distribution detection, figure with 2 panels | 1.4 | supplement | `a7_ood_confidence` |
 | Memory and latency, table | 1.8 | reviewer letter; one sentence in the paper | `a8_edge_benchmark` |
 | Training details per component, table | 2.11 | supplement (shown in the letter) | `../../README.md`, `../../outputs/runs/final/*.summary.json`, NeuroQwen3-0.6B model card |

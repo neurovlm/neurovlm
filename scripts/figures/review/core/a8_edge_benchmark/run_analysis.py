@@ -63,17 +63,24 @@ def hardware_info(check_gpu: bool) -> dict:
 
 
 def module_bytes(module) -> int:
-    """Bytes of params + buffers, counting dynamically quantized packed weights at their int8 size."""
+    """Bytes of params + buffers held in memory: tied tensors (NeuroQwen3's input embedding = output layer) counted once,
+    dynamically quantized packed weights at their int8 size (state_dict unpacks them into fresh tensors, counted by id)."""
     import torch
+
+    seen: set = set()
 
     def size(v) -> int:
         if torch.is_tensor(v):
+            key = id(v) if v.is_quantized else (v.untyped_storage().data_ptr(), v.storage_offset(), v.numel())
+            if key in seen:
+                return 0
+            seen.add(key)
             return v.numel() * v.element_size()
         if isinstance(v, (tuple, list)):
             return sum(size(x) for x in v)
         return 0
 
-    return int(sum(size(v) for v in module.state_dict().values()))
+    return int(sum(size(v) for v in module.state_dict(keep_vars=True).values()))
 
 
 def cast(module, precision: str, device):
@@ -82,6 +89,9 @@ def cast(module, precision: str, device):
     if precision == "int8":
         from torch.ao.quantization import quantize_dynamic
 
+        # quantize_dynamic swaps exact nn.Linear types only: SPECTER2's adapters library wraps 60 of its 97 linear layers (78 of
+        # 87 M linear weights) in LoRALinearTorch, a subclass, so those stay fp32 (quantizing them too, checked 2026-10-13,
+        # drops the embedding cosine to fp32 from 0.999 to 0.90); nn.MultiheadAttention's out_proj also stays fp32
         return quantize_dynamic(module.float().cpu(), {torch.nn.Linear}, dtype=torch.qint8).eval()
     dtype = {"fp32": torch.float32, "bf16": torch.bfloat16, "fp16": torch.float16}[precision]
     return module.to(device=device, dtype=dtype).eval()
@@ -108,9 +118,23 @@ def reset_peak_rss() -> bool:
         return False
 
 
+def preimport_libraries() -> None:
+    """Import the libraries the loaders and generate() import lazily, so the pre-load RSS baseline already holds them."""
+    import importlib
+
+    for mod in ("safetensors.torch", "transformers", "transformers.generation", "transformers.models.qwen3.modeling_qwen3",
+                "adapters", "neurovlm.models", "neurovlm.models.qformer", "neurovlm.resources.loaders",
+                "torch.ao.quantization", "torch.ao.nn.quantized.dynamic"):
+        try:
+            importlib.import_module(mod)
+        except ImportError:
+            pass
+
+
 def worker(cfg: dict) -> dict:
-    """Load one component in one precision on one device and time it; GPU peak = max allocated, CPU peak = max RSS, both
-    per batch size and after loading (load-time copies, such as the fp32 model int8 is quantised from, are released)."""
+    """Load one component in one precision on one device and time it; GPU peak = max allocated, CPU peak = max RSS (and
+    max RSS minus the pre-load RSS), both per batch size and after loading (load-time copies, such as the fp32 model int8
+    is quantised from, are released and the freed heap is returned to the OS before the peak counter is reset)."""
     import warnings
 
     warnings.filterwarnings("ignore")
@@ -128,6 +152,11 @@ def worker(cfg: dict) -> dict:
            "rss_baseline_mb": proc.memory_info().rss / 2 ** 20}
     inputs = torch.load(cfg["inputs"], weights_only=False)
     texts, maps = inputs["texts"], inputs["maps"].float()
+    preimport_libraries()
+    release_memory()
+    # RSS of the process with Python, PyTorch, transformers and the inputs, before any weight is loaded: the CPU analogue
+    # of the GPU's zero allocated bytes before loading
+    res["rss_pre_load_mb"] = proc.memory_info().rss / 2 ** 20
     wdtype = {"fp32": torch.float32, "bf16": torch.bfloat16, "fp16": torch.float16, "int8": torch.float32}[precision]
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats()
@@ -186,11 +215,13 @@ def worker(cfg: dict) -> dict:
         del ih, enc_lat
     if precision == "int8":  # quantize_dynamic returns an int8 copy: drop the fp32 models it was made from
         lm = nq = None  # noqa: F841
-    release_memory()
     res["load_seconds"] = time.perf_counter() - t0
     res["params"] = n_params
     res["params_total"] = int(sum(n_params.values()))
+    # counted before release_memory(): state_dict() of a dynamically quantized model unpacks every int8 weight into a fresh
+    # tensor, and that freed heap (0.56 GB for NeuroQwen3) stayed in RSS and in the int8 peaks until 2026-10-13
     res["weights_mb"] = sum(module_bytes(m.specter if k == "specter" else m) for k, m in mods.items()) / 2 ** 20
+    release_memory()
     res["rss_after_load_mb"] = proc.memory_info().rss / 2 ** 20
     res["cpu_load_peak_rss_mb"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # loading, incl. int8's fp32 source
     if device.type == "cuda":
@@ -242,6 +273,7 @@ def worker(cfg: dict) -> dict:
         sync = (lambda: torch.cuda.synchronize()) if run_dev.type == "cuda" else (lambda: None)
         if run_dev.type == "cuda":
             torch.cuda.reset_peak_memory_stats()
+        release_memory()  # every batch size starts from the same trimmed heap
         res["peak_rss_reset"] = reset_peak_rss()
         with torch.inference_mode():
             for _ in range(int(cfg["warmup"])):
@@ -261,6 +293,7 @@ def worker(cfg: dict) -> dict:
             b["new_tokens"] = n_new
             b["tokens_per_s"] = bs * n_new / b["latency_median_s"]
         b["cpu_peak_rss_mb"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # this batch size (counter reset above)
+        b["cpu_peak_above_preload_mb"] = b["cpu_peak_rss_mb"] - res["rss_pre_load_mb"]  # weights + run, as the GPU's allocated
         if run_dev.type == "cuda":
             b["gpu_peak_mb"] = torch.cuda.max_memory_allocated() / 2 ** 20
             b["gpu_peak_reserved_mb"] = torch.cuda.max_memory_reserved() / 2 ** 20
@@ -329,7 +362,7 @@ def main(argv=None) -> int:
         devices = ["cuda", "cpu"]
     hw = hardware_info(check_gpu="cuda" in devices)
     if "cuda" not in devices and (out / "hardware.json").exists():  # CPU-only rerun: keep the GPU check of the cached GPU rows
-        hw = {**read_json(out / "hardware.json"), **hw}
+        hw = {**read_json(out / "hardware.json"), **{k: v for k, v in hw.items() if k != "cuda_available"}}  # CUDA may be hidden
     write_json(out / "hardware.json", hw)
     if "cuda" in devices and hw.get("gpu_other_compute_apps"):
         msg = f"GPU is not idle: {hw['gpu_other_compute_apps']} -- GPU numbers would be contaminated"
@@ -384,7 +417,7 @@ def main(argv=None) -> int:
             continue
         r = read_json(f)
         base = {k: r.get(k) for k in ("component", "precision", "device", "params_total", "weights_mb", "load_seconds", "rss_baseline_mb",
-                                       "rss_after_load_mb", "cpu_load_peak_rss_mb", "cpu_peak_rss_mb", "gpu_mem_after_load_mb",
+                                       "rss_pre_load_mb", "rss_after_load_mb", "cpu_load_peak_rss_mb", "cpu_peak_rss_mb", "gpu_mem_after_load_mb",
                                        "torch_threads", "error", "smoke")}
         if "batches" not in r:
             rows.append(base)

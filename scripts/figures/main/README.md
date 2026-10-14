@@ -140,8 +140,8 @@ of n = 2,987, before the 16 leakage-audit papers were dropped, which move its me
 | Fig. 4b MiniLM cosine match / null (p) | 0.469 / 0.401 (< 1e-100) | 0.463 / 0.397 (1e-109) | |
 | Fig. 4b contrastive null test, fraction p < 0.05 | 0.61 | **0.70** | 5 % expected by chance |
 | Fig. 5a PubMed 5-fold CV AUC t->i / i->t | 0.825 / 0.820 | 0.826 / 0.821 | |
-| Fig. 5b NeuroVault upper bound AUC t->i / i->t (n = 305) | 0.832 / 0.774 | **0.845 / 0.785** | a3, mean over k, p-maps inverted (raw maps 0.844 / 0.785, trapezoid 0.843 / 0.783) |
-| Fig. 5b multi-target t->i / i->t | 0.859 / - | **0.864 / 0.622** | |
+| Fig. 5b NeuroVault upper bound AUC t->i / i->t (n = 298) | 0.832 / 0.774 | **0.847 / 0.787** | a3, mean over k, p-maps inverted, maps labeled Other typed (raw maps 0.846 / 0.787, trapezoid 0.843 / 0.783) |
+| Fig. 5b multi-target t->i / i->t | 0.859 / - | **0.866 / 0.626** | |
 | Fig. 5b lower bound t->i / i->t | - | **0.396 / 0.399** | worst map per paper |
 | Fig. 5c voxel AUROC PubMed / NeuroVault | 0.975 / 0.939 | 0.974 / 0.939 | |
 | Fig. 5c median bits-per-pixel gain PubMed / NeuroVault | 30.1 % / 35.7 % | 29.7 % / 35.5 % | |
@@ -246,24 +246,24 @@ is the per-map permutation p-value of the true map among all 2,971 test maps; un
 Pearson 0.32 vs 0.12 (PubMed test).
 
 **Fig. 5b** (`\label{fig:perf_quant}`, "Contrastive recall (AUC=0.78) curve (AUC=0.85)").  The paper recipe (one image
-per paper, chosen with the model) gives text->image **0.85** and image->text **0.78** with p-maps inverted (0.844 on the raw maps).  The panel
+per paper, chosen with the model) gives text->image **0.85** and image->text **0.79** with p-maps inverted (0.846 on the raw maps).  The panel
 now draws, per direction (blue text->image, orange image->text), the upper bound (paper recipe), the multi-target curve
 (every image of the paper is a target) and the lower bound (the image the model scores lowest), read from the a3
 analysis.  Suggested: "b) NeuroVault contrastive recall with three choices of target image per paper: upper bound (the
-image the model scores highest for the paper's text; text->image AUC = 0.85, image->text 0.78), multi-target (every
-image of the paper is a target; 0.86 / 0.62) and lower bound (the image it scores lowest; 0.40 / 0.40). Dashed:
+image the model scores highest for the paper's text; text->image AUC = 0.85, image->text 0.79), multi-target (every
+image of the paper is a target; 0.87 / 0.63) and lower bound (the image it scores lowest; 0.40 / 0.40). Dashed:
 chance of each curve, the same rule with every abstract given to another paper (mean of 20 derangements; AUC 0.74 / 0.70,
-0.76 / 0.50 and 0.30 / 0.31)."  Chance is not k/N here: the upper and lower bounds choose the target with the same
+0.76 / 0.51 and 0.31 / 0.32)."  Chance is not k/N here: the upper and lower bounds choose the target with the same
 similarities they rank (best / worst of 10.3 maps per paper on average) and multi-target text->image counts a hit for any
-of the paper's maps; only multi-target image->text (one abstract per map among 305) is the diagonal.  Independent random
+of the paper's maps; only multi-target image->text (one abstract per map among 298) is the diagonal.  Independent random
 similarities would give 0.82 (upper), 0.18 (lower) and 0.82 (multi text->image), because they ignore that a paper's maps
 resemble each other; the derangement keeps the model's map geometry (a3's null, also drawn in its own figure).  **Why
-text->image > image->text:** both rank the same 305 x 305 similarity matrix (one image per paper, same exclusions), so
+text->image > image->text:** both rank the same 298 x 298 similarity matrix (one image per paper, same exclusions), so
 the pools are matched and the gap is not an artefact; a few generic abstracts are close to most maps (one is the nearest
-abstract for 39 of the 305 maps), which pushes the true abstract down when a map ranks the abstracts but is constant
+abstract for 38 of the 298 maps), which pushes the true abstract down when a map ranks the abstracts but is constant
 within an abstract's ranking of the maps (subtracting each abstract's mean similarity to all maps lifts image->text from
-0.785 to 0.841, text->image stays 0.844); the multi-target gap (0.86 / 0.62) is by construction (several hits among
-3,154 maps vs one hit among 305 abstracts; chance 0.76 / 0.50).  Panel a's
+0.787 to 0.842, text->image stays 0.847); the multi-target gap (0.87 / 0.63) is by construction (several hits among
+3,074 maps vs one hit among 298 abstracts; chance 0.76 / 0.51, 0.50 in expectation).  Panel a's
 "AUC=0.81" matches neither direction (5-fold CV 0.83 / 0.82); panel c's AUROC is 0.974 on the PubMed test split (the
 text's 0.975) and 0.939 on NeuroVault (the caption's 0.94).
 

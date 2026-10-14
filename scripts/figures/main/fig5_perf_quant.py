@@ -30,22 +30,22 @@ B_RULES = {  # rule -> a3 definition per direction (as a3's figure)
 }
 B_TINT = {"upper": 0.0, "multi": 0.4, "lower": 0.6}  # mixed with white: one hue per direction, lighter = weaker target
 B_ASYMMETRY = (
-    "upper (paper recipe): both directions rank the same 305 x 305 similarity matrix (one map per paper, same "
+    "upper (paper recipe): both directions rank the same 298 x 298 similarity matrix (one map per paper, same "
     "exclusions), "
     "text->image along its rows and image->text along its columns, so the pools are matched and the gap is not an "
-    "artefact: a few generic abstracts are close to most maps (text hubs; one abstract is the nearest text for 39 of "
-    "the 305 maps, 8 abstracts are in the top 5 of >= 10 % of the maps vs 1 map in the top 5 of >= 10 % of the "
+    "artefact: a few generic abstracts are close to most maps (text hubs; one abstract is the nearest text for 38 of "
+    "the 298 maps, 8 abstracts are in the top 5 of >= 10 % of the maps vs 1 map in the top 5 of >= 10 % of the "
     "abstracts), which pushes the true abstract down when a map ranks the texts but is a constant within a text's own "
-    "ranking of the maps; subtracting each abstract's mean similarity to all 3,154 maps lifts image->text from 0.785 "
-    "to 0.841 and leaves text->image at 0.844 (check on the a3 latents). multi: the pools differ by definition "
-    "(text->image: any of the paper's maps among all 3,154 is a hit; image->text: each map ranks the 305 abstracts "
-    "with one hit), hence 0.86 vs 0.62 (chance 0.76 vs 0.50).")
+    "ranking of the maps; subtracting each abstract's mean similarity to all 3,074 maps lifts image->text from 0.787 "
+    "to 0.842 and leaves text->image at 0.847 (check on the a3 latents, variant released). multi: the pools differ by definition "
+    "(text->image: any of the paper's maps among all 3,074 is a hit; image->text: each map ranks the 298 abstracts "
+    "with one hit), hence 0.87 vs 0.63 (chance 0.76 vs 0.51, 0.50 in expectation).")
 B_CHANCE = (
     "dashed, one per curve in its colour: a3's null of the same rule (recall_curves.csv 'chance', bounds_metrics.csv "
     "chance_recall_curve_auc): every text is given to another paper (a derangement), then the same best / worst / "
     "any-map selection and ranking are applied; mean of 20 derangements. Not k/N: upper and lower pick the target with "
     "the similarities they rank and multi text->image counts any of the paper's maps, so only multi image->text (one "
-    "text per map among 305) is the diagonal.")
+    "text per map among 298) is the diagonal.")
 
 # docs/figures/13 cell 3: class of every non-ICA atlas map in HF order
 LABEL_MAP = [
@@ -595,7 +595,7 @@ def main():
                            "weaker target: upper = the paper's map the model scores highest for its text (paper "
                            "recipe; a3 paper_upper), multi = every map of the paper is a target (text->image: hit when "
                            "any of its maps is in the top k of all maps, a3 oracle_any_true; image->text: every map "
-                           "ranks the 305 texts, a3 per_image), lower = the map it scores lowest (a3 worst_image); "
+                           "ranks the 298 texts, a3 per_image), lower = the map it scores lowest (a3 worst_image); "
                            "dashed lines in the same colour = chance of that curve; legend: AUC (chance AUC)",
                 "chance": B_CHANCE,
                 "auc": {k: round(v["auc"], 4) for k, v in b["curves"].items()},

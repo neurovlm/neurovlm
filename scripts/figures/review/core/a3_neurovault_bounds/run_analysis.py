@@ -3,7 +3,9 @@
 
 Maps are re-read from the raw NIfTIs (NaN -> 0, nearest resampling to the 4 mm mask), branched by map type (signed:
 positive tail / |value| / sign split; p-maps inverted to 1 - p; 1 - p maps and masks used directly), then normalised as
-in the paper (per-image 99th percentile, clamp to [0, 1]). Variant 'released' (Fig. 5b) is the published map tensor with
+in the paper (per-image 99th percentile, clamp to [0, 1]). Maps whose uploaders chose the type 'other' are typed from
+their names, descriptions, siblings and values (_other_maps.py); mean or variance images and maps that cannot be typed are
+excluded (--other-maps infer, default; keep / exclude are written to other_maps_options.csv). Variant 'released' (Fig. 5b) is the published map tensor with
 its p-maps rebuilt from the NIfTIs as 1 - p under the same threshold rules; 'released_raw' is the tensor as published. Target rules: paper_upper (image the model scores highest
 for the paper's text), worst_image (lowest), oracle_any_true / per_image (every image a target), worst_case.
 
@@ -28,6 +30,7 @@ from tqdm.auto import tqdm
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import _final_model as M  # noqa: E402
+import _other_maps as OM  # noqa: E402
 
 N_VOXELS = 28_542
 KS = (1, 5, 10)
@@ -237,6 +240,7 @@ def _mask_vector(path: Path, mask_data: np.ndarray, mask_affine: np.ndarray) -> 
         "min": float(v.min()),
         "max": float(v.max()),
         "n_unique": int(min(np.unique(v).size, 100_000)),
+        **dict(zip(("q001", "q01", "q99", "q999"), np.quantile(v, [0.001, 0.01, 0.99, 0.999]).astype(float).tolist())),
     }
     return v, stats
 
@@ -309,6 +313,8 @@ def preprocess_images(meta: pd.DataFrame, root: Path, masker: Any, ae: Any, devi
     if cache.exists() and not force:
         z = np.load(cache, allow_pickle=True)
         done = {k: z[k] for k in z.files}
+        if "stats" in done and len(done["stats"]) and "q99" not in done["stats"][0]:
+            done = {}  # cache from before the value quantiles
     have = set(done.get("ids", np.array([], dtype=np.int64)).tolist())
     todo = np.flatnonzero(~np.isin(ids, list(have)))
     mask_data = np.asarray(masker.mask_img_.dataobj) > 0
@@ -351,6 +357,40 @@ def preprocess_images(meta: pd.DataFrame, root: Path, masker: Any, ae: Any, devi
     latents = {k: torch.as_tensor(done[f"lat_{k}"][order]) for k in ("released", "released_raw", "pos", "abs", "neg")}
     stats = pd.DataFrame(list(done["stats"])).set_index("id").loc[ids].reset_index()
     return latents, stats
+
+
+def paper_groups(meta: pd.DataFrame, pub_idx: np.ndarray) -> tuple[np.ndarray, list[np.ndarray]]:
+    """Papers of ``pub_idx`` with at least one map in ``meta`` and the row indices of their maps."""
+    q = meta["pub_index"].astype(int).map({p: i for i, p in enumerate(pub_idx)}).to_numpy()
+    groups = [np.flatnonzero(q == i) for i in range(len(pub_idx))]
+    keep = np.asarray([len(g) > 0 for g in groups], dtype=bool)
+    return pub_idx[keep], [g for g, k in zip(groups, keep) if k]
+
+
+def option_bounds(z_text: torch.Tensor, z_img: dict[str, torch.Tensor], meta: pd.DataFrame, pub_idx: np.ndarray, masks: dict[str, np.ndarray],
+                  n_null: int, seed: int) -> pd.DataFrame:
+    """AUC and chance of the three target rules (and per map) for each handling of the 'other' maps; rows of ``z_text``
+    follow ``pub_idx`` (sorted), rows of ``z_img`` follow ``meta``."""
+    rows = []
+    for opt, m in masks.items():
+        sub = meta[m].reset_index(drop=True)
+        pubs, groups = paper_groups(sub, pub_idx)
+        zt = z_text[torch.as_tensor(np.searchsorted(pub_idx, pubs))]
+        order_key = [sub["id"].to_numpy()[g] for g in groups]
+        for var in ("released", "pos"):
+            S = (zt @ z_img[var][torch.as_tensor(np.flatnonzero(m))].T).numpy()
+            for direction, fn in (("text_to_brain", t2i_definitions), ("brain_to_text", i2t_definitions)):
+                defs = fn(S, groups, order_key, np.random.default_rng(seed + 1), 0)
+                nulls = [fn(S[deranged_permutation(len(S), np.random.default_rng(seed + 1000 + d))], groups, order_key, np.random.default_rng(seed + 2000 + d), 0)
+                         for d in range(n_null)]
+                rules = {"upper": "paper_upper", "lower": "worst_image", "multi": "oracle_any_true" if direction == "text_to_brain" else "per_image"}
+                if direction == "text_to_brain":
+                    rules["per map"] = "per_image"
+                for rule, name in rules.items():
+                    rows.append({"other_maps": opt, "variant": var, "direction": direction, "rule": rule, "definition": name, "n_publications": len(pubs),
+                                 "n_images": int(m.sum()), "recall_curve_auc": rank_metrics(*defs[name][:2])["recall_curve_auc"],
+                                 "chance_recall_curve_auc": float(np.mean([rank_metrics(*nl[name][:2])["recall_curve_auc"] for nl in nulls]))})
+    return pd.DataFrame(rows)
 
 
 def rank_metrics(ranks: np.ndarray, sizes: np.ndarray) -> dict[str, float]:
@@ -470,6 +510,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--qc-count-all", action="store_true", help="Also run the image-QC count over every eligible NIfTI (~4.6k files).")
     p.add_argument("--force", action="store_true", help="Recompute even if outputs exist, including the cached NIfTI latents.")
     p.add_argument("--no-exclusions", dest="exclusions", action="store_false", help="Keep the leakage-audit NeuroVault items.")
+    p.add_argument("--other-maps", choices=("infer", "keep", "exclude"), default="infer",
+                   help="Maps of NeuroVault type 'other': typed by _other_maps.py, mean / variance images and untyped maps dropped (infer), "
+                        "all kept as signed maps (keep, the submission) or all dropped (exclude).")
     args = p.parse_args()
     if args.smoke:
         args.max_samples = args.max_samples or 48
@@ -519,11 +562,6 @@ def main() -> None:
                   "n_neurovault_publications_before": int(n_pub_before), "n_neurovault_publications_dropped": int((~pub_keep).sum()),
                   "n_neurovault_images_before": int(n_images_before), "n_neurovault_images_dropped": int(n_images_before - len(meta_all)),
                   "n_pubmed_test_dropped": 0, "n_pubmed_val_dropped": 0, "note": "PubMed is not used by this analysis"}
-    mt = meta_all.groupby("map_type").agg(n_images=("id", "size"), n_publications=("doi", "nunique")).reset_index()
-    mt["map_class"] = mt["map_type"].map(map_class)
-    mt["preprocessing"] = mt["map_class"].map({"signed": "positive tail (paper) | |value| | sign split", "p_map": "inverted (1 - p) before normalisation", "inv_p_map": "used directly", "mask": "binary, used directly"})
-    mt["share_images"] = mt["n_images"] / mt["n_images"].sum()
-    mt.sort_values("n_images", ascending=False).to_csv(out / "map_type_counts.csv", index=False)
 
     pool = np.flatnonzero(pub_keep)  # indices into df_text / the neurovault_text latents
     n_pub_total = len(pool)
@@ -531,12 +569,7 @@ def main() -> None:
     if args.max_samples:
         pub_idx = np.sort(pool[rng.permutation(n_pub_total)[: args.max_samples]])
     meta = meta_all[meta_all["pub_index"].isin(pub_idx)].reset_index(drop=True)
-    pub_pos = {p: i for i, p in enumerate(pub_idx)}
-    meta["q"] = meta["pub_index"].astype(int).map(pub_pos)
-    groups = [np.flatnonzero(meta["q"].to_numpy() == i) for i in range(len(pub_idx))]
-    keep = np.asarray([len(g) > 0 for g in groups])
-    pub_idx, groups = pub_idx[keep], [g for g, k in zip(groups, keep) if k]
-    order_key = [meta["id"].to_numpy()[g] for g in groups]
+    pub_idx, _ = paper_groups(meta, pub_idx)
     print(f"[data] publications={len(pub_idx)} (of {n_pub_total} after exclusions) images={len(meta)} (released {len(meta_all)} after exclusions; "
           f"excluded map types in release: {len(excluded)}; leakage exclusions dropped {exclusions['n_neurovault_publications_dropped']} publications / "
           f"{exclusions['n_neurovault_images_dropped']} images)")
@@ -557,8 +590,6 @@ def main() -> None:
     with timings.time("preprocess"):
         latents, stats = preprocess_images(meta, root, masker, ae, device, cache_dir, args.n_jobs, released, released_raw, force=args.force)
         del released, released_raw
-    stats = stats.merge(meta[["id", "doi", "q"]], on="id", how="left")
-    stats.to_csv(out / "image_preprocessing_stats.csv", index=False)
     print(f"[sanity] median corr(pos, released) = {stats['corr_pos_vs_released'].median():.4f}; images with a negative tail (>=1 % voxels): {int(stats['has_negative_tail'].sum())}")
 
     with timings.time("embeddings"):
@@ -566,6 +597,45 @@ def main() -> None:
         with torch.no_grad():
             z_text = l2n(text_head(l2n(text_lat).to(device))).cpu()
             z_img = {k: l2n(image_head(v.to(device))).cpu() for k, v in latents.items()}
+
+    # maps of NeuroVault type 'other': kind from names, descriptions, siblings and values; bounds under each handling
+    with timings.time("other_maps"):
+        vals = meta[["id", "collection_id", "doi", "map_type"]].merge(stats[["id", "frac_negative", "min", "max", "q001", "q01", "q99", "q999"]], on="id", how="left")
+        other = OM.other_map_kinds(vals, md["local_img"], md["local_col"])
+        other.to_csv(out / "other_maps.csv", index=False)
+        OM.name_rule_check(vals, md["local_img"]).to_csv(out / "other_maps_rule_check.csv", index=False)
+        is_other = meta["map_type"].eq("other").to_numpy()
+        eval_type = dict(zip(other["id"], other["map_type_eval"]))
+        masks = {"keep": np.ones(len(meta), dtype=bool), "infer": ~is_other | meta["id"].map(eval_type).notna().to_numpy(), "exclude": ~is_other}
+        option_bounds(z_text, z_img, meta, pub_idx, masks, args.n_null_draws, args.seed).to_csv(out / "other_maps_options.csv", index=False)
+        sel = np.flatnonzero(masks[args.other_maps])
+        n_drop_img, n_pub_sup = len(meta) - len(sel), len(pub_idx)
+        meta, stats = meta.iloc[sel].reset_index(drop=True), stats.iloc[sel].reset_index(drop=True)
+        z_img = {k: v[torch.as_tensor(sel)] for k, v in z_img.items()}
+        if args.other_maps == "infer":
+            meta["map_type"] = [eval_type.get(i) or t for i, t in zip(meta["id"], meta["map_type"])]
+            stats["map_type"] = meta["map_type"].to_numpy()
+        pub_sup = pub_idx
+        pub_idx, groups = paper_groups(meta, pub_sup)
+        z_text = z_text[torch.as_tensor(np.searchsorted(pub_sup, pub_idx))]
+        meta["q"] = meta["pub_index"].astype(int).map({p: i for i, p in enumerate(pub_idx)})
+        order_key = [meta["id"].to_numpy()[g] for g in groups]
+    print(f"[other maps] {int(is_other.sum())} maps of type 'other': " + ", ".join(f"{k} {v}" for k, v in other["kind"].value_counts().items())
+          + f"; --other-maps {args.other_maps}: {n_drop_img} images / {n_pub_sup - len(pub_idx)} publications dropped -> {len(meta)} images, {len(pub_idx)} publications")
+    if args.other_maps != "keep":
+        rule = "typed from names and values; mean or variance images and untyped maps removed" if args.other_maps == "infer" else "all removed"
+        row = {"stage": f"J. ... maps of NeuroVault type 'other' {rule} (--other-maps {args.other_maps})", "n_images": len(meta),
+               "n_collections": int(meta["collection_id"].nunique()), "n_dois": int(meta["doi"].nunique()),
+               "note": f"{n_drop_img} images / {n_pub_sup - len(pub_idx)} publications dropped (outputs/other_maps.csv); the set every metric here is computed on"}
+        counts = pd.concat([counts, pd.DataFrame([row])], ignore_index=True)
+        counts.to_csv(out / "counts_table.csv", index=False)
+    stats = stats.merge(meta[["id", "doi", "q"]], on="id", how="left")
+    stats.to_csv(out / "image_preprocessing_stats.csv", index=False)
+    mt = meta.groupby("map_type").agg(n_images=("id", "size"), n_publications=("doi", "nunique")).reset_index()
+    mt["map_class"] = mt["map_type"].map(map_class)
+    mt["preprocessing"] = mt["map_class"].map({"signed": "positive tail (paper) | |value| | sign split", "p_map": "inverted (1 - p) before normalisation", "inv_p_map": "used directly", "mask": "binary, used directly"})
+    mt["share_images"] = mt["n_images"] / mt["n_images"].sum()
+    mt.sort_values("n_images", ascending=False).to_csv(out / "map_type_counts.csv", index=False)
     # candidates per variant; signsplit = positive maps plus the negative tails (when present)
     neg_ok = stats["has_negative_tail"].to_numpy()
     variant_sets: dict[str, dict[str, Any]] = {}
@@ -631,6 +701,10 @@ def main() -> None:
         "n_publications_total": int(n_pub_total),
         "n_images": int(len(meta)),
         "n_images_released": int(len(meta_all)),
+        "other_maps": args.other_maps,
+        "other_map_kinds": {k: int(v) for k, v in other["kind"].value_counts().items()},
+        "n_other_maps_dropped": int(n_drop_img),
+        "n_publications_dropped_other_maps": int(n_pub_sup - len(pub_idx)),
         "exclusions": exclusions,
         "n_negative_tail_images": int(neg_ok.sum()),
         "excluded_map_types": EXCLUDED_TYPES,
