@@ -18,14 +18,14 @@
 % BEGIN caption pages (mspages.py)
 \mscaption{Fig.1}{6}\mscaption{Fig.2}{11}\mscaption{Fig.3}{12}\mscaption{Fig.4}{15}\mscaption{Fig.5}{16}\mscaption{Fig.6}{18}
 \mscaption{Fig.S1}{23}\mscaption{Fig.S2}{24}\mscaption{Fig.S3}{33}\mscaption{Fig.S4}{34}\mscaption{Fig.S5}{39}\mscaption{Fig.S6}{42}
-\mscaption{Fig.S7}{44}\mscaption{Fig.S8}{45}\mscaption{Fig.S9}{46}\mscaption{Fig.S10}{47}\mscaption{Fig.S11}{48}\mscaption{Fig.S12}{49}
-\mscaption{Table.S1}{27}\mscaption{Table.S2}{29}\mscaption{Table.S3}{32}\mscaption{Table.S4}{32}\mscaption{Table.S5}{35}\mscaption{Table.S6}{40}
-\mscaption{Table.S7}{40}\mscaption{Table.S8}{43}\mscaption{Table.S9}{44}\mscaption{Table.S10}{50}
+\mscaption{Fig.S7}{45}\mscaption{Fig.S8}{46}\mscaption{Fig.S9}{47}\mscaption{Fig.S10}{48}\mscaption{Fig.S11}{49}\mscaption{Table.S1}{27}
+\mscaption{Table.S2}{29}\mscaption{Table.S3}{32}\mscaption{Table.S4}{32}\mscaption{Table.S5}{35}\mscaption{Table.S6}{40}\mscaption{Table.S7}{40}
+\mscaption{Table.S8}{43}\mscaption{Table.S9}{44}\mscaption{Table.S10}{50}
 % END caption pages
 \newcounter{mspage}
 \AtBeginDocument{\hypersetup{pdftitle={NeuroVLM: response to the reviewers and revised manuscript}}}
 \AtEndDocument{\clearpage
-  \phantomsection\addcontentsline{toc}{section}{Revised manuscript with changes marked}%
+  \phantomsection\addcontentsline{toc}{section}{Revised manuscript}%
   \begingroup\hypersetup{pdfview=Fit}%
   \includepdf[pages=-,pagecommand={\thispagestyle{empty}\stepcounter{mspage}\hypertarget{ms.\arabic{mspage}}{}}]%
     {../../../../paper/sn-article-diff.pdf}%

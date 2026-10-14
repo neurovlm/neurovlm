@@ -108,9 +108,9 @@
 \long\def\revzero#1.#2.#3\relax#4#5{\ifnum#2=0 #4\else#5\fi}
 \newcommand{\revgeneralpage}[1]{\revgeneral{#1}}
 % captions of the figures that later comments link to (each figure is shown once)
-\newcommand{\capbaselines}{\textbf{Text-to-brain baselines.} Text-to-brain maps from NeuroVLM and other methods, scored against each test paper's reconstructed map ($n = 2{,}971$). Panels show (a)~Dice and (b)~voxelwise Pearson $r$, with means and 95\% bootstrap intervals. Dice uses each map's top 30\% of voxels. Neurosynth, NeuroQuery, and Text2Brain were used as published. Their corpora include 1{,}386 (Neurosynth) or 1{,}295 (NeuroQuery and Text2Brain) test papers, which can only favor them. Text2Brain's training split is unreleased, so instead of retraining we scored the 1{,}157 papers in neither corpus, and NeuroVLM still beats all three.}
+\newcommand{\capbaselines}{\textbf{Text-to-brain baselines.} Text-to-brain maps from NeuroVLM and other methods, scored against each PubMed test paper's reconstructed map ($n = 2{,}971$). Panels show (a)~Dice and (b)~voxelwise Pearson $r$, with means and 95\% bootstrap intervals. Dice uses each map's top 30\% of voxels. Neurosynth, NeuroQuery, and Text2Brain were used as published. Their corpora include 1{,}386 (Neurosynth) or 1{,}295 (NeuroQuery and Text2Brain) test papers, which can only favor them. Text2Brain's training split is unreleased, so instead of retraining we scored the 1{,}157 papers in neither corpus, and NeuroVLM still beats all three.}
 \newcommand{\capdataflow}{\textbf{Data flow of the final model.} Box 2 holds InfoNCE text and image heads for retrieval and a text-to-brain head to the autoencoder latent. The anatomical head (3) grounds region and network texts, learning from atlas-derived synthetic pairs. Projectors 4 and 5 feed the language model for brain-to-text generation. Gray arrows carry data or weights, orange dashed arrows evaluation-only sets.}
-\newcommand{\capbounds}{\textbf{NeuroVault retrieval.} Recall for (a)~text to brain and (b)~brain to text, with each paper's best, worst, or every map as target. Dashed lines show chance from shuffled texts. The best map, or any of a paper's maps counting as a hit in (a), lifts chance above the diagonal, and the worst map lowers it.}
+\newcommand{\capbounds}{\textbf{NeuroVault retrieval.} NeuroVLM recall from (a)~text to brain and (b)~brain to text, with each paper's best map (scored highest for its text), worst map (lowest), or every map as target. Chance (dashed) gives each paper's text to another paper at random, applies the same rule, and averages 20 such recall curves. Picking the best of several maps lifts chance above the $k/n$ diagonal even for an unrelated text (AUC 0.74 and 0.70). Picking the worst lowers it (0.31 and 0.32). The every-map rule picks nothing, so chance is the diagonal in (b) but above it in (a), where any of a paper's maps is a hit (0.51 and 0.76).}
 \begin{document}
 \thispagestyle{empty}
 \begin{center}
@@ -128,7 +128,7 @@ We thank the editor and reviewers for their thoughtful comments. The revisions a
   \item Independent voxel-space evaluation of text-to-brain maps against simple baselines and existing, published models (\cmt{1.1}).
   \item Retrieval measured by recall@k, mean reciprocal rank, and median rank, also against hard negatives (\cmt{1.1}).
   \item A comparison of generated and retrieved captions (\cmt{3.3}).
-  \item A data-flow diagram of every training stage (\cmt{1.2}).
+  \item A data-flow diagram of the training stages (\cmt{1.2}).
   \item NeuroVault results reported as an upper bound, a lower bound, and a multi-target evaluation, with map types handled separately (\cmt{1.3}).
   \item A leakage audit beyond DOI matching (\cmt{2.4}).
   \item Out-of-distribution and failure-case analyses (\cmt{1.4} and \cmt{2.12}).
@@ -138,14 +138,13 @@ We thank the editor and reviewers for their thoughtful comments. The revisions a
 We also updated the model and its evaluation:
 
 \begin{itemize}
-  \item We added a latent-space loss when training the text-to-brain head, which makes its maps more accurate (\cmt{1.1}).
+  \item The text-to-brain head is trained with a new loss, latent error plus decoded-map correlation, which makes its maps more accurate (\cmt{1.1} and \cmt{3.5}).
   \item Generated maps are calibrated to the scale of the training maps, with one factor per model fitted on the validation set.
   \item An MLP projector replaces the Qformer in both brain-to-text stages (\cmt{2.1}).
   \item The language model still generates every title, steered toward the canonical network and region names by masking tokens that cannot continue one (\cmt{2.12}).
-  \item Decoding uses Latin-script tokens only (\cmt{2.12}).
   \item The synthetic training maps had included held-out papers. We rebuilt them from training papers only and retrained the models that use them (\cmt{2.4}).
   \item Every evaluation leaves out the duplicated papers found by the leakage audit (\cmt{2.4}).
-  \item All paper figures were redrawn from the final model.
+  \item All result figures were redrawn from the final model and optimized for ease of viewing.
 \end{itemize}
 % calibration: one global factor per model fitted on the validation set, no per-map fallback (z64/calibration.md; RESPONSE.md hidden note)
 
@@ -175,9 +174,9 @@ This is an ambitious and timely manuscript introducing \textbf{NeuroVLM}, a unif
 
 \textbf{Independent evaluation.} Both directions are also scored outside NeuroVLM's representation space. Maps are compared in voxel space, and NeuroVLM also leads against the raw coordinate maps. MiniLM cosine and BERTScore, whose encoders were not used in training, compare generated captions with the paper's text (Reviewer 3, \cmt{3.3}).
 
-\textbf{Matched and shuffled pairs.} The submission's BERTScore null came from an earlier generation run. With the null computed from the same captions, BERTScore separates matched from shuffled pairs only weakly (0.553 against 0.548). BERTScore mostly rewards the style of the reference, an LLM summary. Even random training texts in that style score higher (Table~\ref{tab:genret}).
+\textbf{Matched and shuffled pairs.} BERTScore separates matched from shuffled pairs only weakly (0.553 against 0.548) with the null computed from the same captions. BERTScore mostly rewards the style of the reference, an LLM summary, rather than the domain-specific correctness. Random training texts in that style score higher (Table~\ref{tab:genret}).
 
-\textbf{Modest differences.} The narrow gaps are real. Captions describe the map rather than the study, so they share little content with the paper's text. Unrescaled BERTScore stays near 0.58 even for two unrelated papers. The matched caption scores higher for 57\% of maps by BERTScore, and more often by MiniLM. Fig.~\ref{fig:fig4} shows that the paired test over all test maps resolves this small shift.
+\textbf{Modest differences.} The narrow gaps in BERT and semantic scores are a result of using general models without fine-tuned neuroscience domain knowledge. The in-domain gap between matched and null distributions is larger. The evaluation within NeuroVLM's latent space is on the left-out test set and shows that domain-specific encoders are required to evaluate performance.
 
 \textbf{Expert ratings.} We did not run blinded expert ratings, because they are time consuming and hard to scale. Instead, we used existing expert labels and automatic checks. For anatomical and semantic accuracy, region titles are checked against anatomical atlases and network titles against expert atlas labels (Reviewer 3, \cmt{3.6}). Hard negatives test specificity. Unsupported claims are counted as study details that a map cannot support (Reviewer 3, \cmt{3.3}).
 
@@ -185,18 +184,18 @@ This is an ambitious and timely manuscript introducing \textbf{NeuroVLM}, a unif
 
 \textbf{Nearest training examples.} Generated maps match each test paper's map better than the map of the nearest training paper does (Table~\ref{tab:t2b}). By MiniLM cosine, generated captions are as close to the paper's text as the nearest training caption. However, 57\% of these retrieved captions report details of another study, against 2\% of generated captions. Reviewer 3 raised the same concern (\cmt{3.3}).
 
-\textbf{Simple baselines.} Fig.~\ref{fig:baselines} and Table~\ref{tab:t2b} include each suggested baseline. The linear regression is NeuroVLM with a linear head. It maps the SPECTER2 embedding to the autoencoder latent, the spatial coefficients of each map. We fit it by ridge regression, with the penalty chosen on the validation set. NeuroVLM's non-linear head learns the same mapping through a hidden layer and a loss that also scores the decoded map.
+\textbf{Simple baselines.} Fig.~\ref{fig:baselines} and Table~\ref{tab:t2b} include each suggested baseline. The linear regression is NeuroVLM with a linear head. It maps the SPECTER2 embedding to the autoencoder latent, the spatial coefficients of each map. We fit it by ridge regression, with the penalty chosen on the validation set. The non-linear head adds a hidden layer and replaces cross-entropy with a new loss, latent error plus decoded-map correlation (Table~\ref{tab:ablation}).
 
 \textbf{Retrieval measures.} Table~\ref{tab:retrieval} reports recall@1, recall@5, recall@10, mean reciprocal rank, and median rank in both directions. Fig.~\ref{fig:baselines} and Table~\ref{tab:retrieval} are new in the Supplementary Information.
 \rfig{fig:baselines}{reviewer_01/1.1_text_to_brain_baselines.png}{\capbaselines}
 % the paper's Fig. 4 (../main/fig4_generative_metrics.py; paired differences: fig4_generative_metrics_text.json)
-\rfig{fig:fig4}{../main/fig4_generative_metrics.png}{\textbf{New \msfig{4}.} Text-to-brain (a) and brain-to-text (b) generation on the PubMed test set ($n = 2{,}971$). Boxes compare matched (Match, blue) and shuffled pairs (Null, gray). Stars mark $p < 0.05$, $0.01$, and $0.001$.}
+\rfig{fig:fig4}{../main/fig4_generative_metrics.png}{\textbf{New \msfig{4}.} Text-to-brain (a) and brain-to-text (b) generation by the final model on the PubMed test set ($n = 2{,}971$). Left panels show recall when each generated output retrieves its true item, with $k/n$ the fraction of all candidates. Boxes compare matched (Match, blue) and shuffled pairs (Null, gray) for each score. Stars mark $p < 0.05$, $0.01$, and $0.001$.}
 % source: core/a1_text_to_brain_baselines/outputs/results_table_full.csv (PubMed test set, n = 2,971); Text2Brain row: same file (released weights, two fixes for current libraries)
 \rtab{\textbf{Text-to-brain maps on the PubMed test set.} Mean Dice and Pearson $r$ between each method's map and the test paper's reconstructed map ($n = 2{,}971$), as in Fig.~\ref{fig:baselines}. The nearest training paper is the one whose text is closest to the query.\label{tab:t2b}}{\small\begin{tabular}{lcc}\toprule
 \textbf{Method} & \textbf{Dice} & \textbf{Pearson $r$} \\\midrule
-NeuroVLM (non-linear head) & 0.531 & 0.322 \\\midrule
+NeuroVLM (non-linear head) & 0.531 & 0.322 \\
+NeuroVLM (linear head) & 0.526 & 0.311 \\\midrule
 \multicolumn{3}{l}{\textbf{Simple baselines}} \\
-\quad NeuroVLM (linear head) & 0.526 & 0.311 \\
 \quad Domain mean map & 0.448 & 0.245 \\
 \quad Atlas-based labeling & 0.431 & 0.175 \\
 \quad Global mean map & 0.420 & 0.251 \\
@@ -223,7 +222,7 @@ Shuffled null & 0.408 & 0.122 \\
 \quad Brain $\rightarrow$ text & 0.071 & 0.201 & 0.289 & 0.144 & 35 \\
 \quad \textit{Chance} & 0.003 & 0.017 & 0.034 & 0.019 & 250 \\
 \bottomrule\end{tabular}}
-\revchanges{Methods, Text-to-Brain, \msl{365}{385} (final head), and Performance Metrics, \msl{398}{404} and \msl{415}{427}. Results, Generative Models: PubMed, \msl{596}{615}, and \msfig{4} caption (\msp{15}). Supplementary Information, Projection Head, \msl{1337}{1348} (training of the final head), and Generative Performance, \msl{1453}{1455} (BERTScore null), with \mstab{S4} (\msp{32}). New Supplementary Section Text-to-Brain Baselines and Retrieval, \msl{1843}{1861}, with \msfig{S6} (\msp{42}) and \mstab{S8} (\msp{43}).}
+\revchanges{Methods, Text-to-Brain, \msl{365}{385} (final head), and Performance Metrics, \msl{398}{404} and \msl{415}{427}. Results, Generative Models: PubMed, \msl{596}{615}, and \msfig{4} caption (\msp{15}). Supplementary Information, Projection Head, \msl{1337}{1350} (training of the final head), and Generative Performance, \msl{1454}{1456} (BERTScore null), with \mstab{S4} (\msp{32}). New Supplementary Section Text-to-Brain Baselines and Retrieval, \msl{1843}{1861}, with \msfig{S6} (\msp{42}) and \mstab{S8} (\msp{43}).}
 
 \revcomment{1.2}{Publication-level supervision and dataset separation}\begin{revquote}
 \textbf{2. The publication-level supervision and separation of datasets across training stages need clarification}
@@ -240,15 +239,15 @@ Shuffled null & 0.408 & 0.122 \\
 \revqpar A data-flow diagram showing the datasets used for autoencoder training, contrastive training, language-model adaptation, Qformer training, synthetic fine-tuning, validation, and final testing would substantially improve transparency.
 \end{revquote}\response Each map pools all coordinates of one paper. We added the requested data-flow diagram and the final counts.
 
-\textbf{1. Experiments and contrasts.} Yes, each paper's map combines the coordinates of all its experiments and contrasts. The released coordinates carry no experiment or contrast labels. Each map matches the paper-level text it is paired with.
+\textbf{1. Experiments and contrasts.} Each paper's map combines the coordinates of all its experiments and contrasts. The released coordinates contain no experiment or contrast labels. Each map matches the paper-level text it is paired with.
 
-\textbf{2. Positive and negative effects.} Positive and negative effects are pooled, because the released coordinates carry no sign labels. Each map therefore shows where effects lie, not their sign. The Methods state this.
+\textbf{2. Positive and negative effects.} Positive and negative effects are pooled, because the released coordinates do not contain signs. Each map therefore only shows where effects lie. The Methods state this.
 
 \textbf{3. Multiple coordinate tables.} All coordinate tables of a paper are pooled into one map. Among open-access papers with a coordinate table, 42\% report two or more.
 
-\textbf{4. Final counts.} Table~\ref{tab:counts} gives the final counts, 30,826 publications with 857,298 peaks. Coordinate tables can be counted only in papers with open-access full text, and the table gives that count. Experiments and contrasts are unlabeled, so they cannot be counted.
+\textbf{4. Final counts.} Table~\ref{tab:counts} gives the final counts, 30,826 publications with 857,298 peaks.
 
-\textbf{5. Contrast-level evaluation.} A contrast-level evaluation is possible only on NeuroVault, whose maps are released per contrast (\cmt{1.3}). With every map as its own target, the model beats chance in both directions (AUC 0.62 and 0.63).
+\textbf{5. Contrast-level evaluation.} A contrast-level evaluation is possible only on NeuroVault, whose maps are released per contrast (\cmt{1.3}). We added a multi-target evaluation, where each study's text is paired to multiple reported maps. With every map as its own target, the model beats chance in both text-to-brain and brain-to-text directions (AUC 0.62 and 0.63).
 
 \textbf{Separation of datasets.} Fig.~\ref{fig:dataflow} is the requested data-flow diagram. No validation or test paper trains the autoencoder, projection heads, or projectors. The language model's training script removes the validation, test, and NeuroVault evaluation papers from its corpus. Generated captions share only short phrases with their abstracts (median two words).
 
@@ -262,7 +261,7 @@ Coordinate tables & 20,541 in the 11,943 open-access papers with a coordinate ta
 Experiments, contrasts & not labeled (only paper identifiers and coordinates are released) \\
 Train / validation / test papers & 23,894 / 2,987 / 2,987, and 958 in no split (2,971 test papers after the leakage audit) \\
 \bottomrule\end{tabular}}
-\revchanges{Methods, Datasets, \msl{137}{144} (pooling per paper and splits), and Training, \msl{169}{181} (synthetic maps from training papers only, exclusions, and the evaluation papers removed from the language-model corpus). Supplementary Information, Coordinate Tables, \msl{1044}{1047}. Discussion, \msl{877}{884}. New Supplementary Section Data Flow and Training Details, \msl{1745}{1753}, with \msfig{S5} (\msp{39}) and \mstab{S6} (\msp{40}).}
+\revchanges{Methods, Datasets, \msl{137}{144} (pooling per paper and splits), and Training, \msl{169}{181} (synthetic maps from training papers only, exclusions, and the evaluation papers removed from the language-model corpus). Supplementary Information, Coordinate Tables, \msl{1044}{1047}. Discussion, \msl{881}{888}. New Supplementary Section Data Flow and Training Details, \msl{1745}{1753}, with \msfig{S5} (\msp{39}) and \mstab{S6} (\msp{40}).}
 
 \revcomment{1.3}{NeuroVault evaluation}\begin{revquote}
 \textbf{3. The NeuroVault evaluation would benefit from target-independent selection and map-type-specific preprocessing}
@@ -272,12 +271,12 @@ Train / validation / test papers & 23,894 / 2,987 / 2,987, and 958 in no split (
 \revqpar Please clarify whether map-specific transformations were applied before thresholding. If not, I recommend separate preprocessing and reporting for signed statistical maps, p-maps, masks, and parcellations. This would make the NeuroVault generalization results easier to interpret and ensure that spatial information is treated appropriately for each map type.
 \end{revquote}\response We keep the model-selected map as an upper bound and add a lower bound, each paper's worst-matching map (Fig.~\ref{fig:bounds}). We add two target-independent scores. Multi-target retrieval counts any of a paper's maps as a hit, and the per-map score makes each map its own target. The model beats chance under every rule. Per-map text-to-brain and brain-to-text retrieval reach an area under the recall curve (AUC) of 0.62 and 0.63.
 
-\textbf{Map types.} The submission thresholded every map alike, after removing masks, parcellations, anatomical maps, and variance maps. P-maps are inverted to 1 $-$ p and signed maps keep their positive tail, as before. Using both tails, or adding negative tails as extra maps, reduces evaluation performance. Table~\ref{tab:maptypes} reports each map type separately, and \msfig{5}b uses the same handling.
+\textbf{Map types.} The submission thresholded every map alike, after removing masks, parcellations, anatomical maps, and variance maps. Signed maps keep their positive tail, as before. P-maps are now inverted to 1 $-$ p. Using both tails, or adding negative tails as extra maps, reduces evaluation performance. Table~\ref{tab:maptypes} reports each map type separately, and \msfig{5}b uses the same handling.
 
-\textbf{Maps labeled Other.} Other is a type that NeuroVault uploaders choose, not a missing one. We typed these maps from their file names, descriptions, and values. Most are t, z, or F maps, effect estimates, or components (Table~\ref{tab:maptypes}). Mean or variance images and maps we could not type are excluded, like the variance maps above. This moves every AUC by at most 0.004.
 \rfig{fig:bounds}{reviewer_01/1.3_neurovault_bounds.png}{\capbounds}
-\rtab{\textbf{NeuroVault results by map type.} AUC with every map as its own target (chance 0.50). Other marks maps their uploaders labeled Other, typed from file names, descriptions, and values. Masks, parcellations, anatomical and variance maps, mean images, and untyped maps were excluded.\label{tab:maptypes}}{\small\begin{tabular}{lrrl>{\centering\arraybackslash}p{2.1cm}>{\centering\arraybackslash}p{2.1cm}}\toprule
-\textbf{Map type} & \textbf{Maps} & \textbf{Papers} & \textbf{Handling} & \textbf{AUC, text $\rightarrow$ brain} & \textbf{AUC, brain $\rightarrow$ text} \\\midrule
+\rtab{\textbf{NeuroVault results by map type.} AUC of the final model when every map is a target, scored per map. From text to brain, a paper's text ranks each of its maps among the maps of other papers. From brain to text, each map ranks the 298 texts, as in Fig.~\ref{fig:bounds}b. Chance is this setting's null, texts shuffled across papers (0.50 and 0.51). Other marks maps their uploaders labeled Other, typed from file names, descriptions, and values. Masks, parcellations, anatomical and variance maps, mean images, and untyped maps were excluded.\label{tab:maptypes}}{\small\begin{tabular}{L{3.6cm}rrlcc}\toprule
+ & & & & \multicolumn{2}{c}{\textbf{AUC}} \\\cmidrule(lr){5-6}
+\textbf{Map type} & \textbf{Maps} & \textbf{Papers} & \textbf{Handling} & \textbf{text $\rightarrow$ brain} & \textbf{brain $\rightarrow$ text} \\\midrule
 T & 1,761 & 189 & positive tail & 0.64 & 0.64 \\
 Z & 811 & 75 & positive tail & 0.57 & 0.58 \\
 beta, univariate & 43 & 5 & positive tail & 0.61 & 0.77 \\
@@ -289,7 +288,7 @@ Other, t, z, or F & 204 & 23 & positive tail & 0.63 & 0.70 \\
 Other, effect estimate & 103 & 15 & positive tail & 0.69 & 0.62 \\
 Other, component or gradient & 93 & 8 & positive tail & 0.49 & 0.51 \\
 \bottomrule\end{tabular}}
-\revchanges{\msfig{5}b caption (\msp{16}). Results, Contrastive Model: NeuroVault, \msl{754}{767}. Supplementary Information, NeuroVault preprocessing, \msl{1183}{1200} (map types and exclusions) and \msl{1211}{1217} (bounds). New Supplementary Section NeuroVault Bounds and Map Types, \msl{1954}{1963}, with \msfig{S7} and \mstab{S9} (\msp{44}).}
+\revchanges{\msfig{5}b caption (\msp{16}). Results, Contrastive Model: NeuroVault, \msl{757}{770}. Supplementary Information, NeuroVault preprocessing, \msl{1183}{1200} (map types and exclusions) and \msl{1211}{1217} (bounds). New Supplementary Section NeuroVault Bounds and Map Types, \msl{1954}{1963}, with \mstab{S9} (\msp{44}).}
 
 \revcomment{1.4}{Scope of the generative claims}\begin{revquote}
 \textbf{4. The scope of the generative claims should more closely reflect the available training targets}
@@ -297,25 +296,27 @@ Other, component or gradient & 93 & 8 & positive tail & 0.49 & 0.51 \\
 \revqpar Given these limitations, the generated outputs may be more accurately described as \textbf{coarse spatial-support predictions} or \textbf{spatial priors} rather than complete statistical maps. This framing would still support useful applications in literature navigation, network labeling, and exploratory hypothesis generation, while avoiding the implication that effect size, sign, uncertainty, or a study-specific statistical contrast has been reconstructed.
 \revqpar Similarly, the brain-to-text outputs appear designed to provide concise, high-level network or functional descriptions rather than detailed interpretations of individual experiments. The manuscript should distinguish broad network labeling from study-specific interpretation and mechanistic inference.
 \revqpar The authors already note that the model can generate plausible maps for essentially any text input and should not be viewed as an oracle. A small quantitative analysis of failure cases, out-of-distribution inputs, and abstention or confidence calibration would strengthen this important caution.
-\end{revquote}\response We agree and adopt this framing. The Abstract, Results, and Discussion call text-to-brain outputs coarse spatial priors, without effect size, sign, or uncertainty. They call brain-to-text outputs broad network-level labels, not interpretations of a specific study or mechanism. Failure cases are not rare, and many start in the data. In 16\% of test-set captions, the similarity to the paper's text is negative. Reviewer 2 raised the same concern (\cmt{2.12}).
+\end{revquote}\response We agree and adopt this framing. The Abstract, Results, and Discussion call text-to-brain outputs coarse spatial priors, without effect size, sign, or uncertainty. They call brain-to-text outputs broad network-level labels, not interpretations of a specific study or mechanism.
 
-\textbf{Out-of-distribution inputs.} Fig.~\ref{fig:ood} flags a map when it correlates poorly with its autoencoder reconstruction or its latent lies far from the training latents. It flags a text that lies far from every training abstract. Thresholds set on the validation split flag about 5\% of held-out test inputs. They flag every shuffled, white-noise, and rescaled map, every off-topic text, and 61 to 80\% of rotated or spun maps.
+\textbf{Failure cases.} Failures are not rare. In 16\% of the 2,971 PubMed test-set captions, the similarity to the paper's text is negative. Many of these failures start in the data, since the paper's own text and map are already among the least similar pairs of the set, and the rest are model misses. Reviewer 2 raised the same concern (\cmt{2.12}).
+
+\textbf{Out-of-distribution inputs.} Fig.~\ref{fig:ood} flags a map when it correlates poorly with its autoencoder reconstruction or its latent lies far from the training latents. It flags a text that lies far from every training abstract. Thresholds set on the validation split flag about 5\% of PubMed test-set maps and abstracts. They flag every shuffled, white-noise, and rescaled map, every off-topic text, and 61 to 80\% of rotated or spun maps.
 
 \textbf{Abstention and confidence.} Flagged inputs can be withheld, but the scores are warnings, not calibrated probabilities. Within the training distribution, the peak of a calibrated text-to-brain map works as a confidence score, since it tracks the map's retrieval rank (Spearman 0.63). It does not detect off-topic text, whose maps mostly peak within the range of test abstracts.
 % produced by core/a7_ood_confidence/make_figure.py (outputs/flagged.csv; thresholds on the validation split, 2,961 maps / abstracts: map r(map, reconstruction) < 0.46 (2.5th pct) or latent Mahalanobis > 27.0 (97.5th pct), text SPECTER2 cosine to nearest training abstract < 0.79 (5th pct). Flagged: validation maps 5.0 %, test maps 4.5 %, rot90 / rotation / spin 61 / 70 / 80 %, shuffle, noise, x100, x0.01 100 %; test abstracts 5.2 %, WikiText and recipes 100 %; AUROC 0.89 to 1.00. The previous plain cosine missed white noise (0 %): a dense non-negative map and its flat reconstruction share a constant component, cosine 0.63 against a 0.55 threshold, r 0.00 (outputs/diagnosis.csv). Single scores at the validation 95th percentile: outputs/detection.csv. 16 % = test-set captions with a negative similarity to the paper's text (2.12, a7_failure_cases_percentiles))
-\rfig{fig:ood}{reviewer_01/1.4_ood.png}{\textbf{Out-of-distribution warnings.} Panels show (a)~each input's similarity to the training data, (b)~the distance of a map's latent from the training latents, and (c)~the share of inputs flagged. Dashed lines mark thresholds set on the validation split. Blue marks held-out test inputs.}
-\revchanges{Abstract, \msl{28}{39}. Introduction, \msl{112}{117}. Methods, Text Decoder, \msl{321}{327} (out-of-distribution warnings), and Text-to-Brain, \msl{374}{385}. Results, Generative Models, \msl{433}{435} (spatial priors, network-level labels). Discussion, \msl{859}{860}, and limitations, \msl{898}{912}. New Supplementary Section Out-of-Distribution Inputs, \msl{2027}{2040}, with \msfig{S8} (\msp{45}).}
+\rfig{fig:ood}{reviewer_01/1.4_ood.png}{\textbf{Out-of-distribution warnings.} Scores of PubMed test-set maps and abstracts (blue) and of altered maps and off-topic texts (gray). Panels show (a)~each input's similarity to the training data, (b)~the Mahalanobis distance of a map's latent from the training latents, and (c)~the share of inputs flagged. Dashed lines mark thresholds set on the validation split.}
+\revchanges{Abstract, \msl{28}{39}. Introduction, \msl{112}{117}. Methods, Text Decoder, \msl{321}{327} (out-of-distribution warnings), and Text-to-Brain, \msl{374}{385}. Results, Generative Models, \msl{433}{435} (spatial priors, network-level labels). Discussion, \msl{863}{864}, and limitations, \msl{902}{916}. New Supplementary Section Out-of-Distribution Inputs, \msl{1999}{2012}, with \msfig{S7} (\msp{45}).}
 
 \revcomment{1.5}{Inconsistent dataset and metric values}\begin{revquote}
 1. \textbf{Please reconcile inconsistent dataset and metric values.} The main methods list 3,000 NeuroVault maps and 100 network images, whereas the supplement reports 4,553 NeuroVault maps and the results describe 300 network images. The autoencoder AUROC is also reported as 0.94 in the Figure 5 caption and 0.975 in the main text.
-\end{revquote}\response We recomputed every count from the released data and corrected the text and captions (Table~\ref{tab:corrected}). The supplement's 4,553 maps predate image quality control and the removal of papers already in PubMed. We corrected both network-image counts to the 185 released network maps. Both AUROCs are correct but refer to different datasets, which the \msfig{5} caption names.
-\rtab{\textbf{Corrected counts and AUROCs.} Counts are recomputed from the released data. The AUROC is the autoencoder's voxelwise reconstruction AUROC.\label{tab:corrected}}{\small\begin{tabular}{p{4.5cm}p{9.5cm}}\toprule
-\textbf{In the paper} & \textbf{Correct value} \\\midrule
-3,000 or 4,553 NeuroVault maps & 3,183 released maps from 312 papers, 3,154 maps from 305 papers after the leakage audit, and 3,074 maps from 298 papers for retrieval \\
-100 or 300 network images & 185 network maps, made of 145 atlas maps (119 with a network label) and 40 ICA components \\
-AUROC 0.94 and 0.975 & both correct, 0.94 on NeuroVault and 0.975 on the PubMed test set (0.974 with the final model) \\
-\bottomrule\end{tabular}}
-\revchanges{Methods, Datasets, \msl{132}{144}. Results, Contrastive Model: Network Labeling, \msl{735}{747}, and Autoencoder, \msl{826}{830}. Figs.~\msfign{4} and \msfign{5} captions (\mspp{15}{16}). Supplementary Information, NeuroVault preprocessing, \msl{1183}{1200} and \msl{1216}{1218}.}
+\end{revquote}\response We recomputed every count from the released data and corrected the text and captions.
+
+\textbf{NeuroVault maps.} The supplement's 4,553 maps predate image quality control and the removal of papers already in PubMed. After these steps, the leakage audit, and the removal of mean, variance, and untyped maps, retrieval uses 3,074 maps.
+
+\textbf{Network images.} We corrected both counts to the 185 released network maps. They are the atlas maps and the ICA components.
+
+\textbf{Autoencoder AUROC.} Both values were correct but referred to different datasets, NeuroVault and the PubMed test set. With the final model, the \msfig{5} caption gives 0.939 on NeuroVault and 0.974 on the PubMed test set.
+\revchanges{Methods, Datasets, \msl{132}{144}. Results, Contrastive Model: Network Labeling, \msl{739}{751}, and Autoencoder, \msl{830}{834}. Figs.~\msfign{4} and \msfign{5} captions (\mspp{15}{16}). Supplementary Information, NeuroVault preprocessing, \msl{1183}{1200} and \msl{1216}{1218}.}
 
 \revcomment{1.6}{SPECTER and SPECTER2}\begin{revquote}
 2. \textbf{Please use SPECTER and SPECTER2 consistently.} Section 2.6 describes SPECTER, whereas the text-to-brain methods and supplement describe SPECTER2.
@@ -335,13 +336,13 @@ AUROC 0.94 and 0.975 & both correct, 0.94 on NeuroVault and 0.975 on the PubMed 
 text-to-brain & 171 M & 7 ms, 0.4 GB & 135 ms, 0.6 GB & 53 ms, 0.4 GB & 120 ms, 0.5 GB \\
 brain-to-text, 128 tokens & 685 M & 3.2 s, 1.3 GB & 13.1 s, 2.7 GB & 6.3 s, 1.4 GB & 3.5 s, 1.4 GB \\
 \bottomrule\end{tabular}}
-\revchanges{Methods, Text Encoder, \msl{221}{230} (edge-device sentence replaced by CPU costs). Discussion, \msl{938}{939}.}
+\revchanges{Methods, Text Encoder, \msl{221}{230} (edge-device sentence replaced by CPU costs). Discussion, \msl{942}{943}.}
 
 \revcomment{1.9}{Figure text size, full descriptions, affiliations}\begin{revquote}
 5. Some text in Figures 2, 3, and S4 is difficult to read at normal manuscript scale. Providing the complete generated descriptions in a supplementary table would be helpful. Please also correct the remaining “Organization” placeholders in the affiliation block.
 \end{revquote}\response We redrew Figs.~\msfign{2}, \msfign{3}, and \msfign{S4} at the journal's text width with larger text. Figs.~\ref{fig:fig2}, \ref{fig:fig3}, and \ref{fig:figS4} show the new Figs.~\msfign{2}, \msfign{3}, and \msfign{S4}. Supplementary \mstab{S5} gives the complete texts of \msfig{2}, and Figs.~\msfign{3} and \msfign{S4} print each generated text in full beside its map. We also corrected the affiliations.
-\rfigparts{fig:fig2}{reviewer_01/1.9_fig2_network_examples}{\textbf{New \msfig{2}.} Auditory and default mode networks show the complete generated texts, and the other six their three generated titles. True is the atlas map. Maps show their top 5\% of voxels in sagittal, coronal, and axial views. Supplementary \mstab{S5} gives every text.}
-\rfig{fig:fig3}{reviewer_01/1.9_fig3_newgen.png}{\textbf{New \msfig{3}.} NeuroVault papers from the high, medium, and low thirds of the shared-space cosines, chosen by a fixed rule (Reviewer 3, \cmt{3.9}). Low rows show a scattered true map (top) and a model miss on a clean map (bottom). Maps show their top 5\% of voxels.}
+\rfigparts{fig:fig2}{reviewer_01/1.9_fig2_network_examples}{\textbf{New \msfig{2}.} Eight atlas networks, each with its atlas map (True), the map generated from its description, and the network, anatomy, and cognition texts generated from the atlas map. Auditory and default mode show the complete texts, and the other six their titles. Maps show their top 5\% of voxels in sagittal, coronal, and axial views. Supplementary \mstab{S5} gives every text.}
+\rfig{fig:fig3}{reviewer_01/1.9_fig3_newgen.png}{\textbf{New \msfig{3}.} Six NeuroVault papers, each with its title and the map generated from its text, then its true map and the text generated from that map. Rows come from the high, medium, and low thirds of both shared-space cosines, drawn on the left, and follow a fixed rule (Reviewer 3, \cmt{3.9}). Low rows show a scattered true map (top) and a model miss on a clean map (bottom). Maps show their top 5\% of voxels.}
 \rfig{fig:figS4}{reviewer_01/1.9_figS4_clip_ica.png}{\textbf{New \msfig{S4}.} Labeling of resting-state components from UK Biobank (top) and the Human Connectome Project (bottom). Bars give the five most similar labels from the contrastive models. The generated column is the {[}NETWORK{]} caption of the stage 2 MLP projector, its title in bold.}
 \revchanges{Affiliations, \msl{16}{17}. Figs.~\msfign{2}, \msfign{3}, and \msfign{S4}, redrawn (\msp{11}, \msp{12}, and \msp{34}). Results, Generative Models: Networks, \msl{443}{449}. New Supplementary \mstab{S5} with the complete texts of \msfig{2}, \msl{1567}{1570} (\mspp{35}{38}). Figs.~\msfign{4} and \msfign{5} captions (\mspp{15}{16}).}
 
@@ -358,7 +359,7 @@ The repository is a useful community resource: it has an Apache-2.0 license, pip
 \textbf{Tests and coverage.} Coverage is measured on the 58 files needed to train the models and draw the figures. The CNN and other experiments outside the paper are left out. Training takes hours, so continuous integration trains every model for one batch on CPU, which checks the whole pipeline end to end.
 
 \textbf{Remaining limits.} Two inputs still come from outside the pinned set. They are the Automated Anatomical Labeling (AAL) atlas, whose download server fails, and the NiCLIP and NeuroConText outputs compared in \msfig{S3}.
-\revchanges{New Data availability and Code availability sections after the Discussion, \msl{957}{989}, replacing the links in Methods, Training, \msl{166}{168}.}
+\revchanges{New Data availability and Code availability sections after the Discussion, \msl{961}{993}, replacing the links in Methods, Training, \msl{166}{168}.}
 
 \reviewer{2}
 \revcomment{2.0}{General remarks}\begin{revquote}
@@ -369,7 +370,7 @@ The manuscript presents NeuroVLM, a unified framework for neuroimage–text cont
 1.The authors use a Q-Former for brain-to-text generation, but its motivation is unclear. Comparisons with simpler alternatives, such as an MLP projector or cross-attention module, should be provided.
 \end{revquote}\response We agree. Our original Qformer attended over only two input tokens, the map latent and its semantic vector, so its attention had little to select. A multilayer perceptron (MLP) projector of the same size therefore replaces the Qformer in both stages. It raises stage 1 retrieval AUC from 0.82 to 0.90 (Fig.~\ref{fig:mlp}). A cross-attention module would also attend over only two tokens, so we did not add one.
 \rfig{fig:mlp}{reviewer_02/2.1_mlp_projector.png}{\textbf{Qformer and MLP projector.} Gray bars show the original model with the Qformer and blue bars the final model with the MLP projector, on PubMed test maps. Panels show (a)~retrieval AUC, (b)~caption-to-map cosine, and (c)~BERTScore F1 against the paper's text.}
-\revchanges{Methods, Text Decoder, \msl{284}{298}, and Brain-to-Text, \msl{341}{362} (MLP projector). Results, Generative Models: Networks, \msl{443}{449} (projector named), and PubMed, \msl{596}{607}. Supplementary Information, Brain-to-Text Projector, \msl{1357}{1380} and \msl{1419}{1428} (rewritten for the MLP projector), with \mstab{S3} (\msp{32}). Figs.~\msfign{S1} and \msfign{S4} captions (\msp{23} and \msp{34}). New Supplementary Section Projector Comparison, \msl{2073}{2079}, with \msfig{S9} (\msp{46}).}
+\revchanges{Methods, Text Decoder, \msl{284}{298}, and Brain-to-Text, \msl{341}{362} (MLP projector). Results, Generative Models: Networks, \msl{443}{449} (projector named), and PubMed, \msl{596}{607}. Supplementary Information, Brain-to-Text Projector, \msl{1359}{1382} and \msl{1421}{1429} (rewritten for the MLP projector), with \mstab{S3} (\msp{32}). Figs.~\msfign{S1} and \msfign{S4} captions (\msp{23} and \msp{34}). New Supplementary Section Projector Comparison, \msl{2073}{2079}, with \msfig{S8} (\msp{46}).}
 
 \revcomment{2.2}{Datasets and sample sizes per model}\begin{revquote}
 2.The training data for the contrastive and generative models are not clearly described. The authors should specify the datasets and sample sizes used for each model and clarify whether the same image-text pairs were reused across different training stages.
@@ -377,10 +378,10 @@ The manuscript presents NeuroVLM, a unified framework for neuroimage–text cont
 
 \textbf{1. Datasets and sample sizes.} Fig.~\ref{fig:dataflow} and Table~\ref{tab:stages} give the data and sample size of each training stage.
 
-\textbf{2. Reuse across stages.} Yes, the training papers are reused across stages. The autoencoder, the projection heads, and the stage 1 projector all learn from these papers. The anatomically centered head and the stage 2 projector learn from short concept texts, paired with maps built from training papers only (\cmt{2.6}). No validation or test paper trains these components. The language model's training script also removes them from its corpus (\cmt{2.11}).
+\textbf{2. Reuse across stages.} The training papers are reused across stages. The autoencoder, the projection heads, and the stage 1 projector all learn from these papers. The anatomically centered head and the stage 2 projector learn from short concept texts, paired with maps built from training papers only (\cmt{2.6}). No validation or test paper trains these components. The language model's training script also removes them from its corpus (\cmt{2.11}).
 % sources: core/a4_counts_table/outputs/stage_splits.md (from scripts/outputs/runs/final/*.summary.json) and
 % core/a4_dataflow_diagram/outputs/dataflow_counts.json (same numbers); NeuroQwen3-0.6B split from z53 (01_dapt.ipynb)
-\rtab{\textbf{Training data per component.} Training and validation sizes of each trained component of the final model, as in Fig.~\ref{fig:dataflow}.\label{tab:stages}}{\small\begin{tabular}{p{4.6cm}p{5.4cm}rrr}\toprule
+\rtab{\textbf{Training data per component.} Training and validation sizes of each trained component of the final model, as in Fig.~\ref{fig:dataflow}. The text-to-brain head is selected on 2,961 validation papers, the 2,987 minus the 26 removed by the leakage audit.\label{tab:stages}}{\small\begin{tabular}{p{4.6cm}p{5.4cm}rrr}\toprule
 \textbf{Training stage} & \textbf{Data} & \textbf{Train} & \textbf{Validation} & \textbf{Unit} \\\midrule
 Autoencoder & PubMed coordinate maps & 23,894 & 2,987 & papers \\
 Text-to-brain and contrastive heads & SPECTER2 text and map latents & 23,894 & 2,987 & papers \\
@@ -394,7 +395,7 @@ NeuroQwen3-0.6B & PubMed titles and abstracts & 1.22 M & 12,317 & articles \\
 \revcomment{2.3}{NeuroVault selection bias}\begin{revquote}
 3.The NeuroVault evaluation has selection bias. When multiple images correspond to the same title and abstract, the contrastive model selects the most similar image. This procedure may substantially inflate the reported performance.
 \end{revquote}\response We agree that choosing the most similar map inflates the score. Reviewer 1 raised the same concern (\cmt{1.3}). That map is reported as an upper bound. A lower bound keeps each paper's worst-matching map, and a multi-target score counts any of the paper's maps (Fig.~\ref{fig:bounds}). Each rule has its own chance curve, from texts shuffled across papers. Under every rule, the model's AUC stays about 0.1 above chance.
-\revchanges{\msfig{5}b caption (\msp{16}). Results, Contrastive Model: NeuroVault, \msl{754}{767}. Supplementary Information, NeuroVault preprocessing, \msl{1183}{1200} (map types and exclusions) and \msl{1211}{1217} (bounds). New Supplementary Section NeuroVault Bounds and Map Types, \msl{1954}{1963}, with \msfig{S7} and \mstab{S9} (\msp{44}), as for Reviewer 1's comment \cmt{1.3}.}
+\revchanges{\msfig{5}b caption (\msp{16}). Results, Contrastive Model: NeuroVault, \msl{757}{770}. Supplementary Information, NeuroVault preprocessing, \msl{1183}{1200} (map types and exclusions) and \msl{1211}{1217} (bounds). New Supplementary Section NeuroVault Bounds and Map Types, \msl{1954}{1963}, with \mstab{S9} (\msp{44}), as for Reviewer 1's comment \cmt{1.3}.}
 
 \revcomment{2.4}{Data leakage}\begin{revquote}
 4.Potential data leakage across PubMed, Neurosynth Compose, and NeuroVault has not been sufficiently excluded. DOI-based filtering alone may not identify duplicate records, preprint and journal versions, or repeated coordinate tables.
@@ -408,7 +409,7 @@ NeuroQwen3-0.6B & PubMed titles and abstracts & 1.22 M & 12,317 & articles \\
 
 \textbf{Other training data.} The synthetic maps of the anatomically centered head had pooled held-out papers, so we rebuilt them from training papers only. This fix and the removals each change AUC, Dice, and correlation by less than 0.01. The language model's training script also removes all evaluation papers from its corpus (\cmt{2.11}).
 \rtab{\textbf{Leakage audit.} Held-out PubMed papers flagged by each check against other papers. Rows overlap, and the last row is their union.\label{tab:leakage}}{\small\begin{tabular}{lcc}\toprule
-\textbf{Check against other papers} & \textbf{Test set (2,987)} & \textbf{Validation set (2,987)} \\\midrule
+\textbf{Check against other papers} & \textbf{PubMed test set (2,987)} & \textbf{PubMed validation set (2,987)} \\\midrule
 Near-identical title & 4 & 6 \\
 Near-identical title and abstract & 3 & 6 \\
 Identical coordinate table & 6 & 12 \\
@@ -430,7 +431,7 @@ Removed from every evaluation & 16 & 26 \\
 6.The construction of the summarized and synthetic text data is unclear. The authors should describe the generation procedure and provide representative examples.
 \end{revquote}\response One prompt generated the paper summaries and another generated the synthetic and curated texts. Both prompts are given below, and Table~\ref{tab:examples} gives a complete example of each kind of text.
 
-\textbf{Summaries.} Qwen3.5-27B summarized each paper with the first prompt as its system message, removing low-level study details. The user message was the paper's title and abstract, joined by a separator token. Decoding sampled with temperature 0.3 and top-p 0.9. Summaries re-created for test-set papers cover the same topics as the released ones. The stage 1 projector learns from these summaries.
+\textbf{Summaries.} Qwen3.5-27B summarized each paper with the first prompt as its system message, removing low-level study details. The user message was the paper's title and abstract, joined by a separator token. Decoding sampled with temperature 0.3 and top-p 0.9. Summaries re-created for PubMed test-set papers cover the same topics as the released ones. The stage 1 projector learns from these summaries.
 
 \textbf{Synthetic texts.} Qwen3.5-27B wrote short entries with the second prompt. The seeds were region names from standard brain atlases, Cognitive Atlas concepts, and the network names of our network atlases. The user message was the seed alone, such as ``Insula''. Decoding used temperature 0.1 and top-p 0.9, with thinking mode off. Sampling each seed several times gave re-wordings of one concept. The anatomically centered head learns from these entries.
 
@@ -518,16 +519,20 @@ Curated {[}FUNCTION{]} text ``Language Comprehension'' (stage 2 projector) & Lan
 
 \revcomment{2.7}{Dataset sizes}\begin{revquote}
 1.The reported dataset sizes are inconsistent. The Methods section reports 3,000 NeuroVault images and 100 network images, whereas other sections report 4,553 and 300, respectively.
-\end{revquote}\response Reviewer 1 raised the same concern (\cmt{1.5}). We recomputed every count from the released data and corrected the text and captions (Table~\ref{tab:corrected}). The supplement's 4,553 maps predate image quality control and the removal of papers already in PubMed. We corrected both network-image counts to the 185 released network maps.
-\revchanges{Methods, Datasets, \msl{132}{144}. Results, Contrastive Model: Network Labeling, \msl{735}{747}, and Autoencoder, \msl{826}{830}. Figs.~\msfign{4} and \msfign{5} captions (\mspp{15}{16}). Supplementary Information, NeuroVault preprocessing, \msl{1183}{1200} and \msl{1216}{1218}, as for Reviewer 1's comment \cmt{1.5}.}
+\end{revquote}\response Reviewer 1 raised the same concern (\cmt{1.5}). We recomputed every count from the released data and corrected the text and captions.
+
+\textbf{NeuroVault maps.} The supplement's 4,553 maps predate image quality control and the removal of papers already in PubMed. After these steps, the leakage audit, and the removal of mean, variance, and untyped maps, retrieval uses 3,074 maps.
+
+\textbf{Network images.} We corrected both counts to the 185 released network maps. They are the atlas maps and the ICA components.
+\revchanges{Methods, Datasets, \msl{132}{144}. Results, Contrastive Model: Network Labeling, \msl{739}{751}, and Autoencoder, \msl{830}{834}. Figs.~\msfign{4} and \msfign{5} captions (\mspp{15}{16}). Supplementary Information, NeuroVault preprocessing, \msl{1183}{1200} and \msl{1216}{1218}, as for Reviewer 1's comment \cmt{1.5}.}
 
 \revcomment{2.8}{Fig.~5 caption}\begin{revquote}
 2.The caption of Fig. 5 reports both 0.78 and 0.85 for the NeuroVault AUC.
 \end{revquote}\response The corrected caption names the curve behind each value. With each paper's best-matching map, the AUC is 0.85 from text to brain and 0.79 from brain to text (Fig.~\ref{fig:fig5}b). P-maps are inverted, so that high values mark strong effects, as in our response to Reviewer 1 (\cmt{1.3}). Each curve has its own dashed chance curve, from texts shuffled across papers.
 
 \textbf{Lower bound.} The lower bound and its chance curve lie below 0.50 by construction. The lower bound keeps the map that the model scores lowest for each paper. That map ranks below a typical candidate even when the texts are shuffled. The model still beats this chance level.
-\rfig{fig:fig5}{reviewer_02/2.8_fig5_perf_quant.png}{\textbf{New \msfig{5}.} Contrastive recall on (a)~PubMed and (b)~NeuroVault, (c)~autoencoder reconstruction, and (d)~network classification. In (b), each paper's target is its best map (upper bound), every map (multi-target), or its worst map (lower bound), and dashed lines show chance.}
-\revchanges{\msfig{5} caption (\msp{16}). Results, Contrastive Model: NeuroVault, \msl{754}{767}, and PubMed, \msl{771}{780}.}
+\rfig{fig:fig5}{reviewer_02/2.8_fig5_perf_quant.png}{\textbf{New \msfig{5}.} Contrastive recall on (a)~PubMed and (b)~NeuroVault, (c)~autoencoder reconstruction, and (d)~network classification. In (b), each paper's target is its best map (upper bound), every map (multi-target), or its worst map (lower bound). Dashed lines show each rule's chance, the same rule after each paper's text is given to another paper, as in Fig.~\ref{fig:bounds}.}
+\revchanges{\msfig{5} caption (\msp{16}). Results, Contrastive Model: NeuroVault, \msl{757}{770}, and PubMed, \msl{775}{784}.}
 
 \revcomment{2.9}{SPECTER naming}\begin{revquote}
 3.The use of “SPECTER,” “SPECTER2,” and “Specter” is inconsistent. The exact model used in each component should be clarified.
@@ -559,20 +564,21 @@ NeuroQwen3-0.6B & 596 M & PubMed titles and abstracts, 1.22 M / 12,317 (385 M to
 
 \revcomment{2.12}{Random results and failure cases}\begin{revquote}
 6.Figs. 2 and 3 mainly show selected qualitative examples. Randomly selected results and representative failure cases should also be provided.
-\end{revquote}\response We added random results and failure cases for every evaluation set. They include random test papers, the worst test-set cases in both directions, the weakest atlas networks, and NeuroVault papers that fail on their best-matching map. Failures are not rare, since 16\% of test-set captions have a negative similarity to the paper's text. Fig.~\ref{fig:failures} shows the six worst brain-to-text cases. The other five sets are in the code repository.
+\end{revquote}\response We added random results and failure cases for every evaluation set. They include random PubMed test papers, the worst PubMed test-set cases in both directions, the weakest atlas networks, and NeuroVault papers that fail on their best-matching map. Failures are not rare, since 16\% of PubMed test-set captions have a negative similarity to the paper's text. Fig.~\ref{fig:failures} shows the six worst brain-to-text cases. The other five sets are in the code repository.
 % the other five sets: scripts/figures/review/reviewer_02/2.12_{pubmed_random,pubmed_t2b_worst,networks_bottom,neurovault_b2t_best,neurovault_t2b_best}.png
 
-\textbf{Data and model failures.} Many failures start in the data. For 37\% of failing maps, the paper's own text and map are already among the least similar pairs of the test set, against 5\% of successful maps. Neurosynth, which shares no part with NeuroVLM, also predicts these maps poorly from their text. Maps with few or scattered foci fail no more often than others. The remaining failures are model misses.
+\textbf{Data and model failures.} Many failures start in the data. For 37\% of failing maps, the paper's own text and map are already among the least similar pairs of the PubMed test set, against 5\% of successful maps. Neurosynth, which shares no part with NeuroVLM, also predicts these maps poorly from their text. Maps with few or scattered foci fail no more often than others. The remaining failures are model misses.
 % source: core/a7_failure_cases_percentiles/failure_decomposition.py (outputs/failure_decomposition.md): mismatch = true-pair
 % cosine of title + abstract with the paper's map below the test-set 10th percentile; 180 of 482 failures (37.3%) against
 % 22 of 482 random non-failures (4.6%); poor input map 28.8% against 28.6%; Neurosynth r below its 10th percentile 31.3% against 5.0%
 
-\textbf{Invented names.} With unsteered title decoding, 23\% of test-set {[}NETWORK{]} titles and 9\% of {[}REGION{]} titles matched no canonical or atlas name, such as ``Cerebro-Cervico-Brain''. The language model still generates every title, but it is steered toward the canonical names. At the title position, tokens that cannot continue a canonical network or region name are masked, and the model's own probabilities choose the name. Nothing is classified or looked up.
+\textbf{Invented names.} The language model is better steered towards canonical titles. At the title position, tokens that cannot continue a canonical network or region name are masked, and the model's own probabilities choose the name.
 
 \textbf{Body text.} The body text and {[}FUNCTION{]} titles are generated without this mask. They can still contain invented words or stray fragments, such as ``useary'' in Fig.~\ref{fig:failures}, a limitation the Discussion states.
 
-\textbf{Non-Latin text.} A few captions contained non-Latin characters from the language model's multilingual vocabulary. Decoding uses Latin-script tokens only, which removes them.
-\revchanges{Figs.~\msfign{2}, \msfign{3}, and \msfign{S4} (\msp{11}, \msp{12}, and \msp{34}), with the Low rows of \msfig{3} as failure cases. Methods, Text Decoder, \msl{299}{306} (title decoding steered toward the canonical names, and Latin-script decoding). Supplementary Information, Brain-to-Text Projector, \msl{1411}{1418}. Discussion, limitations, \msl{899}{907} (failure rate, failures that start in the data, typical failures, and invented words or stray fragments in the body text).}
+\textbf{Non-Latin text.} Rarely, captions contained non-Latin characters from the language model's multilingual vocabulary and pre-training. Decoding now uses only Latin-script tokens.
+
+\revchanges{Figs.~\msfign{2}, \msfign{3}, and \msfign{S4} (\msp{11}, \msp{12}, and \msp{34}), with the Low rows of \msfig{3} as failure cases. Methods, Text Decoder, \msl{299}{306} (title decoding steered toward the canonical names, and Latin-script decoding). Supplementary Information, Brain-to-Text Projector, \msl{1413}{1420}. Discussion, limitations, \msl{903}{911} (failure rate, failures that start in the data, typical failures, and invented words or stray fragments in the body text).}
 % the changes line comes before this multi-page figure, so that it is not left alone on a page after the figure pages
 \rfigparts{fig:failures}{reviewer_02/2.12_pubmed_b2t_worst}{\textbf{Worst brain-to-text cases.} The six PubMed test maps whose caption is least similar to the paper's text, two per page. Each shows the map in sagittal, coronal, and axial views, the paper's title and summary beside the complete generated caption, and the caption's similarity with its percentile.}
 
@@ -588,7 +594,7 @@ Augmenting existing meta-analysis tools with the flexibility provided by LLMs is
 \textbf{1. Generation and context.} Generated maps match each test paper's map better than the map of the nearest training paper (Reviewer 1, \cmt{1.1}). By MiniLM cosine, generated captions are as close to the paper's text as retrieved captions. Retrieved captions often report details of another study, and generated captions rarely do (\cmt{3.3}). Context also matters, since SPECTER2 beats a context-free word2vec encoder on every measure, by a modest margin (\cmt{3.4}).
 
 \textbf{2. What the model learns.} Decoded latent dimensions match the Neurosynth maps of their top terms (\cmt{3.5}). Swapping one word moves the generated map toward the matching Neurosynth contrast, but negation has no effect. The cross-entropy loss matters most for retrieval.
-\revchanges{Introduction, \msl{99}{105}, Results, Generative Models: PubMed, \msl{608}{615}, and Discussion, \msl{863}{868}, which state the contribution of generation and context.}
+\revchanges{Introduction, \msl{99}{105}, Results, Generative Models: PubMed, \msl{608}{615}, and Discussion, \msl{867}{872}, which state the contribution of generation and context.}
 
 \revcomment{3.2}{Comparison with existing methods}\begin{revquote}
 My main concern is about the scope of the manuscript. NeuroVLM is clearly a useful tool but it is difficult to evaluate how much it improves on previous work. If the main contribution is higher performance then it would be helpful to include more direct comparisons. The only comparison between NeuroVLM and existing methods is in Figure S3 where it had comparable performance to NiCLIP and NeuroConText (albeit with fewer parameters). If the main contribution is instead more capabilities then it would be helpful to emphasize what NeuroVLM can do that previous methods cannot.
@@ -598,7 +604,7 @@ My main concern is about the scope of the manuscript. NeuroVLM is clearly a usef
 
 \textbf{2. New capabilities.} NeuroVLM is, to our knowledge, the only model that writes text from group-level brain maps. It retrieves and generates in both directions through one shared space. Its generated maps and captions match or beat retrieved ones (\cmt{3.3}). The Introduction emphasizes these capabilities.
 \rfig{fig:figS3}{reviewer_03/3.2_figS3_recall_comparison.png}{\textbf{New \msfig{S3}.} Recall@k for NeuroVLM (blue), NiCLIP (orange), and NeuroConText (green) on the 366 PubMed test papers that none of the three models was trained on. Solid lines are text to image and dashed lines image to text.}
-\revchanges{Introduction, \msl{99}{105}, on the new capabilities. Results, Generative Models: PubMed, \msl{608}{615}, and Contrastive Model: PubMed, \msl{771}{780}. Supplementary Information, Model Comparison, with \msfig{S3} redrawn from the final model (\msp{33}). New Supplementary Section Text-to-Brain Baselines and Retrieval, \msl{1843}{1861}, with \msfig{S6} (\msp{42}).}
+\revchanges{Introduction, \msl{99}{105}, on the new capabilities. Results, Generative Models: PubMed, \msl{608}{615}, and Contrastive Model: PubMed, \msl{775}{784}. Supplementary Information, Model Comparison, with \msfig{S3} redrawn from the final model (\msp{33}). New Supplementary Section Text-to-Brain Baselines and Retrieval, \msl{1843}{1861}, with \msfig{S6} (\msp{42}).}
 
 \revcomment{3.3}{Generation versus retrieval and granularity}\begin{revquote}
 One capability that sets NeuroVLM apart from previous methods is that it can generate original text and neuroimages rather than only retrieving from a fixed set. However it would be helpful to show that the generated outputs are in fact more accurate and useful than retrieved outputs. For example if NeuroVLM uses an overfit decoder that collapses into a fixed set of outputs then it might be no better than existing retrieval methods. In fact the canonical projection matrix might explicitly drive the framework towards more retrieval-like outputs. Is there a way to quantify the granularity of NeuroVLM based on its output space?
@@ -611,7 +617,7 @@ One capability that sets NeuroVLM apart from previous methods is that it can gen
 \textbf{3. Canonical projection.} The canonical projection does pull captions toward its prototypes, as the reviewer suspected. With it, about one caption in ten nearly copies a curated training text, against almost none without it (Fig.~\ref{fig:granularity}c). We added this trade-off to the Methods.
 
 \textbf{4. Granularity.} In the output space, test captions use nearly all canonical network and region names, and no title labels more than one test map in ten. The share of captions naming a study detail, such as a sample size, patient group, or task, falls from 36\% at stage~1 to 2\% at stage~2 (Fig.~\ref{fig:granularity}a). Stage~2 captions describe the map rather than a single study.
-\rfig{fig:granularity}{reviewer_03/3.3_granularity_tradeoff.png}{\textbf{Granularity of generated captions.} Captions of PubMed test maps and NeuroVault papers, retrieved or generated at each stage. Panels show (a)~the share naming a study detail and the MiniLM cosine (b)~with the paper's own text and (c)~with the nearest training text.}
+\rfig{fig:granularity}{reviewer_03/3.3_granularity_tradeoff.png}{\textbf{Granularity of generated captions.} Captions of PubMed test maps and NeuroVault papers, retrieved or generated at each stage. Panels show (a)~the share naming a study detail, and the MiniLM cosine (b)~with the paper's own text and (c)~with the nearest training text.}
 % source: core/a2_granularity_tradeoff/outputs/metrics.json and table.csv (final model; PubMed test set, n = 2,971;
 % Unique = unique_frac_text: stage 2 0.994, stage 1 0.969, retrieved 0.733);
 % random training text: core/a1_brain_to_text_baselines/outputs/brain_to_text_baselines_table.md (model-independent)
@@ -622,13 +628,13 @@ NeuroVLM, stage 1 caption & 0.431 (0.358) & 0.577 & 97\% \\
 Retrieval, training caption nearest to the map & 0.428 (0.362) & 0.588 & 73\% \\
 Random training text & 0.363 & 0.580 & -- \\
 \bottomrule\end{tabular}}
-\revchanges{Methods, Text Decoder, \msl{316}{320}, on the canonical projection, which removes study details but adds near-copies. Discussion, \msl{863}{868}. New Supplementary Section Caption Granularity, \msl{2106}{2115}, with \msfig{S10} (\msp{47}).}
+\revchanges{Methods, Text Decoder, \msl{316}{320}, on the canonical projection, which removes study details but adds near-copies. Discussion, \msl{867}{872}. New Supplementary Section Caption Granularity, \msl{2106}{2115}, with \msfig{S9} (\msp{47}).}
 
 \revcomment{3.4}{Context-free baseline}\begin{revquote}
 Another capability that sets NeuroVLM apart is the context and flexibility provided by the LLM encoder. However it would be helpful to directly quantify how the LLM encoder performs relative to context-free baselines (such as mean Word2Vec embeddings) on the retrieval and text-to-neuroimage tasks.
 \end{revquote}\response SPECTER2 outperforms a context-free baseline on both tasks, by a modest margin (Fig.~\ref{fig:encoder}). We replaced SPECTER2 with the mean word2vec embedding of each title and abstract and retrained only the projection heads. Mean retrieval AUC, the area under the recall curve, is 0.83 against 0.81. Text-to-brain Dice and voxel correlation are also higher with SPECTER2. We added this comparison to the Discussion and the Supplementary Information.
 \rfig{fig:encoder}{reviewer_03/3.4_encoder_swap.png}{\textbf{Context-free encoder.} PubMed test-set performance with SPECTER2 or with the mean word2vec embedding of each title and abstract, after retraining only the projection heads. Panels show (a)~retrieval AUC in both directions and (b)~text-to-brain Dice and voxel correlation.}
-\revchanges{Introduction, \msl{104}{105}, and Discussion, \msl{850}{856}. New Supplementary Section Context-Free Encoder, \msl{2145}{2151}, with \msfig{S11} (\msp{48}).}
+\revchanges{Introduction, \msl{104}{105}, and Discussion, \msl{854}{860}. New Supplementary Section Context-Free Encoder, \msl{2145}{2151}, with \msfig{S10} (\msp{48}).}
 
 \revcomment{3.5}{Interpretation, perturbations, and ablations}\begin{revquote}
 It would be helpful to include more analyses like Figure 6 that interpret different components of the model. Interpreting the encoder weights could reveal the specific associations between text and neuroimage elements that NeuroVLM learned. Perturbing the inputs (such as adding negations) could show how NeuroVLM goes beyond linear additivity. Providing ablation results in the supplementary materials could compare the importance of different modeling decisions (such as the cross-entropy loss and canonical projection matrix).
@@ -640,11 +646,11 @@ It would be helpful to include more analyses like Figure 6 that interpret differ
 
 \textbf{3. Ablations.} The cross-entropy loss matters most for retrieval. Without it, retrieval AUC drops from 0.83 to 0.62, while the temperature and a one-directional loss barely matter (Table~\ref{tab:ablation}). The final text-to-brain head also beats heads trained with other losses. Comment \cmt{3.3} gives the effect of the canonical projection on captions. We added these ablations to the Supplementary Information.
 \rfig{fig:latent}{reviewer_03/3.5_latent_interpretation.png}{\textbf{Latent dimensions.} (a)~Decoded maps of six latent dimensions, each labeled with its three most associated Cognitive Atlas terms and its correlation $r$ with the top term's Neurosynth map. (b)~Agreement of each dimension's term associations between the text and brain sides, against shuffled dimensions.}
-\rfig{fig:probes}{reviewer_03/3.5_perturbation_probes.png}{\textbf{Perturbation probes.} (a)~One word swapped, with NeuroVLM's difference map beside the matching Neurosynth contrast. (b)~Match of such differences with Neurosynth for five word pairs, and (c)~overlap of ``A and B'' maps with both concepts, against single-concept maps.}
+\rfig{fig:probes}{reviewer_03/3.5_perturbation_probes.png}{\textbf{Perturbation probes.} (a)~NeuroVLM maps for ``auditory stimulation'' and ``visual stimulation'', each averaged over eight sentences that differ only in this phrase, their difference, and the difference of the Neurosynth ``auditory'' and ``visual'' term maps. One axial slice shows each map's top 5\% of voxels, and $r$ is the correlation of the two differences, averaged over the sentences. (b)~This correlation for five word pairs, against the other pairs' Neurosynth differences. (c)~Dice overlap of each ``A and B'' map with the union of the A and B maps, against the better of A or B alone.}
 % source: core/a5_loss_ablation/outputs/a5_loss_ablation_table.md and a5_loss_ablation_text_to_brain.csv (3 seeds, test set, heads retrained on the final latents).
 % The final text-to-brain head also differs from the other three in optimizer settings, epochs and model selection (hence the row label).
 \rtab{\textbf{Loss ablations.} Heads retrained on the final model's latents with the loss shown and scored on the PubMed test set. Values are means of three seeds.\label{tab:ablation}}{\small\begin{tabular}{lc}\toprule
-\textbf{Loss} & \textbf{Test-set score} \\\midrule
+\textbf{Loss} & \textbf{PubMed test set} \\\midrule
 \multicolumn{2}{l}{\textbf{Contrastive heads, retrieval AUC}} \\
 \quad Symmetric InfoNCE cross-entropy, $\tau = 0.07$ (final) & 0.833 \\
 \quad One direction only, text $\rightarrow$ brain / brain $\rightarrow$ text & 0.834 / 0.827 \\
@@ -656,7 +662,7 @@ It would be helpful to include more analyses like Figure 6 that interpret differ
 \quad Voxel-wise binary cross-entropy through the decoder & 0.491 \\
 \quad Latent cosine only & 0.385 \\
 \bottomrule\end{tabular}}
-\revchanges{Introduction, \msl{76}{79}, where the contrast with additive term models no longer implies non-linear composition. Discussion, limitations, \msl{906}{911}, with a new sentence that NeuroVLM ignores negation. New Supplementary Section Latent Dimensions and Loss Ablations, \msl{2186}{2195}, with \msfig{S12} (\msp{49}) and \mstab{S10} (\msp{50}).}
+\revchanges{Introduction, \msl{76}{79}, where the contrast with additive term models no longer implies non-linear composition. Discussion, limitations, \msl{910}{915}, with a new sentence that NeuroVLM ignores negation. New Supplementary Section Latent Dimensions and Loss Ablations, \msl{2186}{2195}, with \msfig{S11} (\msp{49}) and \mstab{S10} (\msp{50}).}
 
 \revcomment{3.6}{Network, anatomy, and cognition outputs}\begin{revquote}
 It is interesting that the model can generate separate brain-to-text outputs corresponding to the predicted network, anatomy, and cognition. How does quantitative performance compare between these outputs? What if the text-to-brain outputs were generated using only text about the network, anatomy, or cognition? These analyses would also shed light on the associations learned by NeuroVLM.
@@ -673,7 +679,7 @@ Network name & Yeo-7 and network atlas maps & 126 & 0.29 (0.05) & 0.29 ($-$0.01)
 Region name & Harvard-Oxford and AAL regions & 178 & 0.07 (0.01) & 0.15 (0.00) \\
 Cognitive Atlas term & Neurosynth map of the term & 130 & 0.28 (0.13) & 0.25 (0.02) \\
 \bottomrule\end{tabular}}
-\revchanges{Methods, Text Decoder, \msl{299}{306}, on title decoding steered toward the canonical names. Discussion, limitations, \msl{899}{907}, where {[}NETWORK{]} titles are the least reliable, especially for single-study maps.}
+\revchanges{Methods, Text Decoder, \msl{299}{306}, on title decoding steered toward the canonical names. Discussion, limitations, \msl{903}{911}, where {[}NETWORK{]} titles are the least reliable, especially for single-study maps.}
 
 \revcomment{3.7}{Unsupported claims}\begin{revquote}
 Some claims are not justified in the context of the study. For example “each component of NeuroVLM is modular and interchangeable with larger or smaller models depending on requirements” (line 101) and “our results underscore that the limiting factor for biological fidelity is often the structure of what the field reports and shares” (line 672). While intuitively true these statements would be better supported by including scaling and ablation analyses.
@@ -682,7 +688,7 @@ Some claims are not justified in the context of the study. For example “each c
 \textbf{1. Modular and interchangeable components.} The encoder swap of \cmt{3.4} supports a narrower claim, which we keep. Replacing SPECTER2 with word2vec required retraining only the small projection heads, and performance dropped modestly (Fig.~\ref{fig:encoder}). We softened the sentence to this claim and removed the reference to larger or smaller models, since we did not test scaling.
 
 \textbf{2. Limiting factor.} The sentence compared coordinate-based supervision with full statistical maps, not model sizes. We rewrote it to say so and cited work on what coordinate-based meta-analysis loses.
-\revchanges{Introduction, \msl{109}{111}, modularity sentence. Discussion, \msl{940}{948}, limiting-factor sentence, and \msl{915}{916}, where the sentence on our strongest limitations is deleted.}
+\revchanges{Introduction, \msl{109}{111}, modularity sentence. Discussion, \msl{944}{952}, limiting-factor sentence, and \msl{919}{921}, where the sentence on our strongest limitations is deleted.}
 
 \revcomment{3.8}{Titles and abstracts only}\begin{revquote}
 Could the authors justify why NeuroVLM was only trained on titles and abstracts? I imagine that other sources of information (such as table captions) might be useful for checking whether the activation coordinates are actually related to the claims in the titles and abstracts.
@@ -698,7 +704,7 @@ statistics only & Functional results (p = .05 family-wise error (FWE) cluster co
 statistics only & Significant clusters exhibiting interactions of interest at p $<$ 0.001 (uncorrected), n = 15. & insula, paracingulate, orbitofrontal \\
 region list only & Significant clusters from amygdala connectivity analyses. & medial frontal cortex, insula \\
 \bottomrule\end{tabular}}
-\revchanges{Discussion, \msl{877}{884}, on table captions and on the pooling of a paper's tables as a limitation.}
+\revchanges{Discussion, \msl{881}{888}, on table captions and on the pooling of a paper's tables as a limitation.}
 
 \revcomment{3.9}{Percentiles of the qualitative examples}\begin{revquote}
 It would be helpful to know where the qualitative examples in Figures 2 and 3 fall within the distribution of cosine similarity quality scores. Alternatively the authors could provide a percentile for each example.

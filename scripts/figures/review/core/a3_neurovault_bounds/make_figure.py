@@ -18,7 +18,7 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[3] / "pipeline"))
-from common import FIG_FULL_W, FIG_LETTER_W, PAPER_FIG_DIR  # noqa: E402  paper (5.15 in) and response letter (6.5 in) text widths
+from common import FIG_LETTER_W  # noqa: E402  response letter text width (6.5 in)
 BLUE, ORANGE, AQUA, INK, INK2, GRID = "#2a78d6", "#eb6834", "#1baf7a", "#0b0b0b", "#52514e", "#e1e0d9"
 plt.rcParams.update({
     "font.size": 8, "axes.titlesize": 9, "axes.labelsize": 8, "xtick.labelsize": 8, "ytick.labelsize": 8,
@@ -34,10 +34,12 @@ RULES = {  # rule -> (label, colour, definition per direction)
     "multi": ("every map of a paper is a target", AQUA, {"text_to_brain": "oracle_any_true", "brain_to_text": "per_image"}),
 }
 DIRECTIONS = {"text_to_brain": "a  Text → brain", "brain_to_text": "b  Brain → text"}
-MAP_TYPE_SHORT = {"univariate-beta map": "beta (univariate)", "multivariate-beta map": "beta (multivariate)",
-                  "P map (given null hypothesis)": "p map", "1-P map (\"inverted\" probability)": "1 − p map",
-                  "other: t, z, or F": "Other (t, z, or F)", "other: effect estimate": "Other (effect estimate)",
-                  "other: component or gradient": "Other (component or gradient)"}
+MAP_TYPE_SHORT = {"T map": "T", "Z map": "Z", "F map": "F", "univariate-beta map": "beta, univariate",
+                  "multivariate-beta map": "beta, multivariate", "P map (given null hypothesis)": "p",
+                  "1-P map (\"inverted\" probability)": "1 − p", "other: t, z, or F": "Other, t, z, or F",
+                  "other: effect estimate": "Other, effect estimate", "other: component or gradient": "Other, component or gradient"}
+HANDLING = {"positive tail (paper)": "positive tail", "inverted (1 - p) before normalisation": "inverted (1 − p)",
+            "used directly": "used as is"}
 
 
 def markdown(df: pd.DataFrame) -> str:
@@ -46,10 +48,13 @@ def markdown(df: pd.DataFrame) -> str:
     return "\n".join(lines) + "\n"
 
 
-def figure(curves: pd.DataFrame, out: Path, paper: bool = False) -> None:
-    """Recall curve per target rule (solid) and its chance curve (dashed, same colour): texts shuffled across papers, then the same
-    best- / worst-map selection, which is why chance is above the diagonal for the upper bound and below it for the lower bound."""
-    fig, axes = plt.subplots(1, 2, figsize=(FIG_FULL_W, 3.15) if paper else (FIG_LETTER_W, 3.9), sharey=True, layout="constrained")
+def figure(curves: pd.DataFrame, out: Path) -> None:
+    """Recall curve per target rule (solid) and its chance curve (dashed, same colour): each paper's text given to another
+    paper (20 derangements), then the same best- / worst- / every-map rule. The best of several maps scores high even for an
+    unrelated text (chance above the diagonal), the worst scores low (below); every map has no selection, so chance is the
+    diagonal from brain to text and above it from text to brain, where any of the paper's maps is a hit. The paper shows the
+    same curves in Fig. 5b (scripts/figures/main/fig5_perf_quant.py), so this figure is the letter's only."""
+    fig, axes = plt.subplots(1, 2, figsize=(FIG_LETTER_W, 3.9), sharey=True, layout="constrained")
     fig.get_layout_engine().set(wspace=0.08)
     for ax, (direction, title) in zip(axes, DIRECTIONS.items()):
         c = curves[(curves["variant"] == VARIANT) & (curves["direction"] == direction)]
@@ -66,65 +71,57 @@ def figure(curves: pd.DataFrame, out: Path, paper: bool = False) -> None:
     handles, labels = axes[0].get_legend_handles_labels()
     handles.append(plt.Line2D([], [], color=INK, lw=1.2, ls=(0, (4, 2.5))))
     labels.append("chance (texts shuffled, same target rule)")
-    fig.legend(handles, labels, loc="outside lower center", ncol=2, handlelength=2.4, columnspacing=1.0 if paper else 2.0,
-               fontsize=7 if paper else None)
-    if paper:
-        fig.savefig(PAPER_FIG_DIR / "supp_neurovault_bounds.png")
-        return
+    fig.legend(handles, labels, loc="outside lower center", ncol=2, handlelength=2.4, columnspacing=2.0)
     for ext in ("png", "svg"):
         fig.savefig(out / f"neurovault_bounds.{ext}")
     plt.close(fig)
     print(f"[figure] {out / 'neurovault_bounds.png'}")
 
 
-def map_type_table(per_type: pd.DataFrame, counts: pd.DataFrame, cfg: dict, out: Path) -> None:
-    """Per-map-type AUCs: declared NeuroVault types first, then the maps labelled 'other' by their inferred kind."""
+def map_type_table(per_type: pd.DataFrame, counts: pd.DataFrame, metrics: pd.DataFrame, cfg: dict, out: Path) -> None:
+    """Per-map-type AUCs of the per-map evaluation (every map its own target): declared NeuroVault types first, then the
+    maps labeled Other by their inferred kind. Chance = the same evaluation with texts shuffled across papers."""
     pt = per_type[per_type["variant"] == VARIANT].pivot_table(index="map_type", columns="direction", values="recall_curve_auc")
     c = counts.assign(other=counts["map_type"].str.startswith("other")).sort_values(["other", "n_images"], ascending=[True, False]).set_index("map_type")
     pt = pt.reindex(index=c.index, columns=["text_to_brain", "brain_to_text"])
+    chance = metrics[(metrics["variant"] == VARIANT) & (metrics["definition"] == "per_image")].set_index("direction")["chance_recall_curve_auc"]
     df = pd.DataFrame({
         "Map type": [MAP_TYPE_SHORT.get(t, t) for t in c.index],
-        "Images": c["n_images"].to_numpy(),
-        "Papers": c["n_publications"].to_numpy(),
-        "Preprocessing before the threshold": c["preprocessing"].str.replace(" | |value| | sign split", "", regex=False).to_numpy(),
+        "Maps": [f"{v:,}" for v in c["n_images"]],
+        "Papers": [f"{v:,}" for v in c["n_publications"]],
+        "Handling": [HANDLING.get(h.split(" | ")[0], h.split(" | ")[0]) for h in c["preprocessing"]],
         "AUC text → brain": ["–" if pd.isna(pt.loc[t, 'text_to_brain']) else f"{pt.loc[t, 'text_to_brain']:.2f}" for t in c.index],
         "AUC brain → text": ["–" if pd.isna(pt.loc[t, 'brain_to_text']) else f"{pt.loc[t, 'brain_to_text']:.2f}" for t in c.index],
     })
-    kinds = cfg.get("other_map_kinds", {})
-    if cfg.get("other_maps") == "infer":
-        other = (f"Other = maps their uploaders labelled Other in NeuroVault, typed from names, descriptions and values (other_maps.csv); "
-                 f"{kinds.get('mean or variance image', 0)} mean or variance images and {kinds.get('unresolved', 0)} maps that could not be typed are excluded.")
-    elif cfg.get("other_maps") == "exclude":
-        other = f"The {sum(kinds.values())} maps labelled Other in NeuroVault are excluded."
-    else:
-        other = "'other' = maps their uploaders labelled Other in NeuroVault."
-    note = ("Every image is its own target (chance AUC 0.50). Parcellations, anatomical maps, ROI masks and variance maps "
-            f"are excluded before evaluation. {other}")
+    note = (f"AUC of the final model when every map is a target, scored per map. From text to brain, a paper's text ranks each "
+            f"of its maps among the maps of other papers. From brain to text, each map ranks the {cfg['n_publications']} texts, as in "
+            f"the bounds figure. Chance is this setting's null, texts shuffled across papers ({chance['text_to_brain']:.2f} and "
+            f"{chance['brain_to_text']:.2f}). Other marks maps their uploaders labeled Other, typed from file names, descriptions, "
+            "and values. Masks, parcellations, anatomical and variance maps, mean images, and untyped maps were excluded.")
     df.to_csv(out / "map_type_table.csv", index=False)
     (out / "map_type_table.md").write_text(markdown(df) + "\n" + note + "\n")
-    tex = ["% written by a3_neurovault_bounds/make_figure.py", "\\begin{table}[ht]", "\\centering", "\\footnotesize",
-           f"\\caption{{NeuroVault retrieval per map type. {note}}}", "\\label{tab:neurovault_map_types}",
-           "\\begin{tabular}{lrrlcc}", "\\toprule", " & ".join(df.columns).replace("→", "$\\rightarrow$") + " \\\\", "\\midrule"]
+    tex = ["% written by a3_neurovault_bounds/make_figure.py", "\\begin{table}[ht]", "\\centering", "\\small",
+           f"\\caption{{\\textbf{{NeuroVault results by map type.}} {note}}}", "\\label{tab:neurovault_map_types}",
+           "\\begin{tabular}{>{\\raggedright\\arraybackslash}p{3.6cm}rrlcc}", "\\toprule",
+           " & & & & \\multicolumn{2}{c}{\\textbf{AUC}} \\\\\\cmidrule(lr){5-6}",
+           "\\textbf{Map type} & \\textbf{Maps} & \\textbf{Papers} & \\textbf{Handling} & \\textbf{text $\\rightarrow$ brain} & "
+           "\\textbf{brain $\\rightarrow$ text} \\\\", "\\midrule"]
     tex += [" & ".join(str(v) for v in row).replace("−", "$-$") + " \\\\" for row in df.itertuples(index=False)]
     tex += ["\\bottomrule", "\\end{tabular}", "\\end{table}", ""]
     (out / "map_type_table.tex").write_text("\n".join(tex))
     print(markdown(df))
+    print(f"[caption] {note}")
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--out", type=Path, default=HERE / "outputs")
-    p.add_argument("--paper", action="store_true",
-                   help="Draw at the paper's text width (FIG_FULL_W) and write only paper/figures/supp_neurovault_bounds.png.")
     args = p.parse_args()
     out = args.out
-    if args.paper:
-        figure(pd.read_csv(out / "recall_curves.csv"), out, paper=True)
-        return
     metrics = pd.read_csv(out / "bounds_metrics.csv")
     cfg = json.loads((out / "config.json").read_text())
     figure(pd.read_csv(out / "recall_curves.csv"), out)
-    map_type_table(pd.read_csv(out / "per_map_type_metrics.csv"), pd.read_csv(out / "map_type_counts.csv"), cfg, out)
+    map_type_table(pd.read_csv(out / "per_map_type_metrics.csv"), pd.read_csv(out / "map_type_counts.csv"), metrics, cfg, out)
     shown = {(k[d], d): rule for rule, (_, _, k) in RULES.items() for d in DIRECTIONS}
     metrics = metrics[[(d, r) in shown for d, r in zip(metrics["definition"], metrics["direction"])]].copy()
     metrics.insert(0, "rule", [shown[(d, r)] for d, r in zip(metrics["definition"], metrics["direction"])])

@@ -1035,7 +1035,7 @@ class TitleConstraint:
         import torch
 
         nodes = {}
-        for r, seq in enumerate(input_ids.tolist()):
+        for r, seq in enumerate(input_ids[:, self.offset:].tolist()):  # generated tokens only (prompt ids skipped)
             if not self.tagged[r // self.num_beams]:
                 continue
             node = self.tries[r // self.num_beams]
