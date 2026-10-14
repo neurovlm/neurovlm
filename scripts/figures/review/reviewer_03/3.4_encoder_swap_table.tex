@@ -1,0 +1,14 @@
+% written by a5_encoder_swap/make_figure.py
+\begin{table}[ht]
+\centering
+\caption{SPECTER2 vs a context-free baseline (mean word2vec embeddings of title + abstract). The text encoder is frozen and the projection heads are retrained for each on the final model's autoencoder latents with its recipe (text-to-brain head v2). PubMed test split ($n = 2{,}971$). AUC: recall-curve AUC of contrastive retrieval. Dice (both maps thresholded at their 70th percentile) and voxel Pearson $r$: generated vs autoencoder-reconstructed true map.}
+\label{tab:context_free_baseline}
+\begin{tabular}{lrrrr}
+\toprule
+Encoder & AUC text$\rightarrow$brain & AUC brain$\rightarrow$text & Dice & Pearson $r$ \\
+\midrule
+SPECTER2 & 0.835 & 0.833 & 0.530 & 0.325 \\
+word2vec & 0.809 & 0.808 & 0.516 & 0.303 \\
+\bottomrule
+\end{tabular}
+\end{table}

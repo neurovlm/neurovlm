@@ -1,0 +1,366 @@
+{
+  "p_values_per_panel": {
+    "a Contrastive": {
+      "p": "4e-1116",
+      "log10_p": -1115.41,
+      "cohen_d": 2.48,
+      "test": "Welch t (match vs deranged null)",
+      "stars": "***"
+    },
+    "a Dice": {
+      "p": "2e-246",
+      "log10_p": -245.67,
+      "cohen_d": 0.91,
+      "test": "Welch t (match vs deranged null)",
+      "stars": "***"
+    },
+    "a Pearson/Spearman": {
+      "p": "6e-290",
+      "log10_p": -289.24,
+      "cohen_d": 1.0,
+      "test": "Welch t (match vs deranged null)",
+      "stars": "***"
+    },
+    "b Contrastive": {
+      "p": "7e-1158",
+      "log10_p": -1157.15,
+      "cohen_d": 2.48,
+      "test": "Welch t (match vs deranged null)",
+      "stars": "***"
+    },
+    "b BERTScore": {
+      "p": "9e-19",
+      "log10_p": -18.05,
+      "cohen_d": 0.23,
+      "test": "Welch t (match vs deranged null)",
+      "stars": "***"
+    },
+    "b Semantic": {
+      "p": "1e-109",
+      "log10_p": -108.91,
+      "cohen_d": 0.59,
+      "test": "Welch t (match vs deranged null)",
+      "stars": "***"
+    },
+    "a Spin test": {
+      "p": "3e-620",
+      "log10_p": -619.59,
+      "cohen_d": 1.53,
+      "test": "exact binomial vs uniform-p null",
+      "stars": "***"
+    },
+    "b Contrastive null test": {
+      "p": "6e-1924",
+      "log10_p": -1923.24,
+      "cohen_d": 2.29,
+      "test": "exact binomial vs uniform-p null",
+      "stars": "***"
+    }
+  },
+  "welch_tests": {
+    "a:contrastive": {
+      "t": 95.41134918335977,
+      "df": 4857.3131597005995,
+      "log10_p": -1115.4098220845678,
+      "p": "4e-1116",
+      "n_match": 2971,
+      "n_null": 2971,
+      "match_mean": 0.344895900653215,
+      "null_mean": -0.00419089054717102,
+      "cohen_d": 2.475504436827903
+    },
+    "a:dice": {
+      "t": 35.1756733908268,
+      "df": 5939.720314616078,
+      "log10_p": -245.66631450304754,
+      "p": "2e-246",
+      "n_match": 2971,
+      "n_null": 2971,
+      "match_mean": 0.5307672643530593,
+      "null_mean": 0.40810002828814973,
+      "cohen_d": 0.9126538539986155
+    },
+    "a:correlation": {
+      "t": 38.61271920174224,
+      "df": 5701.015908910674,
+      "log10_p": -289.2363367816878,
+      "p": "6e-290",
+      "n_match": 2971,
+      "n_null": 2971,
+      "match_mean": 0.3193296131694716,
+      "null_mean": 0.12317395831643056,
+      "cohen_d": 1.0018300602605201
+    },
+    "b:contrastive": {
+      "t": 95.4607552050791,
+      "df": 5349.472264168885,
+      "log10_p": -1157.1454293430506,
+      "p": "7e-1158",
+      "n_match": 2971,
+      "n_null": 2971,
+      "match_mean": 0.2806965991978802,
+      "null_mean": 0.009098717828632467,
+      "cohen_d": 2.4767863055680377
+    },
+    "b:bertscore": {
+      "t": 8.876546745914933,
+      "df": 5920.457768730657,
+      "log10_p": -18.04564414594134,
+      "p": "9e-19",
+      "n_match": 2971,
+      "n_null": 2971,
+      "match_mean": 0.5529701593587472,
+      "null_mean": 0.5477778765839063,
+      "cohen_d": 0.2303073066391044
+    },
+    "b:semantic": {
+      "t": 22.732396355211435,
+      "df": 5777.861574086604,
+      "log10_p": -108.91275395858969,
+      "p": "1e-109",
+      "n_match": 2971,
+      "n_null": 2971,
+      "match_mean": 0.4633158241808966,
+      "null_mean": 0.39671672951666437,
+      "cohen_d": 0.589805599844414
+    }
+  },
+  "null_tests": {
+    "a:spin": {
+      "test": "one-sided exact binomial test of #(p < 0.05) against the exact null rate (p uniform on {1/N..1})",
+      "n": 1332,
+      "N_candidates": 101,
+      "min_attainable_p": 0.009900990099009901,
+      "frac_p_lt_0_05": 0.575075075075075,
+      "null_frac_p_lt_0_05": 0.04950495049504951,
+      "median_p": 0.029702970758080482,
+      "null_median_p": 0.504950495049505,
+      "frac_at_min_p": 0.42117117117117114,
+      "mean_neglog10_p": 1.3161573476850372,
+      "null_mean_neglog10_p": 0.42041716557968783,
+      "cohen_d": 1.5280122543601256,
+      "log10_p": -619.591664264928,
+      "p": "3e-620"
+    },
+    "b:null_test": {
+      "test": "one-sided exact binomial test of #(p < 0.05) against the exact null rate (p uniform on {1/N..1})",
+      "n": 2971,
+      "N_candidates": 2971,
+      "min_attainable_p": 0.0003365870077415012,
+      "frac_p_lt_0_05": 0.6960619320094245,
+      "null_frac_p_lt_0_05": 0.049814877145742176,
+      "median_p": 0.024907438572871088,
+      "null_median_p": 0.5001682935038707,
+      "frac_at_min_p": 0.018512285425782565,
+      "mean_neglog10_p": 1.6816149098797535,
+      "null_mean_neglog10_p": 0.43357568236048144,
+      "cohen_d": 2.2937844601000674,
+      "log10_p": -1923.2396442270528,
+      "p": "6e-1924"
+    }
+  },
+  "paired_differences": {
+    "a Contrastive": {
+      "n": 2971,
+      "frac_gt_0": 0.9495119488387749,
+      "sign_test_log10_p": -637.8195502564752,
+      "sign_test_p": "2e-638",
+      "median": 0.3458317629992962,
+      "median_ci95": [
+        0.33425956312566996,
+        0.35502884895540776
+      ],
+      "mean": 0.34908679120038605,
+      "sd": 0.21870346794469128,
+      "d_z": 1.5961648641468633,
+      "paired_t": 87.00196718855472,
+      "paired_t_log10_p": -818.5973889812105,
+      "paired_t_p": "3e-819"
+    },
+    "a Dice": {
+      "n": 2971,
+      "frac_gt_0": 0.7408280040390441,
+      "sign_test_log10_p": -157.6615008155677,
+      "sign_test_p": "2e-158",
+      "median": 0.11806610226631165,
+      "median_ci95": [
+        0.10837030559778213,
+        0.12775897979736328
+      ],
+      "mean": 0.1226672360649096,
+      "sd": 0.1932638471712156,
+      "d_z": 0.6347138270316883,
+      "paired_t": 34.596270594546816,
+      "paired_t_log10_p": -219.94335307114113,
+      "paired_t_p": "1e-220"
+    },
+    "a Pearson/Spearman": {
+      "n": 2971,
+      "frac_gt_0": 0.7610232245035342,
+      "sign_test_log10_p": -186.43537725063922,
+      "sign_test_p": "4e-187",
+      "median": 0.19318386912345886,
+      "median_ci95": [
+        0.17911508679389954,
+        0.20695316046476364
+      ],
+      "mean": 0.196155654853041,
+      "sd": 0.2762765353460358,
+      "d_z": 0.7099975197218846,
+      "paired_t": 38.699749820526726,
+      "paired_t_log10_p": -264.924610248547,
+      "paired_t_p": "1e-265"
+    },
+    "b Contrastive": {
+      "n": 2971,
+      "frac_gt_0": 0.9575900370245709,
+      "sign_test_log10_p": -669.2975820335232,
+      "sign_test_p": "5e-670",
+      "median": 0.26937249302864075,
+      "median_ci95": [
+        0.2621520161628723,
+        0.27753383480012417
+      ],
+      "mean": 0.27159788136924773,
+      "sd": 0.1556447324715686,
+      "d_z": 1.7449860143443026,
+      "paired_t": 95.11374380842226,
+      "paired_t_log10_p": -903.2065328916868,
+      "paired_t_p": "6e-904"
+    },
+    "b BERTScore": {
+      "n": 2971,
+      "frac_gt_0": 0.5661393470212049,
+      "sign_test_log10_p": -12.52786986622854,
+      "sign_test_p": "3e-13",
+      "median": 0.004765510559082031,
+      "median_ci95": [
+        0.0034367784857749937,
+        0.006258964538574219
+      ],
+      "mean": 0.005192282774840811,
+      "sd": 0.028936964894331698,
+      "d_z": 0.1794342562808962,
+      "paired_t": 9.780401528758917,
+      "paired_t_log10_p": -21.529999976110947,
+      "paired_t_p": "3e-22"
+    },
+    "b Semantic": {
+      "n": 2971,
+      "frac_gt_0": 0.6590373611578593,
+      "sign_test_log10_p": -67.91393634686095,
+      "sign_test_p": "1e-68",
+      "median": 0.062463223934173584,
+      "median_ci95": [
+        0.05504743903875351,
+        0.06945645809173584
+      ],
+      "mean": 0.06659909466423222,
+      "sd": 0.15775609830639897,
+      "d_z": 0.4221649456294318,
+      "paired_t": 23.010894158130245,
+      "paired_t_log10_p": -107.23103087942798,
+      "paired_t_p": "6e-108"
+    }
+  },
+  "text_to_brain": {
+    "n": 2971,
+    "n_total": 2971,
+    "retrieval_auc": 0.9525480270385742,
+    "dice_pct": 70.0,
+    "dice_mean_by_pct": {
+      "70.0": 0.5307672619819641,
+      "75.0": 0.48792651295661926,
+      "80.0": 0.4420640468597412,
+      "85.0": 0.39109763503074646,
+      "90.0": 0.3300378620624542,
+      "95.0": 0.24027879536151886
+    },
+    "correlation": "Pearson",
+    "spin": {
+      "enabled": true,
+      "n_tested": 1332,
+      "n_eligible": 1332,
+      "n_perm": 100,
+      "density": "3k",
+      "frac_p_lt_0_05": 0.575075075075075,
+      "n_errors": 0
+    }
+  },
+  "brain_to_text": {
+    "n": 2971,
+    "n_total": 2971,
+    "retrieval_auc": 0.9526612162590027,
+    "frac_p_lt_0_05": 0.6960619320094245,
+    "generation": {
+      "num_beams": 1,
+      "max_new_tokens": 128,
+      "projection_temp": 0.035,
+      "repetition_penalty": 1.25,
+      "cache": "/home/rph/neurovlm_reviews/neurovlm/scripts/figures/main/cache/fig4_b2t_generation_titles-vocab_excl_m-final-9d34a680.parquet"
+    }
+  },
+  "text_score_reference": {
+    "n_pairs": 200,
+    "mean": {
+      "random papers": {
+        "bertscore": 0.5791842937469482,
+        "semantic": 0.3700474500656128
+      },
+      "same topic": {
+        "bertscore": 0.6227436661720276,
+        "semantic": 0.7294856905937195
+      },
+      "same paper": {
+        "bertscore": 0.6841428875923157,
+        "semantic": 0.8436570763587952
+      },
+      "caption match": {
+        "bertscore": 0.5529701113700867,
+        "semantic": 0.46331584453582764
+      },
+      "caption null": {
+        "bertscore": 0.5477778315544128,
+        "semantic": 0.3967166841030121
+      }
+    },
+    "bertscore_rescaled": {
+      "baseline_f1": 0.5150192,
+      "random papers": 0.13230439998232554,
+      "same topic": 0.22212109463308152,
+      "same paper": 0.3487224393054646,
+      "caption match": 0.07825239962094718,
+      "caption null": 0.0675462442109313,
+      "paired_mean_diff": 0.010706161511632648
+    },
+    "match_check_max_abs_diff": 0.00037044286727905273
+  },
+  "eval_exclusions": {
+    "enabled": true,
+    "PubMed test (text-to-brain)": {
+      "before": 2987,
+      "dropped": 16,
+      "kept": 2971
+    },
+    "PubMed test (brain-to-text)": {
+      "before": 2987,
+      "dropped": 16,
+      "kept": 2971
+    }
+  },
+  "model_dir": "scripts/outputs/runs/final",
+  "cache_tag": "_m-final-9d34a680",
+  "model_sources": {
+    "autoencoder": "scripts/outputs/runs/final/autoencoder.pt",
+    "canonical_semantic_banks": "scripts/outputs/runs/final/canonical_semantic_banks.pt (identical to the banks packaged in the Q-Former)",
+    "caption_titles": "titles: canonical vocabulary (48 network / 83 region names)",
+    "latent_neuro": "scripts/outputs/runs/final/latent_neuro.pt",
+    "neuroqwen": "released:neurovlm/NeuroQwen3-0.6B (frozen LM; not retrained by the pipeline)",
+    "pmids_split": "scripts/outputs/runs/final/pmids_split.pt (test: 2987 pmids; identical to the HF pubmed_text test flag)",
+    "proj_head_image_infonce": "scripts/outputs/runs/final/proj_head_image_infonce.pt",
+    "proj_head_text_infonce": "scripts/outputs/runs/final/proj_head_text_infonce.pt",
+    "proj_head_text_mse": "scripts/outputs/runs/final/proj_head_text_mse.pt",
+    "qformer_canonical": "scripts/outputs/runs/final/neuro_qformer_canonical (projector: mlp)",
+    "specter": "released:allenai/specter2_aug2023refresh + adhoc_query adapter (frozen; not retrained by the pipeline)"
+  }
+}

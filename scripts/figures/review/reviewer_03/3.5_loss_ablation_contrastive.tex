@@ -1,0 +1,20 @@
+\begin{table}[t]
+\centering
+\small
+\caption{Contrastive-head loss ablation (mean $\pm$ sd over 3 head seeds; PubMed test, n=2971; heads retrained on the autoencoder latents of the final model). Delta = mean AUC minus the final model's symmetric InfoNCE.}
+\label{tab:a5_loss_contrastive}
+\begin{tabular}{lrrrrrrr}
+\toprule
+Variant & tau & Seeds & t2i AUC & i2t AUC & R@10 & MRR & Delta AUC \\
+\midrule
+symmetric InfoNCE, $\tau$ 0.07 (final) & 0.07 & 3 & 0.835 $\pm$ 0.001 & 0.832 $\pm$ 0.001 & 0.089 $\pm$ 0.002 & 0.043 $\pm$ 0.001 & 0.000 \\
+text$\rightarrow$brain CE only & 0.07 & 3 & 0.836 $\pm$ 0.001 & 0.831 $\pm$ 0.001 & 0.087 $\pm$ 0.001 & 0.042 $\pm$ 0.000 & 0.000 \\
+brain$\rightarrow$text CE only & 0.07 & 3 & 0.824 $\pm$ 0.001 & 0.831 $\pm$ 0.001 & 0.082 $\pm$ 0.003 & 0.040 $\pm$ 0.001 & -0.006 \\
+symmetric, $\tau$ 0.03 & 0.03 & 3 & 0.831 $\pm$ 0.002 & 0.828 $\pm$ 0.002 & 0.088 $\pm$ 0.002 & 0.042 $\pm$ 0.001 & -0.004 \\
+symmetric, $\tau$ 0.20 & 0.20 & 3 & 0.828 $\pm$ 0.001 & 0.827 $\pm$ 0.001 & 0.084 $\pm$ 0.004 & 0.040 $\pm$ 0.001 & -0.006 \\
+symmetric, learnable $\tau$ & learn. & 3 & 0.835 $\pm$ 0.001 & 0.832 $\pm$ 0.001 & 0.089 $\pm$ 0.003 & 0.043 $\pm$ 0.000 & -0.000 \\
+no contrastive CE (cosine only) & -- & 3 & 0.636 $\pm$ 0.017 & 0.600 $\pm$ 0.004 & 0.014 $\pm$ 0.002 & 0.008 $\pm$ 0.001 & -0.215 \\
+final loss, random text-head init & 0.07 & 3 & 0.823 $\pm$ 0.002 & 0.821 $\pm$ 0.002 & 0.090 $\pm$ 0.004 & 0.044 $\pm$ 0.002 & -0.011 \\
+\bottomrule
+\end{tabular}
+\end{table}

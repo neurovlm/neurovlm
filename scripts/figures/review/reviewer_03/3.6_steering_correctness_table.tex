@@ -1,0 +1,21 @@
+\begin{table}[t]
+\centering
+\small
+\caption{Steering-token correctness (final model): share of captions whose title names a region / network / function that matches the map; chance = captions shuffled across maps. A region counts when it holds 5 \% of the map's top voxels or its peak, or when at least half of it lies in the top voxels.}
+\label{tab:steering_correctness}
+\begin{tabular}{lllllll}
+\toprule
+Token & Map set & n & Correct (\%) & 95 \% CI & Chance (\%) & p \\
+\midrule
+{[}NETWORK{]} & Network-atlas maps & 145 & 70 & 62-77 & 12 & $<$ 0.001 \\
+{[}REGION{]} & Network-atlas maps & 145 & 93 & 88-96 & 24 & $<$ 0.001 \\
+{[}FUNCTION{]} & Network-atlas maps & 145 & 78 & 71-84 & 19 & $<$ 0.001 \\
+{[}NETWORK{]} & ICA components & 40 & 52 & 37-67 & 15 & $<$ 0.001 \\
+{[}REGION{]} & ICA components & 40 & 85 & 71-93 & 30 & $<$ 0.001 \\
+{[}FUNCTION{]} & ICA components & 40 & 92 & 80-97 & 23 & $<$ 0.001 \\
+{[}NETWORK{]} & PubMed test maps & 150 & 33 & 26-41 & 10 & $<$ 0.001 \\
+{[}REGION{]} & PubMed test maps & 150 & 63 & 55-70 & 24 & $<$ 0.001 \\
+{[}FUNCTION{]} & PubMed test maps & 150 & 65 & 57-72 & 20 & $<$ 0.001 \\
+\bottomrule
+\end{tabular}
+\end{table}

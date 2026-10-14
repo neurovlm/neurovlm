@@ -1,0 +1,292 @@
+{
+  "text_in_figure": "complete (no truncation)",
+  "cohorts": {
+    "UKBICA": [
+      {
+        "ref": "visual",
+        "component": "ICA2",
+        "index": 1,
+        "top_labels": [
+          "visual",
+          "ventral attention",
+          "action-observation",
+          "dorsal attention",
+          "attention"
+        ],
+        "top_sims": [
+          0.5206974148750305,
+          0.31487780809402466,
+          0.24680066108703613,
+          0.22584789991378784,
+          0.20085307955741882
+        ],
+        "generated": "[NETWORK]Visual Network\nThe visual network includes primary visual cortex, extrastriate occipital cortex, lateral occipital gyrus, ventral occipital lobe, and intrastriate visual cortex. It is commonly associated with visual perception, feature selection, and spatial organization of visual information.",
+        "generated_lines_in_figure": 5,
+        "view": "xyz",
+        "cut_coords": [
+          30.0,
+          -78.0,
+          -8.0
+        ]
+      },
+      {
+        "ref": "language",
+        "component": "ICA13",
+        "index": 12,
+        "top_labels": [
+          "language",
+          "semantic",
+          "frontoparietal",
+          "default mode",
+          "memory"
+        ],
+        "top_sims": [
+          0.35652869939804077,
+          0.3326724171638489,
+          0.05457797273993492,
+          0.05333242937922478,
+          0.03686456382274628
+        ],
+        "generated": "[NETWORK]Language Network\nThe language network includes left inferior frontal, middle temporal, and posterior temporal regions. It is commonly associated with word meaning, sentence structure, and conceptual meaning. This network is often described as supporting the acquisition and use of language.",
+        "generated_lines_in_figure": 5,
+        "view": "xyz",
+        "cut_coords": [
+          -50.0,
+          18.0,
+          0.0
+        ]
+      },
+      {
+        "ref": "sensorimotor",
+        "component": "ICA11",
+        "index": 10,
+        "top_labels": [
+          "sensorimotor",
+          "motor",
+          "action-observation",
+          "language",
+          "central executive"
+        ],
+        "top_sims": [
+          0.3107180595397949,
+          0.22378867864608765,
+          0.09659776091575623,
+          0.08832711726427078,
+          -0.030168939381837845
+        ],
+        "generated": "[NETWORK]Sensorimotor Network\nThe sensorimotor network includes primary somatosensory cortex in the parietal operculum and secondary motor cortex in the central frontoparietal tract. It supports tactile, proprioceptive, and motor representations of body parts. This network is often described as supporting bodily awareness and movement.",
+        "generated_lines_in_figure": 6,
+        "view": "xyz",
+        "cut_coords": [
+          -58.0,
+          -10.0,
+          32.0
+        ]
+      },
+      {
+        "ref": "default mode",
+        "component": "ICA7",
+        "index": 6,
+        "top_labels": [
+          "default mode",
+          "memory",
+          "semantic",
+          "dorsal attention",
+          "salience"
+        ],
+        "top_sims": [
+          0.4672688841819763,
+          0.3080853521823883,
+          0.18340130150318146,
+          0.15292692184448242,
+          0.14644896984100342
+        ],
+        "generated": "[NETWORK]Default Mode Network\nBroadly associated with internally generated thought, this network includes the precuneus, angular gyrus, and parahippocampal regions. It is often linked with self-referential cognition, memory, and spatial context. This network is generally described as supporting the integration of internal and external information.",
+        "generated_lines_in_figure": 6,
+        "view": "xyz",
+        "cut_coords": [
+          6.0,
+          -58.0,
+          20.0
+        ]
+      },
+      {
+        "ref": "frontoparietal",
+        "component": "ICA5",
+        "index": 4,
+        "top_labels": [
+          "frontoparietal",
+          "cognitive control",
+          "central executive",
+          "executive control",
+          "default mode"
+        ],
+        "top_sims": [
+          0.1968175768852234,
+          0.14303278923034668,
+          0.1308150589466095,
+          0.11969718337059021,
+          0.08586336672306061
+        ],
+        "generated": "[NETWORK]Frontoparietal Control Network\nThe frontoparietal control network includes lateral prefrontal cortex, inferior parietal lobule, and middle frontal gyrus. It is commonly associated with working memory, syntactic control, and the integration of information. It is often described as supporting top-down executive control.",
+        "generated_lines_in_figure": 5,
+        "view": "xyz",
+        "cut_coords": [
+          42.0,
+          -66.0,
+          44.0
+        ]
+      }
+    ],
+    "HCPICA": [
+      {
+        "ref": "visual",
+        "component": "ICA4",
+        "index": 3,
+        "top_labels": [
+          "visual",
+          "ventral attention",
+          "dorsal attention",
+          "action-observation",
+          "attention"
+        ],
+        "top_sims": [
+          0.4835636019706726,
+          0.2637876868247986,
+          0.23325243592262268,
+          0.2161373496055603,
+          0.1792210042476654
+        ],
+        "generated": "[NETWORK]Visual Network\nThe visual network includes primary visual cortex, extrastriate occipital cortex, and lateral occipital regions. It is commonly associated with visual perception, feature selection, and the organization of visual input. The network supports the analysis of visual patterns, color, motion, and spatial layout.",
+        "generated_lines_in_figure": 6,
+        "view": "xyz",
+        "cut_coords": [
+          34.0,
+          -82.0,
+          -12.0
+        ]
+      },
+      {
+        "ref": "language",
+        "component": "ICA18",
+        "index": 16,
+        "top_labels": [
+          "language",
+          "semantic",
+          "frontoparietal",
+          "cognitive control",
+          "default mode"
+        ],
+        "top_sims": [
+          0.3588412404060364,
+          0.322504460811615,
+          0.14733466506004333,
+          0.08965356647968292,
+          0.08665023744106293
+        ],
+        "generated": "[NETWORK]Language Network\nThe language network includes inferior frontal gyrus, angular gyrus, middle temporal gyrus, and inferior temporal gyrus. It is commonly associated with phonological processing, syntactic analysis, and meaning retrieval. This network is often described as supporting the comprehension and production of language.",
+        "generated_lines_in_figure": 6,
+        "view": "xyz",
+        "cut_coords": [
+          -50.0,
+          18.0,
+          24.0
+        ]
+      },
+      {
+        "ref": "sensorimotor",
+        "component": "ICA23",
+        "index": 19,
+        "top_labels": [
+          "sensorimotor",
+          "motor",
+          "action-observation",
+          "language",
+          "dorsal attention"
+        ],
+        "top_sims": [
+          0.31720393896102905,
+          0.20406021177768707,
+          0.12523861229419708,
+          0.1199910044670105,
+          0.019814830273389816
+        ],
+        "generated": "[NETWORK]Sensorimotor Network\nThe sensorimotor network includes primary somatosensory cortex in the parietal operculum and secondary motor cortex in the central frontoparietal regions. It supports tactile, proprioceptive, and motor representations of body contact and movement.",
+        "generated_lines_in_figure": 5,
+        "view": "xyz",
+        "cut_coords": [
+          -58.0,
+          -10.0,
+          32.0
+        ]
+      },
+      {
+        "ref": "default mode",
+        "component": "ICA2",
+        "index": 1,
+        "top_labels": [
+          "default mode",
+          "semantic",
+          "memory",
+          "frontoparietal",
+          "central executive"
+        ],
+        "top_sims": [
+          0.4590376019477844,
+          0.22876808047294617,
+          0.17196758091449738,
+          0.15530943870544434,
+          0.14452652633190155
+        ],
+        "generated": "[NETWORK]Default Mode Network\nThe default mode network includes medial prefrontal cortex, posterior cingulate cortex, precuneus, angular gyrus, and lateral parietal cortex. It is commonly associated with self-related thought, memory, and context-based reasoning. The network is often described as a hub for integrating internal and external information.",
+        "generated_lines_in_figure": 6,
+        "view": "xyz",
+        "cut_coords": [
+          2.0,
+          -62.0,
+          28.0
+        ]
+      },
+      {
+        "ref": "frontoparietal",
+        "component": "ICA11",
+        "index": 10,
+        "top_labels": [
+          "frontoparietal",
+          "central executive",
+          "language",
+          "semantic",
+          "cognitive control"
+        ],
+        "top_sims": [
+          0.3176560401916504,
+          0.2332877814769745,
+          0.22083018720149994,
+          0.21450203657150269,
+          0.19864895939826965
+        ],
+        "generated": "[NETWORK]Frontoparietal Control Network\nThe frontoparietal control network includes lateral prefrontal cortex, inferior parietal lobule, intraparietal sulcus, and posterior parietal cortex. It is commonly associated with working memory, syntactic control, and the integration of information for flexible decision-making.",
+        "generated_lines_in_figure": 5,
+        "view": "xyz",
+        "cut_coords": [
+          -38.0,
+          18.0,
+          44.0
+        ]
+      }
+    ]
+  },
+  "model_dir": "scripts/outputs/runs/final",
+  "cache_tag": "_m-final-9d34a680",
+  "model_sources": {
+    "autoencoder": "scripts/outputs/runs/final/autoencoder.pt",
+    "canonical_semantic_banks": "scripts/outputs/runs/final/canonical_semantic_banks.pt (identical to the banks packaged in the Q-Former)",
+    "caption_titles": "titles: canonical vocabulary (48 network / 83 region names)",
+    "neuroqwen": "released:neurovlm/NeuroQwen3-0.6B (frozen LM; not retrained by the pipeline)",
+    "proj_head_image_infonce": "scripts/outputs/runs/final/proj_head_image_infonce.pt",
+    "proj_head_text_infonce": "scripts/outputs/runs/final/proj_head_text_infonce.pt",
+    "proj_head_text_mse": "scripts/outputs/runs/final/proj_head_text_mse.pt",
+    "qformer_canonical": "scripts/outputs/runs/final/neuro_qformer_canonical (projector: mlp)",
+    "specter": "released:allenai/specter2_aug2023refresh + adhoc_query adapter (frozen; not retrained by the pipeline)"
+  }
+}

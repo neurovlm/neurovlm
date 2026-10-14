@@ -1,0 +1,197 @@
+{
+  "PubMed": {
+    "source": "neuro_vectors.pt test split, np.random.seed(0)",
+    "pmids": [
+      35784619,
+      34470467,
+      26658924,
+      21933718,
+      21545807,
+      27241484,
+      23158779,
+      17188902
+    ]
+  },
+  "Networks": {
+    "source": "scripts/figures/main/network_examples.csv, rows [4, 5, 6, 7, 0, 1, 2, 3] (the submitted figure's order)",
+    "maps": [
+      "YeoLab/DefaultA",
+      "YeoLab/SomMotA",
+      "YeoLab/SalVentAttnB",
+      "YeoLab/ControlB",
+      "Glasser/Visual2",
+      "Glasser/Language",
+      "Glasser/Auditory",
+      "WashU/DorsAttn"
+    ]
+  },
+  "NeuroVault": {
+    "source": "neurovault.pt neuro_clustered, np.random.seed(1)",
+    "rows": [
+      1061,
+      235,
+      1096,
+      905,
+      2763,
+      2895,
+      960,
+      144
+    ],
+    "image_ids": [
+      114255,
+      24840,
+      24348,
+      3180,
+      23636,
+      391742,
+      62768,
+      28783
+    ],
+    "collection_ids": [
+      4804,
+      1658,
+      1598,
+      457,
+      1478,
+      8073,
+      1297,
+      1848
+    ],
+    "dois": [
+      "10.1523/ENEURO.0084-17.2017",
+      "10.1111/desc.12531",
+      "10.1073/pnas.1608282113",
+      "10.1016/j.neuroimage.2013.05.041",
+      "10.1073/pnas.1602641113",
+      "10.1038/s41562-020-0929-3",
+      "10.1093/scan/nsy018",
+      "10.1016/j.neuroimage.2016.10.041"
+    ]
+  },
+  "examples": "the submitted Fig. 6 (paper/figures_back/autoencoder_qual.png), assembled by hand from notebook 16's per-example plots (data_dir/ae_qual/ae_<k>_<set>_<orig|pred>.png): networks ae_04-07 then ae_00-03, NeuroVault and PubMed ae_00-07",
+  "view_rule": "axial for every example, at z of nilearn's find_xyz_cut_coords of the thresholded reconstruction (the cut of the submitted figure's views); the true map is drawn at the same slice",
+  "display": "reconstructions and PubMed true maps: voxels above their 99th percentile in clusters of >= 50 voxels; network and NeuroVault true maps as they are; reconstructions coloured on [0, 1], true maps on [0, their maximum] (as notebook 16)",
+  "views": {
+    "Networks": [
+      {
+        "view": "z",
+        "cut_mm": -3.184213246758304
+      },
+      {
+        "view": "z",
+        "cut_mm": 65.67992142872868
+      },
+      {
+        "view": "z",
+        "cut_mm": 26.657879625161854
+      },
+      {
+        "view": "z",
+        "cut_mm": 46.76308363987316
+      },
+      {
+        "view": "z",
+        "cut_mm": 26.21067502463538
+      },
+      {
+        "view": "z",
+        "cut_mm": 6.9758599062985525
+      },
+      {
+        "view": "z",
+        "cut_mm": 6.43665715364331
+      },
+      {
+        "view": "z",
+        "cut_mm": 55.52842630128367
+      }
+    ],
+    "NeuroVault": [
+      {
+        "view": "z",
+        "cut_mm": 23.34482248616402
+      },
+      {
+        "view": "z",
+        "cut_mm": 50.45055455909119
+      },
+      {
+        "view": "z",
+        "cut_mm": 1.6258138942562823
+      },
+      {
+        "view": "z",
+        "cut_mm": 8.783024184567267
+      },
+      {
+        "view": "z",
+        "cut_mm": -8.341787470522604
+      },
+      {
+        "view": "z",
+        "cut_mm": 2.990815591678029
+      },
+      {
+        "view": "z",
+        "cut_mm": 63.127191448691406
+      },
+      {
+        "view": "z",
+        "cut_mm": 12.495148081812161
+      }
+    ],
+    "PubMed": [
+      {
+        "view": "z",
+        "cut_mm": -17.25635467153083
+      },
+      {
+        "view": "z",
+        "cut_mm": 18.71743281193693
+      },
+      {
+        "view": "z",
+        "cut_mm": 32.69316566620299
+      },
+      {
+        "view": "z",
+        "cut_mm": 50.391152411238394
+      },
+      {
+        "view": "z",
+        "cut_mm": 46.77316072216135
+      },
+      {
+        "view": "z",
+        "cut_mm": 4.173270819128689
+      },
+      {
+        "view": "z",
+        "cut_mm": 1.4742572452892801
+      },
+      {
+        "view": "z",
+        "cut_mm": 47.19283503175423
+      }
+    ]
+  },
+  "eval_exclusions": {
+    "enabled": true,
+    "PubMed test": {
+      "before": 2987,
+      "dropped": 16,
+      "kept": 2971
+    },
+    "NeuroVault images": {
+      "before": 3183,
+      "dropped": 29,
+      "kept": 3154
+    }
+  },
+  "model_dir": "scripts/outputs/runs/final",
+  "cache_tag": "_m-final-9d34a680",
+  "model_sources": {
+    "autoencoder": "scripts/outputs/runs/final/autoencoder.pt",
+    "pmids_split": "scripts/outputs/runs/final/pmids_split.pt"
+  }
+}

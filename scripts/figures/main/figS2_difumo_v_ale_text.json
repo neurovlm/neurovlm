@@ -1,0 +1,20 @@
+{
+  "mode": "data",
+  "pmids": [
+    19258375,
+    15820652,
+    22564749,
+    38144685,
+    18849132,
+    26605335,
+    28174127,
+    38651439
+  ],
+  "pairs": null,
+  "rows": "top: Gaussian-kernel map of one study (neuro_vectors_ale.pt: nimare ALEKernel modeled activation, 9 mm FWHM Gaussian per focus, maximum over foci, / kernel peak, clamped at 1); bottom: its DiFuMo-512 reconstruction (neuro_vectors.pt)",
+  "model_dir": "scripts/outputs/runs/final",
+  "cache_tag": "_m-final-9d34a680",
+  "model_sources": {
+    "note": "no trained model is used"
+  }
+}

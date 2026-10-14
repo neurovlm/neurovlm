@@ -1,0 +1,27 @@
+% written by a1_retrieval_metrics_table/make_figure.py
+\begin{table}[ht]
+\centering
+\small
+\caption{Contrastive retrieval on the PubMed test set (2,971 papers) with the final model. Hard negatives are test papers from the query's own cognitive domain. Random negatives match their number.}
+\label{tab:retrieval_metrics}
+\begin{tabular}{lccccc}
+\toprule
+ & Recall@1 & Recall@5 & Recall@10 & MRR & Median rank \\
+\midrule
+\multicolumn{6}{l}{\textbf{All candidates} (2,971 test papers)} \\
+\quad Text $\rightarrow$ brain & 0.018 & 0.053 & 0.088 & 0.045 & 230 \\
+\quad Brain $\rightarrow$ text & 0.013 & 0.052 & 0.088 & 0.041 & 217 \\
+\quad \textit{Chance} & $<$0.001 & 0.002 & 0.003 & 0.003 & 1,486 \\
+\midrule
+\multicolumn{6}{l}{\textbf{Hard negatives} (papers of the query's own domain, mean 585)} \\
+\quad Text $\rightarrow$ brain & 0.054 & 0.160 & 0.242 & 0.118 & 44 \\
+\quad Brain $\rightarrow$ text & 0.059 & 0.176 & 0.263 & 0.126 & 40 \\
+\quad \textit{Chance} & 0.003 & 0.017 & 0.034 & 0.019 & 250 \\
+\midrule
+\multicolumn{6}{l}{\textbf{Random negatives} (random papers, as many as the hard negatives)} \\
+\quad Text $\rightarrow$ brain & 0.069 & 0.196 & 0.283 & 0.142 & 35 \\
+\quad Brain $\rightarrow$ text & 0.071 & 0.201 & 0.289 & 0.144 & 35 \\
+\quad \textit{Chance} & 0.003 & 0.017 & 0.034 & 0.019 & 250 \\
+\bottomrule
+\end{tabular}
+\end{table}

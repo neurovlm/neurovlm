@@ -1,0 +1,19 @@
+% written by a3_neurovault_bounds/make_figure.py
+\begin{table}[ht]
+\centering
+\scriptsize
+\caption{NeuroVault retrieval (298 papers, 3,074 maps) with three choices of target per paper. Positive-tail preprocessing with p-maps inverted; pool = mean number of candidates per query; chance: texts shuffled across papers, then the same best- or worst-map selection. Every preprocessing variant is in bounds\_table.csv.}
+\label{tab:neurovault_bounds}
+\begin{tabular}{llrrrrrrrrr}
+\toprule
+Target & Direction & Queries & Pool & R@1 & R@5 & R@10 & MRR & Median rank & AUC & Chance AUC \\
+\midrule
+upper bound: best image per paper & text $\rightarrow$ brain & 298 & 298 & 0.040 & 0.168 & 0.292 & 0.130 & 23 & 0.847 & 0.738 \\
+upper bound: best image per paper & brain $\rightarrow$ text & 298 & 298 & 0.057 & 0.178 & 0.255 & 0.127 & 32 & 0.787 & 0.698 \\
+lower bound: worst image per paper & text $\rightarrow$ brain & 298 & 298 & 0.003 & 0.007 & 0.017 & 0.014 & 195 & 0.397 & 0.306 \\
+lower bound: worst image per paper & brain $\rightarrow$ text & 298 & 298 & 0.000 & 0.007 & 0.013 & 0.011 & 193 & 0.400 & 0.318 \\
+multi-target: every image a target & text $\rightarrow$ brain & 298 & 3,065 & 0.017 & 0.054 & 0.077 & 0.044 & 174 & 0.866 & 0.759 \\
+multi-target: every image a target & brain $\rightarrow$ text & 3,074 & 298 & 0.015 & 0.060 & 0.097 & 0.050 & 93 & 0.626 & 0.509 \\
+\bottomrule
+\end{tabular}
+\end{table}

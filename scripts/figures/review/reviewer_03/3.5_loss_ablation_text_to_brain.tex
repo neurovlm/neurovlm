@@ -1,0 +1,16 @@
+\begin{table}[t]
+\centering
+\small
+\caption{Text-to-brain head objective ablation (mean $\pm$ sd over 3 head seeds; PubMed test, n=2971; heads retrained on the autoencoder latents of the final model). Dice: 70th-percentile masks of the calibrated generated map and the reconstructed true map; null = deranged pairing; Delta = Dice minus head v2.}
+\label{tab:a5_loss_t2b}
+\begin{tabular}{lrrrrrrr}
+\toprule
+Variant & Seeds & Dice & Dice null & Pearson & Pearson null & Map AUC & Delta Dice \\
+\midrule
+head v2: latent MSE + correlation terms (final) & 3 & 0.530 $\pm$ 0.000 & 0.408 & 0.324 $\pm$ 0.004 & 0.129 & 0.742 $\pm$ 0.002 & 0.000 \\
+BCE via decoder (submitted) & 3 & 0.491 $\pm$ 0.000 & 0.405 & 0.319 $\pm$ 0.001 & 0.186 & 0.632 $\pm$ 0.001 & -0.039 \\
+latent MSE (library) & 3 & 0.512 $\pm$ 0.001 & 0.419 & 0.281 $\pm$ 0.001 & 0.148 & 0.668 $\pm$ 0.003 & -0.018 \\
+latent cosine & 3 & 0.385 $\pm$ 0.006 & 0.339 & 0.130 $\pm$ 0.003 & 0.103 & 0.505 $\pm$ 0.000 & -0.145 \\
+\bottomrule
+\end{tabular}
+\end{table}

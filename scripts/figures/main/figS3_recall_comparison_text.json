@@ -1,0 +1,47 @@
+{
+  "n": 366,
+  "n_test": 2987,
+  "notes": {
+    "external_root": "/home/rph/neurovlm",
+    "fair_subset": {
+      "n_test": 2987,
+      "in_niclip_train": 2033,
+      "in_neurocontext_train": 1907,
+      "n_fair": 368
+    },
+    "eval_exclusions_dropped_from_evaluated_subset": 2
+  },
+  "auc": {
+    "NeuroVLM": {
+      "t2i": 0.8340425207152393,
+      "i2t": 0.8351249647800062,
+      "source": "evaluated"
+    },
+    "NiCLIP": {
+      "t2i": 0.8231807458392583,
+      "i2t": 0.8072053502654768,
+      "source": "evaluated"
+    },
+    "NeuroConText": {
+      "t2i": 0.8009346344513322,
+      "i2t": 0.81284152913859,
+      "source": "evaluated"
+    }
+  },
+  "eval_exclusions": {
+    "enabled": true,
+    "PubMed test": {
+      "before": 2987,
+      "dropped": 16,
+      "kept": 2971
+    }
+  },
+  "model_dir": "scripts/outputs/runs/final",
+  "cache_tag": "_m-final-9d34a680",
+  "model_sources": {
+    "autoencoder": "scripts/outputs/runs/final/autoencoder.pt",
+    "pmids_split": "scripts/outputs/runs/final/pmids_split.pt (test: 2987 pmids; identical to the HF pubmed_text test flag)",
+    "proj_head_image_infonce": "scripts/outputs/runs/final/proj_head_image_infonce.pt",
+    "proj_head_text_infonce": "scripts/outputs/runs/final/proj_head_text_infonce.pt"
+  }
+}

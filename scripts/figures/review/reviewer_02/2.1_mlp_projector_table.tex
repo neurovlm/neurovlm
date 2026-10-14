@@ -1,0 +1,18 @@
+\begin{table}[t]
+\centering
+\small
+\caption{Residual-MLP projectors vs the released PubMed Q-Former (same inputs, training objective/data/schedule, greedy decoding and validate\_models metrics; PubMed test set without the leakage-audit papers, n=2971). O7: pass if within the preset tolerances of the Q-Former. The final model uses MLP-M (param-matched).}
+\label{tab:a5_mlp_projector}
+\begin{tabular}{lrrrrrrrrrrr}
+\toprule
+model & params (M) & W x D & retrieval AUC & BERTScore F1 & MiniLM cos & shared cos & degenerate & duplicated & fabricated & test loss & O7 \\
+\midrule
+Q-Former (released) & 28.461 & 512 x 6 & 0.819 & 0.573 & 0.399 & 0.187 & 0.000 & 0.021 & 0.003 & 2.054 & reference \\
+MLP-S & 7.497 & 192 x 2 & 0.896 & 0.574 & 0.424 & 0.239 & 0.000 & 0.028 & 0.000 & 1.935 & pass \\
+MLP-M (param-matched) & 28.344 & 704 x 2 & 0.905 & 0.576 & 0.431 & 0.243 & 0.000 & 0.026 & 0.002 & 1.934 & pass \\
+MLP-L & 80.611 & 1536 x 3 & 0.889 & 0.575 & 0.430 & 0.232 & 0.000 & 0.050 & 0.000 & 1.929 & fail: duplicated \\
+MLP-M, 1 token repeated & 5.996 & 704 x 2 & 0.782 & 0.570 & 0.410 & 0.158 & 0.000 & 0.079 & 0.002 & 2.058 & fail: recall\_auc, contrastive\_sim, duplicated \\
+MLP-M, lr 1e-4 & 28.344 & 704 x 2 & 0.901 & 0.577 & 0.427 & 0.237 & 0.000 & 0.028 & 0.000 & 1.934 & pass \\
+\bottomrule
+\end{tabular}
+\end{table}

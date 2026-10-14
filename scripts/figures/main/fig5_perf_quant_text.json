@@ -1,0 +1,199 @@
+{
+  "a": {
+    "source": "5-fold checkpoints from scripts/outputs/runs/final",
+    "auc_t2i": 0.8258374904473541,
+    "auc_i2t": 0.8211018878167543,
+    "fold_n": [
+      5932,
+      5974,
+      5974,
+      5973,
+      5973
+    ]
+  },
+  "b": {
+    "source": "scripts/figures/review/core/a3_neurovault_bounds/outputs/recall_curves.csv",
+    "a3_variant": "released",
+    "a3_model_sources": {
+      "autoencoder": "scripts/outputs/runs/final/autoencoder.pt",
+      "proj_head_text_infonce": "scripts/outputs/runs/final/proj_head_text_infonce.pt",
+      "proj_head_image_infonce": "scripts/outputs/runs/final/proj_head_image_infonce.pt"
+    },
+    "n_papers": 298,
+    "n_maps": 3074,
+    "plotted": "solid lines, one hue per direction (blue text->image, orange image->text), lighter = weaker target: upper = the paper's map the model scores highest for its text (paper recipe; a3 paper_upper), multi = every map of the paper is a target (text->image: hit when any of its maps is in the top k of all maps, a3 oracle_any_true; image->text: every map ranks the 298 texts, a3 per_image), lower = the map it scores lowest (a3 worst_image); dashed lines in the same colour = chance of that curve; legend: AUC (chance AUC)",
+    "chance": "dashed, one per curve in its colour: a3's null of the same rule (recall_curves.csv 'chance', bounds_metrics.csv chance_recall_curve_auc): every text is given to another paper (a derangement), then the same best / worst / any-map selection and ranking are applied; mean of 20 derangements. Not k/N: upper and lower pick the target with the similarities they rank and multi text->image counts any of the paper's maps, so only multi image->text (one text per map among 298) is the diagonal.",
+    "auc": {
+      "upper:text_to_brain": 0.8468,
+      "upper:brain_to_text": 0.7869,
+      "multi:text_to_brain": 0.8663,
+      "multi:brain_to_text": 0.6264,
+      "lower:text_to_brain": 0.3982,
+      "lower:brain_to_text": 0.3998
+    },
+    "chance_auc": {
+      "upper:text_to_brain": 0.7377,
+      "upper:brain_to_text": 0.6977,
+      "multi:text_to_brain": 0.7591,
+      "multi:brain_to_text": 0.5092,
+      "lower:text_to_brain": 0.3061,
+      "lower:brain_to_text": 0.3182
+    },
+    "n_queries": {
+      "upper:text_to_brain": 298,
+      "upper:brain_to_text": 298,
+      "multi:text_to_brain": 298,
+      "multi:brain_to_text": 3074,
+      "lower:text_to_brain": 298,
+      "lower:brain_to_text": 298
+    },
+    "mean_pool_size": {
+      "upper:text_to_brain": 298.0,
+      "upper:brain_to_text": 298.0,
+      "multi:text_to_brain": 3064.7,
+      "multi:brain_to_text": 298.0,
+      "lower:text_to_brain": 298.0,
+      "lower:brain_to_text": 298.0
+    },
+    "asymmetry": "upper (paper recipe): both directions rank the same 298 x 298 similarity matrix (one map per paper, same exclusions), text->image along its rows and image->text along its columns, so the pools are matched and the gap is not an artefact: a few generic abstracts are close to most maps (text hubs; one abstract is the nearest text for 38 of the 298 maps, 8 abstracts are in the top 5 of >= 10 % of the maps vs 1 map in the top 5 of >= 10 % of the abstracts), which pushes the true abstract down when a map ranks the texts but is a constant within a text's own ranking of the maps; subtracting each abstract's mean similarity to all 3,074 maps lifts image->text from 0.787 to 0.842 and leaves text->image at 0.847 (check on the a3 latents, variant released). multi: the pools differ by definition (text->image: any of the paper's maps among all 3,074 is a hit; image->text: each map ranks the 298 abstracts with one hit), hence 0.87 vs 0.63 (chance 0.76 vs 0.51, 0.50 in expectation)."
+  },
+  "c": {
+    "PubMed test": {
+      "auc": 0.9740000036057286,
+      "n": 2971,
+      "source": "neuro_vectors.pt + scripts/outputs/runs/final/pmids_split.pt (test)",
+      "median_pct_gain": 29.673410415649414
+    },
+    "NeuroVault": {
+      "auc": 0.9386689900038865,
+      "n": 3154,
+      "source": "neurovault.pt neuro_clustered > 0",
+      "median_pct_gain": 35.47233200073242
+    }
+  },
+  "d": {
+    "accuracy": 0.8235294117647058,
+    "n": 119,
+    "classes": [
+      "Language",
+      "Auditory",
+      "Default mode",
+      "Frontoparietal",
+      "Attention",
+      "Visual",
+      "Motor",
+      "Cingulo-opercular"
+    ],
+    "labels": "full class names on both axes (columns at 60 degrees); cells: % of the true class (rows), empty = 0",
+    "cm_counts": [
+      [
+        5,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        6,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        1,
+        0,
+        14,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1,
+        1,
+        0,
+        13,
+        2,
+        1,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        2,
+        4,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0,
+        0,
+        21,
+        0,
+        0
+      ],
+      [
+        0,
+        3,
+        0,
+        0,
+        2,
+        0,
+        23,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        14
+      ]
+    ]
+  },
+  "eval_exclusions": {
+    "enabled": true,
+    "PubMed CV pool (all folds)": {
+      "before": 29868,
+      "dropped": 42,
+      "kept": 29826
+    },
+    "PubMed test": {
+      "before": 2987,
+      "dropped": 16,
+      "kept": 2971
+    },
+    "NeuroVault images (neurovault.pt)": {
+      "before": 3183,
+      "dropped": 29,
+      "kept": 3154
+    }
+  },
+  "model_dir": "scripts/outputs/runs/final",
+  "cache_tag": "_m-final-9d34a680",
+  "model_sources": {
+    "autoencoder": "scripts/outputs/runs/final/autoencoder.pt",
+    "cv_folds": "scripts/outputs/runs/final/{autoencoder,proj_head_text_infonce,proj_head_image_infonce}_kfold-{0..4}.pt",
+    "pmids_split": "scripts/outputs/runs/final/pmids_split.pt",
+    "proj_head_image_infonce": "scripts/outputs/runs/final/proj_head_image_infonce.pt",
+    "proj_head_text_infonce": "scripts/outputs/runs/final/proj_head_text_infonce.pt",
+    "specter": "released:allenai/specter2_aug2023refresh + adhoc_query adapter (frozen; not retrained by the pipeline)"
+  }
+}

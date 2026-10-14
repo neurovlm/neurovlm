@@ -1,0 +1,23 @@
+% written by a3_neurovault_bounds/make_figure.py
+\begin{table}[ht]
+\centering
+\footnotesize
+\caption{NeuroVault retrieval per map type. Every image is its own target (chance AUC 0.50). Parcellations, anatomical maps, ROI masks and variance maps are excluded before evaluation. Other = maps their uploaders labelled Other in NeuroVault, typed from names, descriptions and values (other_maps.csv); 70 mean or variance images and 10 maps that could not be typed are excluded.}
+\label{tab:neurovault_map_types}
+\begin{tabular}{lrrlcc}
+\toprule
+Map type & Images & Papers & Preprocessing before the threshold & AUC text $\rightarrow$ brain & AUC brain $\rightarrow$ text \\
+\midrule
+T map & 1761 & 189 & positive tail (paper) & 0.64 & 0.64 \\
+Z map & 811 & 75 & positive tail (paper) & 0.57 & 0.58 \\
+beta (univariate) & 43 & 5 & positive tail (paper) & 0.61 & 0.77 \\
+F map & 40 & 17 & positive tail (paper) & 0.64 & 0.55 \\
+beta (multivariate) & 14 & 5 & positive tail (paper) & 0.84 & 0.83 \\
+p map & 3 & 2 & inverted (1 - p) before normalisation & 0.64 & 0.60 \\
+1 $-$ p map & 2 & 1 & used directly & 0.54 & 0.44 \\
+Other (t, z, or F) & 204 & 23 & positive tail (paper) & 0.63 & 0.70 \\
+Other (effect estimate) & 103 & 15 & positive tail (paper) & 0.69 & 0.62 \\
+Other (component or gradient) & 93 & 8 & positive tail (paper) & 0.49 & 0.51 \\
+\bottomrule
+\end{tabular}
+\end{table}

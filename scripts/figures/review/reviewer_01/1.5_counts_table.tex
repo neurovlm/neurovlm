@@ -1,0 +1,21 @@
+% written by a4_counts_table/make_figure.py
+\begin{table}[t]
+\centering
+\small
+\caption{Dataset counts recomputed from the released data.}
+\label{tab:a4_counts}
+\begin{tabular}{p{5.2cm}p{9cm}}
+\toprule
+Question & Released data \\
+\midrule
+Coordinates combined across experiments / contrasts? & Yes. One map per paper: every peak of the paper, ALE kernel (9 mm FWHM), voxel-wise maximum. \\
+Positive vs negative effects? & Not separable: the released coordinates carry no sign, so both are pooled. \\
+Several coordinate tables per DOI? & Pooled into the paper's single map (no table identifiers are released). \\
+Publications / peaks & 30,826 papers; 857,298 peaks (median 17 per paper, IQR 8-35) \\
+Experiments / contrasts / tables & Not identifiable in the released data (columns: pmid, doi, x, y, z). \\
+Train / val / test papers & 23,894 / 2,987 / 2,987 by PMID; 958 papers in no split ($>$ 100 peaks or an all-zero map) \\
+NeuroVault maps (paper: 3,000 and 4,553) & 3,183 maps / 312 papers released (= '3,000'); '4,553' is not reproducible (4,611 statistic maps before image QC) \\
+Network maps (paper: 300 and 100) & Neither reproducible: 185 maps = 145 labelled + 40 ICA components \\
+\bottomrule
+\end{tabular}
+\end{table}

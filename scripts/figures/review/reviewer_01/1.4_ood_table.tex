@@ -1,0 +1,26 @@
+\begin{table}[ht]
+\centering
+\small
+\caption{Out-of-distribution warning (final NeuroVLM models), thresholds fixed on the validation split. A map is flagged when its Pearson correlation with its autoencoder reconstruction is below 0.46 or the Mahalanobis distance of its autoencoder latent from the 23,894 training latents is above 27.0 (each flags 2.5\% of validation maps). A text is flagged when the cosine of its SPECTER2 embedding to the nearest training abstract is below 0.79 (5\% of validation abstracts). 95\% bootstrap CI with validation, test, and OOD inputs resampled. AUROC of the larger validation tail share of the scores, test inputs against each OOD set.}
+\label{tab:a7_ood}
+\begin{tabular}{lrrrlr}
+\toprule
+Input set & $n$ & Median similarity & Median latent distance & Flagged [95\% CI] & AUROC \\
+\midrule
+validation maps & 2961 & 0.71 & 17.2 & 5\% & -- \\
+held-out test maps & 2971 & 0.71 & 17.3 & 4\% [3, 5] & -- \\
+rotated 90$^\circ$ & 459 & 0.43 & 13.2 & 61\% [54, 67] & 0.89 \\
+random rotation & 497 & 0.40 & 12.9 & 70\% [65, 74] & 0.92 \\
+surface spin & 496 & 0.37 & 13.6 & 80\% [75, 84] & 0.96 \\
+voxel shuffle & 500 & 0.01 & 12.2 & 100\% [100, 100] & 1.00 \\
+white noise & 500 & 0.00 & 48.6 & 100\% [100, 100] & 1.00 \\
+map $\times$ 100 & 500 & 0.53 & 1940.6 & 100\% [100, 100] & 1.00 \\
+map $\times$ 0.01 & 500 & 0.01 & 10.8 & 100\% [100, 100] & 1.00 \\
+\midrule
+validation abstracts & 2961 & 0.84 & -- & 5\% & -- \\
+held-out test abstracts & 2971 & 0.84 & -- & 5\% [4, 6] & -- \\
+Wikipedia (WikiText) & 500 & 0.64 & -- & 100\% [100, 100] & 1.00 \\
+cooking recipes & 20 & 0.57 & -- & 100\% [100, 100] & 1.00 \\
+\bottomrule
+\end{tabular}
+\end{table}

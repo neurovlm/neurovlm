@@ -1,0 +1,412 @@
+{
+  "text_in_figure": "page 1: the complete generated texts of the full examples, the three generated titles of the others; complete texts of all in fig2_texts_table.{tex,md}",
+  "labels": {
+    "true map": "True",
+    "generated map": "Generated (text-to-brain)",
+    "generated texts": "Generated (brain-to-text)"
+  },
+  "full_examples": {
+    "networks": [
+      "Auditory",
+      "Default Mode Network"
+    ],
+    "rule": "the two networks with the most of their three generated titles (network, anatomy, cognition) named verbatim in the input description, ties broken by the share of the description's word pairs that the three generated texts repeat (pick_full)",
+    "scores": {
+      "Visual": {
+        "titles_named": 1,
+        "word_pair_overlap": 0.25
+      },
+      "Language": {
+        "titles_named": 1,
+        "word_pair_overlap": 0.366
+      },
+      "Auditory": {
+        "titles_named": 2,
+        "word_pair_overlap": 0.417
+      },
+      "Somatomotor": {
+        "titles_named": 1,
+        "word_pair_overlap": 0.133
+      },
+      "Interoception": {
+        "titles_named": 0,
+        "word_pair_overlap": 0.297
+      },
+      "Default Mode Network": {
+        "titles_named": 3,
+        "word_pair_overlap": 0.556
+      },
+      "Frontoparietal Control Network": {
+        "titles_named": 2,
+        "word_pair_overlap": 0.278
+      },
+      "Salience Network": {
+        "titles_named": 2,
+        "word_pair_overlap": 0.278
+      }
+    }
+  },
+  "views": "sagittal, coronal and axial (VIEWS = 'xyz'), one row per network: true map left, the map generated from the description right, all maps at one scale",
+  "layout_in": {
+    "map_width_in": 0.63,
+    "map_height_in": 0.225,
+    "text_columns_in": [
+      1.313,
+      1.029,
+      1.206
+    ]
+  },
+  "map_display": "the top 5 % of in-mask voxels of each map (ties at the cut drawn, zeros never; generated, atlas and true maps alike; no cluster threshold)",
+  "map_calibration": "global",
+  "pages": {
+    "fig2_network_examples.png": {
+      "height_in": 6.63
+    }
+  },
+  "rows": [
+    {
+      "atlas": "YeoLab",
+      "map": "VisualA",
+      "title": "Visual",
+      "input_text": "The visual network supports perception and interpretation of visual information. It is centered on primary visual cortex, extrastriate occipital cortex, and lateral occipital cortex. It supports visual feature processing, object perception, motion perception, spatial layout, and visual attention.",
+      "cut_coords": [
+        42.011173184357546,
+        -70.33519553072625,
+        -1.2067039106145216
+      ],
+      "map_display": {
+        "atlas": {
+          "threshold": 1.0,
+          "max": 1.0,
+          "voxels_drawn": 1021
+        },
+        "generated": {
+          "threshold": 1.0,
+          "max": 1.0,
+          "voxels_drawn": 2059
+        }
+      },
+      "generated": {
+        "network": {
+          "raw": "[NETWORK]Object Perception Network\nThe object perception network includes extrastriate cortex, particularly the right inferior temporal cortex, and includes lateral occipital regions. It is commonly associated with the perception of object form, location, motion, and depth. The network is often described as supporting the coordinated analysis of visual input.",
+          "title": "Object Perception Network",
+          "body": "The object perception network includes extrastriate cortex, particularly the right inferior temporal cortex, and includes lateral occipital regions. It is commonly associated with the perception of object form, location, motion, and depth. The network is often described as supporting the coordinated analysis of visual input."
+        },
+        "region": {
+          "raw": "[REGION]Lateral Occipital Cortex\nThe lateral occipital cortex is a ventral occipital region. It is commonly associated with object form and visual identity. This region is often described as supporting perception of complex visual structures.",
+          "title": "Lateral Occipital Cortex",
+          "body": "The lateral occipital cortex is a ventral occipital region. It is commonly associated with object form and visual identity. This region is often described as supporting perception of complex visual structures."
+        },
+        "function": {
+          "raw": "[FUNCTION]Visual Analysis\nVisual analysis is the processing of visual form, object structure, and visual identity. It is associated with extrastriate occipitotemporal cortex, intrastriate temporoparietal cortex, lateral temporal cortex, and fusiform gyrus. This concept supports recognizing complex visual patterns, object form, spatial layout, and visual object identity.",
+          "title": "Visual Analysis",
+          "body": "Visual analysis is the processing of visual form, object structure, and visual identity. It is associated with extrastriate occipitotemporal cortex, intrastriate temporoparietal cortex, lateral temporal cortex, and fusiform gyrus. This concept supports recognizing complex visual patterns, object form, spatial layout, and visual object identity."
+        }
+      }
+    },
+    {
+      "atlas": "Glasser",
+      "map": "Language",
+      "title": "Language",
+      "input_text": "The language network supports comprehension and production of spoken and written language. It is mainly left-lateralized, involving inferior frontal cortex, posterior superior temporal cortex, middle temporal cortex, and angular gyrus. It supports semantic access, syntax, phonology, speech comprehension, reading, and verbal expression.",
+      "cut_coords": [
+        -48.72611464968153,
+        21.312101910828034,
+        12.942675159235677
+      ],
+      "map_display": {
+        "atlas": {
+          "threshold": 1.0,
+          "max": 1.0,
+          "voxels_drawn": 930
+        },
+        "generated": {
+          "threshold": 1.0,
+          "max": 1.0,
+          "voxels_drawn": 1820
+        }
+      },
+      "generated": {
+        "network": {
+          "raw": "[NETWORK]Language Network\nThe language network commonly includes inferior frontal gyrus, middle temporal pole, superior temporal gyrus, and lateral temporal cortex. It is associated with phonological processing, syntactic analysis, and meaning construction. The network is often described as supporting the comprehension and production of spoken or written language.",
+          "title": "Language Network",
+          "body": "The language network commonly includes inferior frontal gyrus, middle temporal pole, superior temporal gyrus, and lateral temporal cortex. It is associated with phonological processing, syntactic analysis, and meaning construction. The network is often described as supporting the comprehension and production of spoken or written language."
+        },
+        "region": {
+          "raw": "[REGION]Middle Temporal Gyrus\nThe middle temporal gyrus lies along the lateral surface of the superior temporal gyrus. It is commonly associated with auditory processing, language comprehension, and semantic content. This region is often described as supporting the analysis of spoken words.",
+          "title": "Middle Temporal Gyrus",
+          "body": "The middle temporal gyrus lies along the lateral surface of the superior temporal gyrus. It is commonly associated with auditory processing, language comprehension, and semantic content. This region is often described as supporting the analysis of spoken words."
+        },
+        "function": {
+          "raw": "[FUNCTION]Language Comprehension\nLanguage comprehension commonly involves inferior frontal gyrus, middle temporal gyrus, and superior temporal gyrus. These regions support processing of spoken and written language, including phonology, syntax, semantics, and meaning retrieval.",
+          "title": "Language Comprehension",
+          "body": "Language comprehension commonly involves inferior frontal gyrus, middle temporal gyrus, and superior temporal gyrus. These regions support processing of spoken and written language, including phonology, syntax, semantics, and meaning retrieval."
+        }
+      }
+    },
+    {
+      "atlas": "Shirer",
+      "map": "Auditory",
+      "title": "Auditory",
+      "input_text": "The auditory network supports perception and interpretation of sound. It is centered on Heschl's gyrus, primary auditory cortex, planum temporale, and superior temporal gyrus. It supports pitch, loudness, rhythm, timbre, speech-sound processing, and auditory scene analysis.",
+      "cut_coords": [
+        -56.25925925925926,
+        -13.666666666666671,
+        6.888888888888886
+      ],
+      "map_display": {
+        "atlas": {
+          "threshold": 1.0,
+          "max": 1.0,
+          "voxels_drawn": 191
+        },
+        "generated": {
+          "threshold": 0.7144,
+          "max": 1.0,
+          "voxels_drawn": 1428
+        }
+      },
+      "generated": {
+        "network": {
+          "raw": "[NETWORK]Auditory Network\nThe auditory network includes Heschl's gyrus, superior temporal gyrus, planum temporale, and inferior frontal cortex. It is commonly associated with the processing of sound, speech, and environmental sounds. The network is often described as a hierarchical system for auditory perception. Its coordinated activity is thought to support the integration of auditory information across the brain.",
+          "title": "Auditory Network",
+          "body": "The auditory network includes Heschl's gyrus, superior temporal gyrus, planum temporale, and inferior frontal cortex. It is commonly associated with the processing of sound, speech, and environmental sounds. The network is often described as a hierarchical system for auditory perception. Its coordinated activity is thought to support the integration of auditory information across the brain."
+        },
+        "region": {
+          "raw": "[REGION]Superior Temporal Gyrus\nThe superior temporal gyrus is centered on the superior temporal sulcus. It is commonly associated with auditory processing, speech perception, and sound-related associations. Its anatomy supports representation of acoustic features such as frequency, timbre, and pitch.",
+          "title": "Superior Temporal Gyrus",
+          "body": "The superior temporal gyrus is centered on the superior temporal sulcus. It is commonly associated with auditory processing, speech perception, and sound-related associations. Its anatomy supports representation of acoustic features such as frequency, timbre, and pitch."
+        },
+        "function": {
+          "raw": "[FUNCTION]Early Auditory Processing\nEarly auditory processing is the analysis of sound input at high frequencies. It involves primary auditory cortex in Heschl's gyrus, superior temporal gyrus, and planum temporale. This concept supports speech recognition, pitch detection, and low-frequency sound processing.",
+          "title": "Early Auditory Processing",
+          "body": "Early auditory processing is the analysis of sound input at high frequencies. It involves primary auditory cortex in Heschl's gyrus, superior temporal gyrus, and planum temporale. This concept supports speech recognition, pitch detection, and low-frequency sound processing."
+        }
+      }
+    },
+    {
+      "atlas": "WashU",
+      "map": "LateralSM",
+      "title": "Somatomotor",
+      "input_text": "The somatomotor network supports movement and body sensation. It spans precentral gyrus, postcentral gyrus, supplementary motor area, and paracentral lobule. It supports voluntary movement, touch, proprioception, motor planning, and sensorimotor integration.",
+      "cut_coords": [
+        -48.264150943396224,
+        -14.075471698113205,
+        42.0377358490566
+      ],
+      "map_display": {
+        "atlas": {
+          "threshold": 1.0,
+          "max": 1.0,
+          "voxels_drawn": 343
+        },
+        "generated": {
+          "threshold": 0.3658,
+          "max": 1.0,
+          "voxels_drawn": 1428
+        }
+      },
+      "generated": {
+        "network": {
+          "raw": "[NETWORK]Somatomotor Network\nThe somatomotor network is commonly associated with somatomotor representation in the primary motor cortex. It is broadly tied to bodily motion, tactile sensation, and motor control. The network is often described as a central hub for somatosensory-to-motor integration.",
+          "title": "Somatomotor Network",
+          "body": "The somatomotor network is commonly associated with somatomotor representation in the primary motor cortex. It is broadly tied to bodily motion, tactile sensation, and motor control. The network is often described as a central hub for somatosensory-to-motor integration."
+        },
+        "region": {
+          "raw": "[REGION]Primary Somatosensory Cortex\nPrimary somatosensory cortex lies in the posterior parietal lobe. It is commonly associated with tactile, proprioceptive, and body-related sensory representations. It supports the integration of sensory information across the body.",
+          "title": "Primary Somatosensory Cortex",
+          "body": "Primary somatosensory cortex lies in the posterior parietal lobe. It is commonly associated with tactile, proprioceptive, and body-related sensory representations. It supports the integration of sensory information across the body."
+        },
+        "function": {
+          "raw": "[FUNCTION]Tactile Encoding\nTactile encoding is the representation of touch in the body. It involves primary somatosensory cortex in the parietal operculum, secondary somatosensorium in the insular cortex, and posterior insula. This concept supports tactile discrimination, body awareness, and the integration of sensory feedback with cognitive processing.",
+          "title": "Tactile Encoding",
+          "body": "Tactile encoding is the representation of touch in the body. It involves primary somatosensory cortex in the parietal operculum, secondary somatosensorium in the insular cortex, and posterior insula. This concept supports tactile discrimination, body awareness, and the integration of sensory feedback with cognitive processing."
+        }
+      }
+    },
+    {
+      "atlas": "Laird",
+      "map": "Emo/Interoception4",
+      "title": "Interoception",
+      "input_text": "The interoception network supports awareness of internal bodily state. It is centered on the insula and anterior cingulate cortex, with contributions from midcingulate cortex. It supports visceral sensation, autonomic monitoring, bodily awareness, pain appraisal, and affective feeling states.",
+      "cut_coords": [
+        39.880135156650766,
+        20.87903868112113,
+        -1.803321398551745
+      ],
+      "map_display": {
+        "atlas": {
+          "threshold": 0.233,
+          "max": 0.9884,
+          "voxels_drawn": 1428
+        },
+        "generated": {
+          "threshold": 0.8658,
+          "max": 1.0,
+          "voxels_drawn": 1428
+        }
+      },
+      "generated": {
+        "network": {
+          "raw": "[NETWORK]Interoceptive Network\nThe interoceptive network includes anterior insula, posterior insula, anterior cingulate cortex, thalamus, and somatosensory cortex. It is commonly associated with salience of internal states, bodily awareness, and integration of bodily and emotional information.",
+          "title": "Interoceptive Network",
+          "body": "The interoceptive network includes anterior insula, posterior insula, anterior cingulate cortex, thalamus, and somatosensory cortex. It is commonly associated with salience of internal states, bodily awareness, and integration of bodily and emotional information."
+        },
+        "region": {
+          "raw": "[REGION]Anterior Insula\nThe anterior insula is a region of the brain commonly associated with salience, emotion, and bodily awareness. It is often linked with interoception, affective salience, and the integration of internal and external states. Its anatomy supports the interplay between subjective experience and cortical processing.",
+          "title": "Anterior Insula",
+          "body": "The anterior insula is a region of the brain commonly associated with salience, emotion, and bodily awareness. It is often linked with interoception, affective salience, and the integration of internal and external states. Its anatomy supports the interplay between subjective experience and cortical processing."
+        },
+        "function": {
+          "raw": "[FUNCTION]Interoceptive Processing\nInteroceptive processing is the evaluation of internal bodily signals. It is commonly associated with anterior insula, posterior insula, anterior cingulate cortex, and corticospinal tracts. This function supports awareness of bodily state, salience of internal concerns, and integration of interoceptive and affective information.",
+          "title": "Interoceptive Processing",
+          "body": "Interoceptive processing is the evaluation of internal bodily signals. It is commonly associated with anterior insula, posterior insula, anterior cingulate cortex, and corticospinal tracts. This function supports awareness of bodily state, salience of internal concerns, and integration of interoceptive and affective information."
+        }
+      }
+    },
+    {
+      "atlas": "Shen",
+      "map": "default mode",
+      "title": "Default Mode Network",
+      "input_text": "The default mode network supports internally oriented cognition. It includes medial prefrontal cortex, posterior cingulate cortex, precuneus, angular gyrus, and medial temporal lobe. It supports autobiographical memory, self-referential thought, future simulation, social inference, and narrative reasoning.",
+      "cut_coords": [
+        0.0,
+        -56.0,
+        34.0
+      ],
+      "map_display": {
+        "atlas": {
+          "threshold": 1.0,
+          "max": 1.0,
+          "voxels_drawn": 1398
+        },
+        "generated": {
+          "threshold": 0.908,
+          "max": 1.0,
+          "voxels_drawn": 1428
+        }
+      },
+      "generated": {
+        "network": {
+          "raw": "[NETWORK]Default Mode Network\nThe default mode network includes medial prefrontal cortex, posterior cingulate cortex, precuneus, angular gyrus, lateral parietal cortex, and medial temporal regions. It is commonly associated with internally oriented cognition, autobiographical memory, self-referential thought, and the integration of personal and social context.",
+          "title": "Default Mode Network",
+          "body": "The default mode network includes medial prefrontal cortex, posterior cingulate cortex, precuneus, angular gyrus, lateral parietal cortex, and medial temporal regions. It is commonly associated with internally oriented cognition, autobiographical memory, self-referential thought, and the integration of personal and social context."
+        },
+        "region": {
+          "raw": "[REGION]Precuneus\nThe precuneus lies on the medial parietal cortex. It is commonly associated with autobiographical memory, self-related imagery, and mental context. This region is often described as supporting integration of personal and external information.",
+          "title": "Precuneus",
+          "body": "The precuneus lies on the medial parietal cortex. It is commonly associated with autobiographical memory, self-related imagery, and mental context. This region is often described as supporting integration of personal and external information."
+        },
+        "function": {
+          "raw": "[FUNCTION]Autobiographical Memory\nAutobiographical memory is commonly associated with the medial prefrontal cortex, posterior cingulate cortex, precuneus, angular gyrus, parahippocampal cortex, retrosplenial cortex, and lateral parietal cortex. This function supports remembering personal experiences, spatial context, and internally constructed events.",
+          "title": "Autobiographical Memory",
+          "body": "Autobiographical memory is commonly associated with the medial prefrontal cortex, posterior cingulate cortex, precuneus, angular gyrus, parahippocampal cortex, retrosplenial cortex, and lateral parietal cortex. This function supports remembering personal experiences, spatial context, and internally constructed events."
+        }
+      }
+    },
+    {
+      "atlas": "Du",
+      "map": "FPN-A",
+      "title": "Frontoparietal Control Network",
+      "input_text": "The frontoparietal control network supports flexible cognitive control. It links lateral prefrontal cortex, inferior frontal junction, intraparietal sulcus, and inferior parietal lobule. It supports task goals, working memory, planning, rule use, attentional control, and adaptive decision-making.",
+      "cut_coords": [
+        -41.540983606557376,
+        25.366120218579226,
+        23.497267759562845
+      ],
+      "map_display": {
+        "atlas": {
+          "threshold": 1.0,
+          "max": 1.0,
+          "voxels_drawn": 977
+        },
+        "generated": {
+          "threshold": 1.0,
+          "max": 1.0,
+          "voxels_drawn": 3590
+        }
+      },
+      "generated": {
+        "network": {
+          "raw": "[NETWORK]Frontoparietal Control Network\nThe frontoparietal control network includes dorsolateral prefrontal cortex, angular gyrus, intraparietal cortex, inferior parietal lobule, and posterior parietal cortex. It is commonly associated with executive control, working memory, and goal-directed behavior.",
+          "title": "Frontoparietal Control Network",
+          "body": "The frontoparietal control network includes dorsolateral prefrontal cortex, angular gyrus, intraparietal cortex, inferior parietal lobule, and posterior parietal cortex. It is commonly associated with executive control, working memory, and goal-directed behavior."
+        },
+        "region": {
+          "raw": "[REGION]Inferior Frontal Gyrus\nThis region is broadly tied to the integration of information. It is often associated with the handling of language and the manipulation of conceptual knowledge. Its function is generally described as supporting high-level cognition. It is thought to play a central role in executive control.",
+          "title": "Inferior Frontal Gyrus",
+          "body": "This region is broadly tied to the integration of information. It is often associated with the handling of language and the manipulation of conceptual knowledge. Its function is generally described as supporting high-level cognition. It is thought to play a central role in executive control."
+        },
+        "function": {
+          "raw": "[FUNCTION]Working Memory\nWorking memory commonly involves dorsolateral prefrontal cortex, inferior parietal lobule, intraparietal sulcus, and lateral frontal cortex. These regions support the maintenance and manipulation of information in working memory. Their anatomy aligns with the frontoparietal network.",
+          "title": "Working Memory",
+          "body": "Working memory commonly involves dorsolateral prefrontal cortex, inferior parietal lobule, intraparietal sulcus, and lateral frontal cortex. These regions support the maintenance and manipulation of information in working memory. Their anatomy aligns with the frontoparietal network."
+        }
+      }
+    },
+    {
+      "atlas": "Du",
+      "map": "SAL/PMN",
+      "title": "Salience Network",
+      "input_text": "The salience network supports detection of behaviorally relevant events. It is centered on anterior insula, frontal operculum, dorsal anterior cingulate cortex, and midcingulate cortex. It supports salience detection, interoceptive appraisal, attentional orienting, conflict monitoring, and response selection.",
+      "cut_coords": [
+        -38.0,
+        18.0,
+        2.0
+      ],
+      "map_display": {
+        "atlas": {
+          "threshold": 1.0,
+          "max": 1.0,
+          "voxels_drawn": 974
+        },
+        "generated": {
+          "threshold": 0.8043,
+          "max": 1.0,
+          "voxels_drawn": 1428
+        }
+      },
+      "generated": {
+        "network": {
+          "raw": "[NETWORK]Salience Network\nThe salience network includes the anterior insula, anterior cingulate cortex, and posterior cingulate gyrus. It is commonly associated with monitoring internal and external events, detecting relevant information, and shifting foci of inquiry.",
+          "title": "Salience Network",
+          "body": "The salience network includes the anterior insula, anterior cingulate cortex, and posterior cingulate gyrus. It is commonly associated with monitoring internal and external events, detecting relevant information, and shifting foci of inquiry."
+        },
+        "region": {
+          "raw": "[REGION]Anterior Cingulate Cortex\nThe anterior cingulate cortex is a medial region of the frontal lobe. It is commonly linked with control, monitoring, and self-regulation. This region is often described as supporting the evaluation of salient information.",
+          "title": "Anterior Cingulate Cortex",
+          "body": "The anterior cingulate cortex is a medial region of the frontal lobe. It is commonly linked with control, monitoring, and self-regulation. This region is often described as supporting the evaluation of salient information."
+        },
+        "function": {
+          "raw": "[FUNCTION]Executive Control\nExecutive control is the regulation of thought, behavior, and performance. It involves dorsolateral prefrontal cortex, anterior cingulate cortex, frontoparietal regions, basal ganglia, and dorsal anterior insula. This concept supports adaptation, flexibility, goal-directed behavior, and conflict monitoring.",
+          "title": "Executive Control",
+          "body": "Executive control is the regulation of thought, behavior, and performance. It involves dorsolateral prefrontal cortex, anterior cingulate cortex, frontoparietal regions, basal ganglia, and dorsal anterior insula. This concept supports adaptation, flexibility, goal-directed behavior, and conflict monitoring."
+        }
+      }
+    }
+  ],
+  "generation": {
+    "num_beams": 5,
+    "max_new_tokens": 256,
+    "projection_temp": 0.05,
+    "do_sample": false,
+    "seed_per_basis": [
+      0,
+      1,
+      2
+    ]
+  },
+  "model_dir": "scripts/outputs/runs/final",
+  "cache_tag": "_m-final-9d34a680",
+  "model_sources": {
+    "autoencoder": "scripts/outputs/runs/final/autoencoder.pt",
+    "canonical_semantic_banks": "scripts/outputs/runs/final/canonical_semantic_banks.pt (identical to the banks packaged in the Q-Former)",
+    "caption_titles": "titles: canonical vocabulary (48 network / 83 region names)",
+    "neuroqwen": "released:neurovlm/NeuroQwen3-0.6B (frozen LM; not retrained by the pipeline)",
+    "proj_head_image_infonce": "scripts/outputs/runs/final/proj_head_image_infonce.pt",
+    "proj_head_text_infonce": "scripts/outputs/runs/final/proj_head_text_infonce.pt",
+    "proj_head_text_mse": "scripts/outputs/runs/final/proj_head_text_mse.pt",
+    "qformer_canonical": "scripts/outputs/runs/final/neuro_qformer_canonical (projector: mlp)",
+    "specter": "released:allenai/specter2_aug2023refresh + adhoc_query adapter (frozen; not retrained by the pipeline)"
+  }
+}
