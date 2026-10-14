@@ -20,7 +20,7 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parents[3]))
+sys.path.insert(0, str(HERE.parents[3] / "pipeline"))
 from common import FIG_FULL_W, FIG_LETTER_W, PAPER_FIG_DIR  # noqa: E402  paper (5.15 in) and response letter (6.5 in) text widths
 from run_analysis import FLAG_Q, MAP_SETS, TEXT_SETS  # noqa: E402
 

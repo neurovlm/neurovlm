@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """Publish the NeuroVLM revision (2026-10) on the Hugging Face org neurovlm. Dry run unless --execute.
 
-    .venv/bin/python scripts/push_hf_release.py                      # dry run of everything: uploads, checks, manifest diff
-    .venv/bin/python scripts/push_hf_release.py --only models --execute --update-manifest
-    .venv/bin/python scripts/push_hf_release.py --only neuroqwen --neuroqwen-dir scripts/outputs/runs/<run>/neuroqwen \\
+    .venv/bin/python scripts/pipeline/push_hf_release.py                      # dry run of everything: uploads, checks, manifest diff
+    .venv/bin/python scripts/pipeline/push_hf_release.py --only models --execute --update-manifest
+    .venv/bin/python scripts/pipeline/push_hf_release.py --only neuroqwen --neuroqwen-dir scripts/outputs/runs/<run>/neuroqwen \\
         --execute --update-manifest
-    .venv/bin/python scripts/push_hf_release.py --only corpus --execute --yes --update-manifest
+    .venv/bin/python scripts/pipeline/push_hf_release.py --only corpus --execute --yes --update-manifest
 
 models     runs/final to the existing repos, under the names the library loaders read: NeuroAutoEncoder, ProjectionHeads
            (+ map_calibration.json), NeuroAdapter (anatomical head, + map_calibration.json), NeuroQformer (stage 14,
@@ -20,10 +20,10 @@ Each README.md gets a "Revision 2026-10" section (replaced when present, the res
 card. config.json files are uploaded with absolute local paths cut to scripts/... The dry run only reads the Hub.
 
 --execute refuses when git status is dirty, a run file's sha256 differs from EXPECTED_SHA256 (the validated runs/final,
-cross-checked with REPRODUCTION.md, title_vocabulary.json and map_calibration.json), a parquet/csv/json/md file holds an
+cross-checked with scripts/README.md, title_vocabulary.json and map_calibration.json), a parquet/csv/json/md file holds an
 e-mail address, the installed neurovlm loaders cannot load a weight file (--allow-loader-mismatch overrides), or a
 NeuroQwen export is a smoke run or fails its export check. After the commits it reads every file's sha256 back from the
-Hub and, with --update-manifest, re-pins those repos in scripts/hf_manifest.json (diff printed; files new to a repo
+Hub and, with --update-manifest, re-pins those repos in scripts/config/hf_manifest.json (diff printed; files new to a repo
 inherit its groups, files of new repos get the group "release"). --pin-only does only that last step, for the current
 Hub heads. If runs/final changes after validation, check it and paste the output of --print-lock into EXPECTED_SHA256.
 """
@@ -40,7 +40,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # scripts/
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # scripts/pipeline/
 from common import HF_MANIFEST, REPO_ROOT, SCRIPTS_DIR, read_json, sha256_file  # noqa: E402
 
 TAG = "Revision 2026-10"
@@ -85,7 +85,7 @@ LABEL = {
     CV_REPO: "5-fold PubMed CV checkpoints",
 }
 
-# sha256 of the validated runs/final (2026-10-13; equal to the REPRODUCTION.md table) and of the redacted corpus
+# sha256 of the validated runs/final (2026-10-13; equal to the scripts/README.md table) and of the redacted corpus
 EXPECTED_SHA256 = {
     "adapter_anat_full.safetensors": "60d8ae78086462f1c261419dea0ce4409583c8e9cc8766195635abc80fd78372",
     "autoencoder.safetensors": "151d62eebc805ea79007415355c8b26069af7d9c8ee545b7fddb6a5922731f55",
@@ -154,7 +154,7 @@ Checkpoints of the 5-fold PubMed cross-validation of NeuroVLM (stage 20, `script
 
 The {rows} PubMed studies with at most 100 coordinates are split into five folds
 (`KFold(n_splits=5, shuffle=True, random_state=0)`). Fold k trains the autoencoder, the text-to-brain head and the two
-InfoNCE heads on the other four folds and holds out fold k. `scripts/validate_models.py --components cv` scores them.
+InfoNCE heads on the other four folds and holds out fold k. `scripts/pipeline/validate_models.py --components cv` scores them.
 
 | files | module |
 |---|---|
@@ -231,7 +231,7 @@ downloads the records in batches of 200. The output was saved as parquet on 2026
 
 E-mail addresses were replaced with `[email removed]`, 99 addresses in 82 records (5 titles, 72 abstracts, 7 author
 lists). Everything else is identical to the file NeuroQwen3-0.6B was trained on (sha256 `{source}`, pinned under
-`not_on_hub` in NeuroVLM's `scripts/hf_manifest.json`), which is not published.
+`not_on_hub` in NeuroVLM's `scripts/config/hf_manifest.json`), which is not published.
 
 ## Evaluation papers
 
@@ -359,9 +359,9 @@ def model_section(rel: Release, facts: dict, earlier: str | None) -> str:
         bullets = bullets[:1]
     lines = [f"## {TAG}", "", "Weights of the revised NeuroVLM paper. What changed:", "", *bullets,
              "", HERE[rel.repo], "", *files_table(rel), "",
-             f"Provenance: `scripts/outputs/runs/final` of NeuroVLM (`scripts/train_pipeline.py`, finished {f['finished']}), "
+             f"Provenance: `scripts/outputs/runs/final` of NeuroVLM (`scripts/pipeline/train_pipeline.py`, finished {f['finished']}), "
              f"training code at git `{f['commit'][:7]}` with {f['modified']} modified files, inputs pinned by "
-             f"`scripts/hf_manifest.json` (sha256 `{f['manifest'][:12]}`). `scripts/REPRODUCTION.md` records the later runs "
+             f"`scripts/config/hf_manifest.json` (sha256 `{f['manifest'][:12]}`). `scripts/README.md` records the later runs "
              "from scratch that gave the same bytes."]
     if earlier:
         lines += ["", f"Earlier weights: revision `{earlier}`."]
@@ -383,7 +383,7 @@ def neuroqwen_section(rel: Release, s: dict, earlier: str | None) -> str:
              "is now kept in every transformers version.",
              "", *files_table(rel), "",
              f"Provenance: `00_neuroqwen_dapt.summary.json` of the run ({s['ts']}), code at git `{(prov['git'].get('commit') or '?')[:7]}`, "
-             f"inputs pinned by `scripts/hf_manifest.json` (sha256 `{prov['hf_manifest']['sha256'][:12]}`), corpus sha256 "
+             f"inputs pinned by `scripts/config/hf_manifest.json` (sha256 `{prov['hf_manifest']['sha256'][:12]}`), corpus sha256 "
              f"`{s['corpus']['sha256'][:12]}`."]
     if earlier:
         lines += ["", f"Earlier weights: revision `{earlier}`."]
@@ -430,10 +430,10 @@ def run_facts(run_dir: Path) -> dict:
 
 def commit_text(label: str, facts: dict, rel: Release, release_commit: str) -> tuple[str, str]:
     title = f"{TAG}: {label} (git {facts['commit'][:7]}, hf_manifest {facts['manifest'][:12]}, {facts['finished'][:10]})"
-    body = [f"Run: scripts/outputs/runs/final (scripts/train_pipeline.py), finished {facts['finished']}.",
+    body = [f"Run: scripts/outputs/runs/final (scripts/pipeline/train_pipeline.py), finished {facts['finished']}.",
             f"Training code: git {facts['commit']} with {facts['modified']} modified files (runs/final/provenance.json).",
-            f"Inputs: scripts/hf_manifest.json sha256 {facts['manifest']}.",
-            f"Published by scripts/push_hf_release.py at git {release_commit}.", ""]
+            f"Inputs: scripts/config/hf_manifest.json sha256 {facts['manifest']}.",
+            f"Published by scripts/pipeline/push_hf_release.py at git {release_commit}.", ""]
     body += [f"{p}  {rel.sha[p]}" for p in rel.files if p != "README.md"]
     return title, "\n".join(body)
 
@@ -501,9 +501,9 @@ def neuroqwen_release(hub: Hub, qdir: Path, stage: Path, manifest: dict, release
     rel.body = "\n".join([f"Run: {summary_path.parent.relative_to(REPO_ROOT) if summary_path.is_relative_to(REPO_ROOT) else summary_path.parent}"
                           f" (scripts/models/00_neuroqwen_dapt.py), finished {s['ts']}.",
                           f"Code: git {prov['git'].get('commit')} with {prov['git'].get('modified_files')} modified files.",
-                          f"Inputs: scripts/hf_manifest.json sha256 {prov['hf_manifest']['sha256']}, corpus sha256 {s['corpus']['sha256']}.",
+                          f"Inputs: scripts/config/hf_manifest.json sha256 {prov['hf_manifest']['sha256']}, corpus sha256 {s['corpus']['sha256']}.",
                           "tie_word_embeddings false: the trained lm_head is stored and loaded untied (export_check.json passed).",
-                          f"Published by scripts/push_hf_release.py at git {release_commit}.", ""]
+                          f"Published by scripts/pipeline/push_hf_release.py at git {release_commit}.", ""]
                          + [f"{p}  {rel.sha[p]}" for p in rel.files if p != "README.md"])
     return rel
 
@@ -529,7 +529,7 @@ def corpus_release(hub: Hub, corpus: Path, stage: Path, manifest: dict, release_
     rel.body = "\n".join([f"Source: pubmed_neuroimaging.parquet (sha256 {source['sha256']}, hf_manifest.json not_on_hub), the "
                           "NeuroQwen3-0.6B training corpus from efficient_ai project/scrape.py.",
                           "Redaction: e-mail addresses replaced with [email removed]. No other change.",
-                          f"Published by scripts/push_hf_release.py at git {release_commit}, hf_manifest.json sha256 {msha}.", "",
+                          f"Published by scripts/pipeline/push_hf_release.py at git {release_commit}, hf_manifest.json sha256 {msha}.", "",
                           f"{corpus.name}  {rel.sha[corpus.name]}"])
     return rel
 
@@ -546,11 +546,11 @@ def lock_check(releases: list[Release], run_dir: Path) -> list[str]:
 
 
 def provenance_check(run_dir: Path) -> list[str]:
-    """EXPECTED_SHA256 against the hashes the run itself recorded: REPRODUCTION.md tables, banks and calibration sources."""
+    """EXPECTED_SHA256 against the hashes the run itself recorded: the scripts/README.md table, banks and calibration sources."""
     bad = []
-    for path, digest in re.findall(r"^\| `([^`]+)`[^|]*\| `([0-9a-f]{64})` \|", (SCRIPTS_DIR / "REPRODUCTION.md").read_text(), re.M):
+    for path, digest in re.findall(r"^\| `([^`]+)`[^|]*\| `([0-9a-f]{64})` \|", (SCRIPTS_DIR / "README.md").read_text(), re.M):
         if path in EXPECTED_SHA256 and EXPECTED_SHA256[path] != digest:
-            bad.append(f"{path}: EXPECTED_SHA256 differs from REPRODUCTION.md ({digest[:12]})")
+            bad.append(f"{path}: EXPECTED_SHA256 differs from scripts/README.md ({digest[:12]})")
     banks = read_json(run_dir / "title_vocabulary.json")["source"]["banks_sha256"]
     if EXPECTED_SHA256.get("canonical_semantic_banks.pt") != banks:
         bad.append(f"canonical_semantic_banks.pt: title_vocabulary.json was built from banks {banks[:12]}")
@@ -662,7 +662,7 @@ def repin(m: dict, rel: Release, revision: str, files: dict[str, tuple[str, int]
         kin = [i for i, e in enumerate(m["files"]) if e["repo"].startswith("neurovlm/") and e["repo_type"] == rel.repo_type]
         at = (same or kin or [len(m["files"]) - 1])[-1] + 1
         m["files"][at:at] = new
-    note = " Revision 2026-10 repos re-pinned by scripts/push_hf_release.py."
+    note = " Revision 2026-10 repos re-pinned by scripts/pipeline/push_hf_release.py."
     if note not in m["about"]:
         m["about"] += note
 
@@ -801,7 +801,7 @@ def run(args, run_dir: Path, stage: Path) -> int:
     n_src = sum(len(r.sources) for r in releases)
     if n_src:
         print(f"  sha256 vs provenance: {'all' if not bad else 'FAIL,'} {n_src} run/corpus files {'match' if not bad else 'checked against'} EXPECTED_SHA256"
-              + (", which agrees with REPRODUCTION.md, title_vocabulary.json and map_calibration.json" if models and not bad else ""))
+              + (", which agrees with scripts/README.md, title_vocabulary.json and map_calibration.json" if models and not bad else ""))
     for b in bad:
         print(f"    {b}")
     blockers += bad

@@ -1,6 +1,6 @@
 # Exact package set of the environment that produced runs/final (uv pip freeze of .venv, CPython 3.12.12, linux x86_64).
 # torch==2.14.1 from PyPI is the CUDA 13.0 build (torch.version.cuda 13.0, git 5c48869; needs an NVIDIA driver >= 580).
-# Install: uv venv .venv --python 3.12.12 && uv pip install --python .venv/bin/python -r scripts/requirements.lock -e ".[full,test]"
+# Install: uv venv .venv --python 3.12.12 && uv pip install --python .venv/bin/python -r scripts/config/requirements.lock -e ".[full,test]"
 # The neurovlm package itself is installed editable from the checkout (not listed here).
 absl-py==2.5.0
 accelerate==1.15.0

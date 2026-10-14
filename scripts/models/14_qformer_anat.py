@@ -5,7 +5,7 @@ Port of docs/03_models/14_qformer_anat.ipynb. Brain latents are synthesised by t
 its maximum and binarised at its 95th percentile; --map-calibration none --synth-binarize-pct 0 = notebook). --seed is
 the training seed, --split-seed the validation split. File names keep the qformer_ prefix for either projector.
 
-Training recipe (defaults since 2026-10-10, see scripts/README.md "Salience (Fig. 2)"): the canonical projection of the
+Training recipe (defaults since 2026-10-10, see scripts/models/README.md "Salience (Fig. 2)"): the canonical projection of the
 training semantics uses each row's own level bank, as inference does (--train-bank level); each training map is
 re-binarised per batch at a random percentile with voxel dropout (--map-aug); the title tokens weigh 5x in the LM loss
 (--title-weight 5). --train-bank all --no-map-aug --title-weight 1 = the previous recipe.

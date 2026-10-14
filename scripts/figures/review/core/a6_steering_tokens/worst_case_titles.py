@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Comment 2.m6: the [NETWORK] / [REGION] titles of the six worst test-set captions (Fig. R11, a7 pubmed_b2t_worst)
 re-decoded free and with the title constraint (--title-constraint of run_correctness.py), in the recipe of the stage-2
-test captions (scripts/validate_models.py: greedy, 128 new tokens, projection temperature 0.035, repetition penalty
+test captions (scripts/pipeline/validate_models.py: greedy, 128 new tokens, projection temperature 0.035, repetition penalty
 1.25, batches of 128 test maps in its order). The unconstrained run must reproduce the released test captions.
     .venv/bin/python scripts/figures/review/core/a6_steering_tokens/worst_case_titles.py   # GPU, ~1 min
 """

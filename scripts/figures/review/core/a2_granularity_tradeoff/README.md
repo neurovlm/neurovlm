@@ -5,7 +5,7 @@
 .venv/bin/python scripts/figures/review/core/a2_granularity_tradeoff/make_figure.py                                                        # CPU, 2 s
 ```
 **Inputs:** the final run (`scripts/outputs/runs/final`: autoencoder, heads, stage-1/2 MLP projectors, banks, latents, split), the validator's PubMed
-stage-1/2 captions (`scripts/outputs/validation/final/df_gen_{pubmed,canonical}.parquet`, batch 512: run `scripts/validate_models.py` first), pinned HF data
+stage-1/2 captions (`scripts/outputs/validation/final/df_gen_{pubmed,canonical}.parquet`, batch 512: run `scripts/pipeline/validate_models.py` first), pinned HF data
 and models (`_hf_pins.py`), leakage exclusions. Stage 2 without projection and NeuroVault (305 papers) are generated here (batch 128). Without `--force`,
 cached captions (`generated_*.csv`) are reused; `outputs/cache/` holds the training bank and the stage-2 texts (rebuilt from `text_synth_less.parquet` if absent).
 **Outputs** (`outputs/`): `a2_granularity_tradeoff.{png,svg}`, `metrics.json` (all numbers), `table.csv`, `per_text_*.parquet`, `collapse_*.parquet`,

@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[3]))
+sys.path.insert(0, str(HERE.parents[3] / "pipeline"))
 from common import FIG_FULL_W, FIG_LETTER_W, PAPER_FIG_DIR  # noqa: E402  paper (5.15 in) and response letter (6.5 in) text widths
 INK, INK2, MUTED = "#0b0b0b", "#52514e", "#8a8984"
 ARROW, HELD = "#7d7c77", "#eb6834"  # training-data arrows; held-out (evaluation-only) arrows

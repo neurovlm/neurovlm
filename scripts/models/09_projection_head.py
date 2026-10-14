@@ -5,7 +5,7 @@
 
 Stage A is the notebook's BCE head (saved as proj_head_text_bce; it initialises the InfoNCE text head). The text-to-brain
 head proj_head_text_mse is head v2: the same module trained on latent MSE + decoder-space Pearson terms and kept at its
-best validation Dice (scripts/README.md, "Text-to-brain head v2"). --text-head v1 saves stage A as proj_head_text_mse.
+best validation Dice (scripts/models/README.md, "Text-to-brain head v2"). --text-head v1 saves stage A as proj_head_text_mse.
 """
 from __future__ import annotations
 

@@ -24,7 +24,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _review_common import apply_style, cut_coords_for, draw_brain, flat_to_nifti  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4]))  # scripts/
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "pipeline"))  # scripts/pipeline/
 from common import FIG_LETTER_PAGE_H, FIG_LETTER_W  # noqa: E402
 
 INK, INK2, RULE = "#0b0b0b", "#52514e", "#c3c2b7"

@@ -14,7 +14,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-PAPER_TEMP = 0.035  # Q-Former projection temperature (scripts/validate_models.py::eval_qformer)
+PAPER_TEMP = 0.035  # Q-Former projection temperature (scripts/pipeline/validate_models.py::eval_qformer)
 
 
 def set_offline_env() -> None:

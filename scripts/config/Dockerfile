@@ -1,9 +1,9 @@
-# NeuroVLM revision: reproduction image (locked environment; entrypoint scripts/reproduce.sh).
+# NeuroVLM revision: reproduction image (locked environment; entrypoint scripts/pipeline/reproduce.sh).
 #
 # Build from the repository root (the build context is the repository; only the files below are copied):
-#   docker build -f scripts/Dockerfile -t neurovlm-repro .
+#   docker build -f scripts/config/Dockerfile -t neurovlm-repro .
 # Run (NVIDIA driver >= 580 and the NVIDIA Container Toolkit on the host). Mounts: the Hugging Face cache (models and
-# datasets, filled on first use), the inputs without a producer in this repository (scripts/README.md, Reproducibility),
+# datasets, filled on first use), the inputs without a producer in this repository (scripts/README.md, Reproduce),
 # the package data dir (data stages 01-07 write ~25 GB), the outputs and the figures:
 #   docker run --gpus all --shm-size 16g \
 #     -v $HOME/.cache/huggingface:/hf -v /path/to/external:/external:ro -v $PWD/repro_data:/work/.cache/neurovlm \
@@ -38,22 +38,25 @@ COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /uvx /usr/local/bin/
 WORKDIR /opt/neurovlm
 
 # 1. the locked third-party packages (own layer: rebuilt only when the lock changes)
-COPY scripts/requirements.lock scripts/requirements.lock
+COPY scripts/config/requirements.lock scripts/config/requirements.lock
 RUN uv venv .venv --python 3.12.12 \
- && uv pip install --python .venv/bin/python -r scripts/requirements.lock
+ && uv pip install --python .venv/bin/python -r scripts/config/requirements.lock
 
 # 2. the package and the scripts
 COPY pyproject.toml README.md LICENSE ./
 COPY src src
-COPY scripts/*.py scripts/*.sh scripts/reference_metrics.json scripts/README.md scripts/
+COPY scripts/README.md scripts/
+COPY scripts/config scripts/config
+COPY scripts/pipeline scripts/pipeline
 COPY scripts/data scripts/data
 COPY scripts/models scripts/models
 COPY scripts/eval_exclusions scripts/eval_exclusions
-COPY scripts/figures/main/*.py scripts/figures/main/README.md scripts/figures/main/
+COPY scripts/figures/main/*.py scripts/figures/main/*.csv scripts/figures/main/README.md scripts/figures/main/
+COPY scripts/figures/review/core/a3_neurovault_bounds/*.py scripts/figures/review/core/a3_neurovault_bounds/
 RUN uv pip install --python .venv/bin/python --no-deps -e . \
- && diff <(grep -v '^#' scripts/requirements.lock) <(uv pip freeze --python .venv/bin/python | grep -v '^-e ') \
+ && diff <(grep -v '^#' scripts/config/requirements.lock) <(uv pip freeze --python .venv/bin/python | grep -v '^-e ') \
  && .venv/bin/python -c "import neurovlm, torch; print('neurovlm', neurovlm.__file__, 'torch', torch.__version__)"
 
 # reproduce.sh finds the image's .venv, checks it against the lock and runs the pipeline
-ENTRYPOINT ["bash", "scripts/reproduce.sh"]
+ENTRYPOINT ["bash", "scripts/pipeline/reproduce.sh"]
 CMD []

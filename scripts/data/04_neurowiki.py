@@ -10,7 +10,7 @@ import sys
 from hashlib import sha256
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # scripts/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))  # scripts/pipeline/
 from common import artifacts_exist, base_parser, finalize_args, get_logger, select_device, setup_torch, timed  # noqa: E402
 from data_utils import SPECTER_REPOS, add_data_args, chunk_bounds, encode_texts, hf_cache_pinned, resolve_artifact_dir  # noqa: E402
 

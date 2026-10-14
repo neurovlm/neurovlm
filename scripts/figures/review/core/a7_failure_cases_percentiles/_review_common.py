@@ -336,20 +336,20 @@ def calibrate_maps(maps, rule: str = "global", *, kind: str = "head", factor: fl
 def map_factor(kind: str = "head") -> float:
     """Global calibration factor of the text-to-brain head ("head") or anatomical head ("adapter"): <model dir>/
     map_calibration.json, or scripts/outputs/released_map_calibration.json for the released models (both written by
-    scripts/validate_models.py)."""
+    scripts/pipeline/validate_models.py)."""
     import hashlib
 
     if "map_calibration" not in _MODEL_DIR:
         d = _MODEL_DIR["path"]
         path = d / "map_calibration.json" if d is not None else REPO / "scripts" / "outputs" / "released_map_calibration.json"
         if not path.exists():
-            raise FileNotFoundError(f"{path} is missing: run scripts/validate_models.py on this model first")
+            raise FileNotFoundError(f"{path} is missing: run scripts/pipeline/validate_models.py on this model first")
         cal = json.loads(path.read_text())
         for src in cal["source"]["models"].values():  # the factors belong to the model files they were fitted on
             if d is not None and not src.startswith("released:"):
                 fname, sha = src.split(":")
                 if hashlib.sha256((d / fname).read_bytes()).hexdigest() != sha:
-                    raise RuntimeError(f"{path} was fitted on another {fname}; rerun scripts/validate_models.py")
+                    raise RuntimeError(f"{path} was fitted on another {fname}; rerun scripts/pipeline/validate_models.py")
         _MODEL_DIR["map_calibration"] = cal
     return float(_MODEL_DIR["map_calibration"][kind])
 
@@ -427,7 +427,7 @@ def env_packages(names: Sequence[str] = ("torch", "transformers", "sentence_tran
     return out
 
 
-# --model-dir: models of a retrained run (scripts/train_pipeline.py layout) instead of the release; anything the run lacks
+# --model-dir: models of a retrained run (scripts/pipeline/train_pipeline.py layout) instead of the release; anything the run lacks
 # falls back to the release. SPECTER2 and NeuroQwen3-0.6B are frozen: always the released ones. Copied from
 # scripts/figures/main/_shared.py and scripts/models/_common_models.py.
 DEFAULT_MODEL_DIR = REPO / "scripts" / "outputs" / "runs" / "final"

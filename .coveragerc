@@ -4,12 +4,13 @@
 # Everything else is left out ([run] omit): the CNN, the atlas-free data, the notebook-era trainers and evaluators, the
 # runtime and retrieval API, the data stages 01-07 (they regenerate the released inputs), the review analyses, notebooks,
 # docs and tutorials.
-# Used by tests.yml (pytest --cov) and smoke.yml (scripts/smoke_pipeline.sh under coverage, subprocesses included).
+# Used by tests.yml (pytest --cov) and smoke.yml (scripts/pipeline/smoke_pipeline.sh under coverage, subprocesses
+# included).
 [run]
-# scripts/data, scripts/models and scripts/figures/main have no __init__.py, so they are listed for unrun files to count
+# the script directories have no __init__.py, so each is listed for unrun files to count
 source =
     neurovlm
-    scripts
+    scripts/pipeline
     scripts/data
     scripts/models
     scripts/figures/main
@@ -37,9 +38,8 @@ omit =
     scripts/data/0*.py
     scripts/data/run_all.py
     scripts/data/data_utils.py
-    # review analyses, notebook export, run outputs
+    # review analyses, run outputs
     scripts/figures/review/*
-    scripts/export_notebook.py
     */outputs/*
 patch = subprocess
 relative_files = true
@@ -50,8 +50,8 @@ include =
     # pinned inputs from Hugging Face
     scripts/data/fetch_hf.py
     # training: shared helpers, pipeline driver, stages and their helpers, validation, reproduction check
-    scripts/common.py
-    scripts/train_pipeline.py
+    scripts/pipeline/common.py
+    scripts/pipeline/train_pipeline.py
     scripts/models/00_neuroqwen_dapt.py
     scripts/models/08_autoencoder.py
     scripts/models/09_projection_head.py
@@ -63,8 +63,8 @@ include =
     scripts/models/_common_models.py
     scripts/models/_qformer_anat_data.py
     scripts/models/_anatomical_atlases_lib.py
-    scripts/validate_models.py
-    scripts/verify_reproduction.py
+    scripts/pipeline/validate_models.py
+    scripts/pipeline/verify_reproduction.py
     # figures: Figs. 2-6 and S2-S4, their shared helpers and make_all.py
     scripts/figures/main/*.py
     # library: package entry, NeuroVLM client (figures, validation), data and pinned-resource loaders

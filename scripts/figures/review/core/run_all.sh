@@ -5,8 +5,8 @@
 #   bash scripts/figures/review/core/run_all.sh a3_neurovault_bounds a7_ood_confidence   # only these directories
 #   FIGURES_ONLY=1 bash scripts/figures/review/core/run_all.sh                           # only re-plot (CPU, ~2 min)
 #
-# Needs the final model (scripts/train_pipeline.py), its validation (scripts/validate_models.py, read by a2_granularity_tradeoff and a5_mlp_projector)
-# and the paper figures (scripts/figures/main/make_all.py, read by a7_failure_cases_percentiles).
+# Needs the final model in scripts/outputs/runs/final, its validation (read by a2_granularity_tradeoff and a5_mlp_projector)
+# and the paper figures (read by a7_failure_cases_percentiles): bash scripts/pipeline/reproduce.sh --run-name final.
 # Logs: core/logs/<dir>.log and core/logs/status.tsv (dir, script, exit code, seconds); a failed step does not stop the queue.
 # ~2.5 h on one RTX 5090; A5_FULL=1 adds the 8-h A5.1 projector study.  DEVICE (default cuda) is passed as --device.
 set -uo pipefail

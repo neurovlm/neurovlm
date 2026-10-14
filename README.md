@@ -121,23 +121,21 @@ Analyses are organized as Jupyter notebooks:
 4. `docs/figures`: Preprint-v3 evaluation and figure reproduction
 5. `docs/experimental`: Retained exploratory evaluation, atlas-free CNN, and data-preparation research
 
-## Revision
+## Reproducing the paper
 
-The revision in response to the reviewers adds headless, pinned reproductions of the paper under `scripts/` (start
-with `scripts/README.md`):
+Every figure of the paper and of the response to reviewers is reproducible from [`scripts/`](scripts/README.md).
+The inputs are fetched from Hugging Face at pinned revisions and checked by sha256, and training is deterministic. On a
+Linux machine with an NVIDIA GPU (driver >= 580) and [uv](https://docs.astral.sh/uv/), run from the repository root:
 
-- `scripts/hf_manifest.json` and `scripts/data/fetch_hf.py`: every Hugging Face input pinned to a revision and checked
-  against its sha256.
-- `scripts/train_pipeline.py` and `scripts/models/`: the training stages with deterministic kernels;
-  `scripts/validate_models.py` compares a run with the released checkpoints.
-- `scripts/figures/main/`: one script per paper figure.
-- `scripts/reproduce.sh`, `scripts/requirements.lock` and `scripts/Dockerfile`: one-command reproduction, documented in
-  `scripts/REPRODUCTION.md`.
-- `scripts/figures/review/`: the reviewer analyses (`core/`) and the response letter (`RESPONSE.md`,
-  `response_letter.tex`).
+```bash
+bash scripts/pipeline/reproduce.sh --run-name final   # environment, data, training, validation, paper figures (~2.5 h, one RTX 5090)
+bash scripts/figures/review/core/run_all.sh           # response analyses and figures (~2.5 h)
+```
 
-CI runs the offline test suite (`.github/workflows/tests.yml`) and `scripts/smoke_pipeline.sh`, every training stage at
-smoke scale on CPU (`.github/workflows/smoke.yml`), both in the locked environment.
+`bash scripts/pipeline/reproduce.sh --smoke` runs every stage at smoke scale in about 5 minutes.
+[`scripts/README.md`](scripts/README.md) explains the layout, the options, the validation and the proof that repeated
+runs give byte-identical models. CI runs the offline test suite (`.github/workflows/tests.yml`) and the pipeline smoke
+test (`.github/workflows/smoke.yml`).
 
 ## License
 

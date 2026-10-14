@@ -29,12 +29,12 @@ import numpy as np
 CUBLAS_WORKSPACE_CONFIG = ":4096:8"
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", CUBLAS_WORKSPACE_CONFIG)
 
-SCRIPTS_DIR = Path(__file__).resolve().parent
+SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = SCRIPTS_DIR.parent
 DEFAULT_OUT_ROOT = SCRIPTS_DIR / "outputs"
 PAPER_FIG_DIR = REPO_ROOT.parent / "paper" / "figures"
 EVAL_EXCLUSIONS_DIR = SCRIPTS_DIR / "eval_exclusions"
-HF_MANIFEST = SCRIPTS_DIR / "hf_manifest.json"
+HF_MANIFEST = SCRIPTS_DIR / "config" / "hf_manifest.json"
 # figure sizes (inches), measured with \the\textwidth / \the\textheight: sn-jnl [sn-nature] 372.0 x 552.69 pt,
 # response letter (article 11pt, letter paper, 1 in margins) 469.75 x 650.43 pt; a figure is at most 0.6 x text height
 FIG_FULL_W = 372.0 / 72.27  # 5.15, paper (sn-jnl) text width
@@ -87,7 +87,7 @@ def sha256_file(path: Path | str) -> str:
     return h.hexdigest()
 
 
-# pinned Hugging Face inputs (scripts/hf_manifest.json, written for scripts/data/fetch_hf.py)
+# pinned Hugging Face inputs (scripts/config/hf_manifest.json, written for scripts/data/fetch_hf.py)
 @functools.cache
 def hf_manifest() -> dict:
     return json.loads(HF_MANIFEST.read_text())
@@ -103,7 +103,7 @@ def _verified(path: str, size: int, mtime: float, digest: str) -> bool:
 
 
 def hf_pinned(repo_id: str, path: str | None = None, repo_type: str | None = None):
-    """Pinned revision of ``repo_id`` from scripts/hf_manifest.json (the main-branch pin when a repo has several).
+    """Pinned revision of ``repo_id`` from scripts/config/hf_manifest.json (the main-branch pin when a repo has several).
 
     With ``path``: the local file at that revision, sha256-checked. Looked up in the HF cache, then in data_dir under
     the manifest's local_name (what fetch_hf.py writes), else downloaded with hf_hub_download.

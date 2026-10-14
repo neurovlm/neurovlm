@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 OUT = Path(__file__).resolve().parent / "outputs"
-sys.path.insert(0, str(Path(__file__).resolve().parents[4]))  # scripts/
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "pipeline"))  # scripts/pipeline/
 from common import FIG_FULL_W, FIG_LETTER_W, PAPER_FIG_DIR  # noqa: E402  paper (5.15 in) and response letter (6.5 in) text widths
 ENCODERS = {"specter2": ("SPECTER2", "#2a78d6"), "word2vec": ("word2vec", "#898781")}  # blue = paper, gray = baseline
 LEGEND = {"specter2": "SPECTER2 language model (paper)", "word2vec": "mean word2vec (context-free baseline)"}

@@ -31,11 +31,10 @@ items of `scripts/eval_exclusions/` (16 test-set papers, 7 NeuroVault papers / 2
 ## Reproduce
 
 ```bash
-cd neurovlm && export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
-.venv/bin/python scripts/train_pipeline.py --run-name final                  # the model (scripts/README.md, "Final run")
-.venv/bin/python scripts/validate_models.py --run scripts/outputs/runs/final --name final \
-    --reference scripts/outputs/validation/released_excl/metrics.json         # validation (read by a5_mlp_projector)
-.venv/bin/python scripts/figures/main/make_all.py                            # paper figures (read by a7_failure_cases_percentiles)
+cd neurovlm
+bash scripts/pipeline/reproduce.sh --run-name final                          # model, validation (read by a5_mlp_projector) and
+                                                                             # paper figures (read by a7_failure_cases_percentiles)
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 bash scripts/figures/review/core/run_all.sh                                  # every analysis (~2.5 h), then reviewer_0N/
 FIGURES_ONLY=1 bash scripts/figures/review/core/run_all.sh                   # re-plot everything from outputs/ (CPU, ~2 min)
 bash scripts/figures/review/core/run_all.sh a3_neurovault_bounds             # one analysis
@@ -105,7 +104,7 @@ abstracts until the author's retrain, see `OPEN_ITEMS.md`; memorization check in
 summary and synthetic-text prompts and examples (the summary prompt, model and sampling settings come from
 `docs/02_data/07_transform_text.ipynb`); 3.7 second half (line 672, no scaling analysis); 1.6, 1.7, 1.9 (text changes); 2.11
 (table from the run summaries and the NeuroQwen3-0.6B model card); 1.0, 1.10, 2.0 and 3.0 (general remarks, overall
-assessment and summary, answered by pointing to the comments); 1.11 (repository: `scripts/reproduce.sh`, the CI
+assessment and summary, answered by pointing to the comments); 1.11 (repository: `scripts/pipeline/reproduce.sh`, the CI
 smoke test `.github/workflows/smoke.yml` that trains every stage for one batch on CPU, and `.coveragerc`).
 
 ## Dependencies beyond the base environment

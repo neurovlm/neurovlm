@@ -164,7 +164,7 @@ def embed_tfidf_svd(texts: list[str], train_mask: np.ndarray, *, dim: int = 300,
 def embed_sentence_transformer(texts: list[str], name: str, device, batch_size: int = 64) -> tuple[np.ndarray, dict]:
     from _hf_pins import sentence_transformer
 
-    st = sentence_transformer(name, device)  # at the revision pinned in scripts/hf_manifest.json
+    st = sentence_transformer(name, device)  # at the revision pinned in scripts/config/hf_manifest.json
     emb = st.encode(texts, batch_size=batch_size, convert_to_numpy=True, normalize_embeddings=False, show_progress_bar=False)
     n_params = sum(p.numel() for p in st.parameters())
     return emb.astype(np.float32), {"method": "sentence-transformers", "model": name, "params_M": n_params / 1e6, "max_seq_length": int(st.max_seq_length)}
@@ -227,7 +227,7 @@ def main(argv=None) -> int:
     p.add_argument("--encoders", default="specter2,word2vec",
                    help="Comma list of specter2,specter2_base,specter2_prox,minilm,word2vec,tfidf,tfidf<k>[,large].")
     p.add_argument("--w2v-model", default="word2vec-google-news-300", help="gensim vectors for word2vec (e.g. glove-wiki-gigaword-300).")
-    p.add_argument("--large-encoder", default=None, help="HF / sentence-transformers id for an extra 'large' row (pin it in scripts/hf_manifest.json first).")
+    p.add_argument("--large-encoder", default=None, help="HF / sentence-transformers id for an extra 'large' row (pin it in scripts/config/hf_manifest.json first).")
     p.add_argument("--epochs", type=int, default=None, help="Stage-A epochs (default 201; 1 in --smoke).")
     p.add_argument("--infonce-epochs", type=int, default=None, help="Stage-B epochs (default 301; 1 in --smoke).")
     p.add_argument("--max-samples", type=int, default=None, help="Cap rows (split-proportional prefix).")

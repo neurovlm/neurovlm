@@ -1,9 +1,9 @@
 """Trained models of ``--model-dir`` (default scripts/outputs/runs/final, the paper model) or, with ``--released``, the
-released Hugging Face weights at the revisions pinned in scripts/hf_manifest.json (_hf_pins.py). Copied from
+released Hugging Face weights at the revisions pinned in scripts/config/hf_manifest.json (_hf_pins.py). Copied from
 ../a2_granularity_tradeoff/_review_common.py so this directory imports nothing from scripts/; a file the run lacks falls back
 to the released one. SPECTER2 and NeuroQwen3-0.6B are frozen: always released.
 
-Generated maps follow the paper's calibration rule (scripts/README.md, "Map calibration"): each sigmoid map is multiplied
+Generated maps follow the paper's calibration rule (scripts/models/README.md, "Map calibration"): each sigmoid map is multiplied
 by the model's global factor (fitted on the validation split, <model dir>/map_calibration.json) and clipped at 1 before it
 is drawn, encoded or scored. Percentile Dice does not change; anything encoded does.
 """
@@ -158,20 +158,20 @@ def split_pmids() -> dict[str, np.ndarray]:
 def map_factor(kind: str = "head") -> float:
     """Global calibration factor of the text-to-brain head ("head") or anatomical head ("adapter"): <model dir>/
     map_calibration.json, or scripts/outputs/released_map_calibration.json for the released weights. Both are written by
-    scripts/validate_models.py (scripts/models/_common_models.map_calibration)."""
+    scripts/pipeline/validate_models.py (scripts/models/_common_models.map_calibration)."""
     import hashlib
 
     if "map_calibration" not in _STATE:
         d = _STATE["path"]
         path = d / "map_calibration.json" if d is not None else REPO / "scripts" / "outputs" / "released_map_calibration.json"
         if not path.exists():
-            raise FileNotFoundError(f"{path} is missing: run scripts/validate_models.py on this model first")
+            raise FileNotFoundError(f"{path} is missing: run scripts/pipeline/validate_models.py on this model first")
         cal = json.loads(path.read_text())
         for src in cal["source"]["models"].values():  # the factors belong to the model files they were fitted on
             if d is not None and not src.startswith("released:"):
                 fname, sha = src.split(":")
                 if hashlib.sha256((d / fname).read_bytes()).hexdigest() != sha:
-                    raise RuntimeError(f"{path} was fitted on another {fname}; rerun scripts/validate_models.py")
+                    raise RuntimeError(f"{path} was fitted on another {fname}; rerun scripts/pipeline/validate_models.py")
         _STATE["map_calibration"] = cal
     return float(_STATE["map_calibration"][kind])
 

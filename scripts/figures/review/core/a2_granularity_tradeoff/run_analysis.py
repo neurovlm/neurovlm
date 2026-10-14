@@ -395,7 +395,7 @@ def llm_judge(device, per_pubmed: dict, *, n: int, seed: int, repo: str = "Qwen/
     from _hf_pins import hf_revision
 
     try:
-        rev = hf_revision(repo)  # pinned in scripts/hf_manifest.json
+        rev = hf_revision(repo)  # pinned in scripts/config/hf_manifest.json
         tok = AutoTokenizer.from_pretrained(repo, revision=rev)
         lm = AutoModelForCausalLM.from_pretrained(repo, revision=rev, dtype=torch.bfloat16 if device.type == "cuda" else torch.float32).to(device).eval()
     except Exception as exc:  # not cached

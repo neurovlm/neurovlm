@@ -25,7 +25,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS_ROOT = REPO_ROOT / "docs"
 RUNNER = Path(__file__).parent / "run_smoke.py"
-EXPORTER = REPO_ROOT / "scripts" / "export_notebook.py"
+EXPORTER = Path(__file__).parent / "export_notebook.py"
 
 DEFAULT_TIMEOUT = 300
 

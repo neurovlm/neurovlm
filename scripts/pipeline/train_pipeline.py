@@ -2,16 +2,16 @@
 """Retrain the NeuroVLM paper models: data stages, then 08 -> 09 -> 20 -> 11 -> 12 -> 13 -> 14, each followed by
 validate_models.py on the components it trained.
 
-    python scripts/train_pipeline.py --smoke                      # every stage, tiny, into runs/smoke/
-    python scripts/train_pipeline.py --run-name paper             # full retrain into runs/paper/
-    python scripts/train_pipeline.py --only 08,09 --run-name x    # subset (also --from 12 --to 14, --stages cv)
-    python scripts/train_pipeline.py --only 13,14 --run-name x --skip-data --stage-args "--inputs-from scripts/outputs/runs/final"
+    python scripts/pipeline/train_pipeline.py --smoke                      # every stage, tiny, into runs/smoke/
+    python scripts/pipeline/train_pipeline.py --run-name paper             # full retrain into runs/paper/
+    python scripts/pipeline/train_pipeline.py --only 08,09 --run-name x    # subset (also --from 12 --to 14, --stages cv)
+    python scripts/pipeline/train_pipeline.py --only 13,14 --run-name x --skip-data --stage-args "--inputs-from scripts/outputs/runs/final"
 
 Dependencies: 09, 11 <- 08; 20 <- 09; 12 <- 11, 09, 08; 13 <- 09, 08; 14 <- 13, 12, 09, 08.
 Artifacts stay in scripts/outputs/runs/<run_name>/ unless --install copies them into neurovlm.data.data_dir.
 Timings go to scripts/outputs/pipeline_timings.json and runs/<run_name>/pipeline_timings.json.
 Stages run with deterministic kernels (bit-identical reruns on the same GPU and software); --stage-args "--no-deterministic" turns that off.
-Every input comes from the Hugging Face revisions pinned in scripts/hf_manifest.json. runs/<run_name>/provenance.json records the
+Every input comes from the Hugging Face revisions pinned in scripts/config/hf_manifest.json. runs/<run_name>/provenance.json records the
 manifest sha256, the pinned revisions, torch/CUDA/cuDNN, GPU and driver, the determinism settings, the git commit and the
 command line (earlier invocations into the same run dir are kept under "earlier").
 """
@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # scripts/
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # scripts/pipeline/
 from common import (CUBLAS_WORKSPACE_CONFIG, DEFAULT_OUT_ROOT, REPO_ROOT, SCRIPTS_DIR, get_logger, provenance, read_json,  # noqa: E402
                     write_json)
 
@@ -226,7 +226,7 @@ def main(argv=None):
             log.error("stage %s failed with exit code %d", sid, code)
             failed = True
         elif args.validate and components:
-            vcmd = [PYTHON, str(SCRIPTS_DIR / "validate_models.py"), "--run", str(run_dir), "--components", components, "--device", args.device, "--name", run_name]
+            vcmd = [PYTHON, str(SCRIPTS_DIR / "pipeline" / "validate_models.py"), "--run", str(run_dir), "--components", components, "--device", args.device, "--name", run_name]
             if args.smoke:
                 vcmd += ["--max-samples", "64", "--folds", "0"]
             vcode, vsecs = run(vcmd + extra_val, dry_run=args.dry_run, log_path=run_dir / "logs" / f"{sid}.validate.log")

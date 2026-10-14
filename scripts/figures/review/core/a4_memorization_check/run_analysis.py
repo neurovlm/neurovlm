@@ -12,7 +12,7 @@ the abstract / summary of another paper of the same group (derangement, seed 0).
 (lower-cased alphanumeric runs). Per caption: longest common run of words (LCS substring), share of the caption's word
 8-grams found in the reference, ROUGE-L F1. Test vs train: medians, 95th percentiles, two-sided Mann-Whitney U.
 
-Imports scripts/validate_models.py so the training-sample captions use the validation generation path verbatim.
+Imports scripts/pipeline/validate_models.py so the training-sample captions use the validation generation path verbatim.
     .venv/bin/python scripts/figures/review/core/a4_memorization_check/run_analysis.py --device cuda   # GPU ~5 min, then CPU ~1 min
 """
 from __future__ import annotations
@@ -29,7 +29,7 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parents[3]
-sys.path[:0] = [str(SCRIPTS), str(SCRIPTS / "models")]
+sys.path[:0] = [str(SCRIPTS / "pipeline"), str(SCRIPTS / "models")]
 from common import hf_pinned, setup_torch  # noqa: E402
 
 VALIDATION_FINAL = SCRIPTS / "outputs" / "validation" / "final"

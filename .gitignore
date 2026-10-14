@@ -33,7 +33,7 @@ docs/experimental/data_preparation/**/*.csv
 docs/experimental/data_preparation/**/*.json
 docs/experimental/data_preparation/**/*.xml
 
-# derivatives of the revision pipeline: regenerate with scripts/reproduce.sh, make_all.py, core/run_all.sh, build_reviewer_dirs.py
+# derivatives of the revision pipeline: regenerate with scripts/pipeline/reproduce.sh, make_all.py, core/run_all.sh, build_reviewer_dirs.py
 scripts/outputs/
 scripts/figures/main/*.png
 scripts/figures/main/*.svg

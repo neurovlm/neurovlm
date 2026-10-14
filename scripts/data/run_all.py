@@ -6,7 +6,7 @@
     .venv/bin/python scripts/data/run_all.py --regenerate --skip-optional
     .venv/bin/python scripts/data/run_all.py --regenerate --only 06 07 --force --stage-args 06="--corpus corpus.txt"
 
---from-hf (default) runs scripts/data/fetch_hf.py (scripts/hf_manifest.json: pinned revisions, sha256 checked) and
+--from-hf (default) runs scripts/data/fetch_hf.py (scripts/config/hf_manifest.json: pinned revisions, sha256 checked) and
 no data stage. --regenerate is the provenance path: it fetches the pinned raw inputs, then runs 01-07 into
 --artifact-dir (default scripts/outputs/data_regenerated/, never the data dir, so the released files are not
 overwritten). --smoke, --force, --device and --artifact-dir are passed to every stage; 04 and 05 are optional.
@@ -21,7 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # scripts/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))  # scripts/pipeline/
 from common import DEFAULT_OUT_ROOT, REPO_ROOT, get_logger, record_timing  # noqa: E402
 
 HERE = Path(__file__).resolve().parent

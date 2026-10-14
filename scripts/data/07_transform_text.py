@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # scripts/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))  # scripts/pipeline/
 from common import artifacts_exist, base_parser, finalize_args, get_logger, hf_pinned, select_device, setup_torch, timed  # noqa: E402
 from data_utils import add_data_args, hf_cache_pinned, resolve_artifact_dir  # noqa: E402
 
@@ -154,7 +154,7 @@ def generate_summaries(df_pubs: pd.DataFrame, jsonl_path: Path, *, model_id: str
     log.info("%d/%d publications still need a summary (resuming %d)", len(todo), len(df_pubs), len(done_pmids))
 
     with timed("load_llm", log, out=out, model=model_id, **meta):
-        rev = hf_pinned(model_id)  # scripts/hf_manifest.json (KeyError for an unpinned --model)
+        rev = hf_pinned(model_id)  # scripts/config/hf_manifest.json (KeyError for an unpinned --model)
         tokenizer = AutoTokenizer.from_pretrained(model_id, revision=rev, padding_side="left")
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
@@ -203,7 +203,7 @@ def main(argv=None):
     mode.add_argument("--from-release", action="store_true", help="Write the released pubmed_summaries (default).")
     mode.add_argument("--regenerate", action="store_true", help="Run the LLM instead of using the released summaries.")
     p.add_argument("--summaries-dir", type=Path, default=None, help="Where neuro_summaries.* go (default: --artifact-dir).")
-    p.add_argument("--model", default=MODEL_ID, help="Causal LM for --regenerate (pinned in scripts/hf_manifest.json).")
+    p.add_argument("--model", default=MODEL_ID, help="Causal LM for --regenerate (pinned in scripts/config/hf_manifest.json).")
     p.add_argument("--max-new-tokens", type=int, default=None, help=f"Default {MAX_NEW_TOKENS} (64 in --smoke).")
     p.add_argument("--max-input-tokens", type=int, default=None, help="Prompt truncation length (default: min(model max, 8192)).")
     p.add_argument("--prompt-format", choices=["auto", "chat", "plain"], default="auto",

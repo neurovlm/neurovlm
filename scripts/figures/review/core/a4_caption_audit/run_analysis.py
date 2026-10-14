@@ -44,7 +44,7 @@ def log(msg: str) -> None:
 def load_corpus() -> tuple[pd.DataFrame, str]:
     from _hf_pins import hf_file
 
-    def hf(fn: str) -> Path:  # at the revision pinned in scripts/hf_manifest.json, sha256-checked
+    def hf(fn: str) -> Path:  # at the revision pinned in scripts/config/hf_manifest.json, sha256-checked
         return hf_file("neurovlm/neuro_image_papers", fn)
 
     pubs = pd.read_parquet(hf("publications.parquet"))

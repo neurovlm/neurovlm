@@ -4,7 +4,7 @@
 Downloads the released checkpoint (the Google Drive link in the upstream README) and checks its sha256, saves its
 state_dict as safetensors (all 230 tensors unchanged, without the optimizer state and the pickle), and archives the
 upstream source at the pinned commit. --upload creates the repo and pushes the files with a model card. The mirror is
-pinned in scripts/hf_manifest.json; run_text_to_brain.py reads text2brain.safetensors from there.
+pinned in scripts/config/hf_manifest.json; run_text_to_brain.py reads text2brain.safetensors from there.
 
     .venv/bin/python scripts/figures/review/core/a1_text_to_brain_baselines/mirror_text2brain.py --out DIR [--upload]
 """

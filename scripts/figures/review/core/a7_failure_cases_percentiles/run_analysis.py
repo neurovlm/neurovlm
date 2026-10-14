@@ -2,7 +2,7 @@
 """Percentiles of the paper's qualitative examples (3.8) and failure-case sets (2.m6), final model.
 Each example of Figs. 2, 3 and S4 (from the figures' *_text.json) is scored with its figure's recipe, ported from
 scripts/figures/main, and ranked within the same score over the whole set (leakage-audit exclusions applied).
-Generated maps are divided by their maximum before they are encoded, scored or drawn (scripts/README.md, "Map calibration").
+Generated maps are divided by their maximum before they are encoded, scored or drawn (scripts/models/README.md, "Map calibration").
 
     run_analysis.py --device cuda --gen-batch 64
     run_analysis.py --smoke --device cpu
@@ -404,7 +404,7 @@ def pubmed_cases(models: dict, *, device, args, timings: Timings):
         pmids = pmids[: args.max_samples]
     gen = gen.set_index(gen["pmid"].astype(str)).reindex([str(p) for p in pmids])
     if gen["text"].isna().any():
-        raise RuntimeError(f"{cache} does not cover the evaluated PubMed test-set papers (run scripts/validate_models.py --run <model dir> first)")
+        raise RuntimeError(f"{cache} does not cover the evaluated PubMed test-set papers (run scripts/pipeline/validate_models.py --run <model dir> first)")
     rows = load_pubmed_text_rows(pmids)
     truth = [f"{n} [SEP] {s_}" for n, s_ in zip(rows["name"], rows["summary"])]
     t2b_input = [f"{n} [SEP] {d}" for n, d in zip(rows["name"], rows["description"])]

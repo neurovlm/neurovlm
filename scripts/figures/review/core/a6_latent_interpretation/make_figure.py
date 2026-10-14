@@ -17,7 +17,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import _a6_common as C  # noqa: E402
 
-sys.path.insert(0, str(HERE.parents[3]))  # scripts/
+sys.path.insert(0, str(HERE.parents[3] / "pipeline"))  # scripts/pipeline/
 from common import FIG_FULL_W, FIG_LETTER_W, PAPER_FIG_DIR  # noqa: E402  paper (5.15 in) and response letter (6.5 in) text widths
 
 BLUE, GRAY, INK, INK2, LINE = "#2a78d6", "#898781", "#0b0b0b", "#52514e", "#c3c2b7"

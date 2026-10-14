@@ -1,6 +1,6 @@
 name: Tests
 
-# Offline test suite (tests/) in the locked environment of the revision: CPython 3.12.12, scripts/requirements.lock
+# Offline test suite (tests/) in the locked environment of the revision: CPython 3.12.12, scripts/config/requirements.lock
 # with the CPU build of torch. Tests marked network, requires_data, requires_pretrained, requires_specter or slow
 # (Hugging Face downloads, released weights, notebooks) are deselected, and the Hugging Face libraries run offline, so
 # the job downloads no data and needs no secrets. The coverage report is uploaded as the artifact coverage-tests.
@@ -44,13 +44,13 @@ jobs:
           version: "0.9.26"
           enable-cache: true
           cache-dependency-glob: |
-            scripts/requirements.lock
+            scripts/config/requirements.lock
             pyproject.toml
 
-      - name: Environment (scripts/requirements.lock with the CPU build of torch)
+      - name: Environment (scripts/config/requirements.lock with the CPU build of torch)
         run: |
           uv venv .venv --python 3.12.12
-          grep -vE '^(nvidia-|cuda-|triton==)' scripts/requirements.lock > "$RUNNER_TEMP/requirements-cpu.txt"
+          grep -vE '^(nvidia-|cuda-|triton==)' scripts/config/requirements.lock > "$RUNNER_TEMP/requirements-cpu.txt"
           uv pip install --python .venv/bin/python --torch-backend cpu -r "$RUNNER_TEMP/requirements-cpu.txt" -e ".[full,test]"
           .venv/bin/python -c "import torch, transformers, neurovlm; print('torch', torch.__version__, 'cuda', torch.version.cuda, '| transformers', transformers.__version__)"
 

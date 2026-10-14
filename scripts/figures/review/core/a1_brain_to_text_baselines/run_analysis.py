@@ -329,7 +329,7 @@ class Embedder:
         from _hf_pins import sentence_transformer
 
         self.name = name
-        self.model = sentence_transformer(name, device)  # at the revision pinned in scripts/hf_manifest.json
+        self.model = sentence_transformer(name, device)  # at the revision pinned in scripts/config/hf_manifest.json
         self.batch_size = batch_size
 
     def __call__(self, texts: list[str]) -> torch.Tensor:
@@ -427,7 +427,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-domains", type=int, default=10)
     p.add_argument("--train-subsample", type=int, default=None, help="Training texts for the nearest-training-text check (default: all).")
     p.add_argument("--embedder", default="sentence-transformers/all-MiniLM-L6-v2")
-    p.add_argument("--extra-embedder", default=None, help="Optional second embedder, e.g. BAAI/bge-small-en-v1.5 (pin it in scripts/hf_manifest.json first).")
+    p.add_argument("--extra-embedder", default=None, help="Optional second embedder, e.g. BAAI/bge-small-en-v1.5 (pin it in scripts/config/hf_manifest.json first).")
     p.add_argument("--bertscore-model", default="microsoft/deberta-xlarge-mnli")
     p.add_argument("--bertscore-batch-size", type=int, default=32)
     p.add_argument("--skip-bertscore", action="store_true")

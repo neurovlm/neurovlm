@@ -1,6 +1,6 @@
 """Text2Brain text -> map baseline used by run_text_to_brain.py (Ngo et al., MICCAI 2021; github.com/ngohgia/text2brain, MIT).
 
-The released checkpoint, mirrored with the upstream source on neurovlm/text2brain-mirror (pinned in scripts/hf_manifest.json),
+The released checkpoint, mirrored with the upstream source on neurovlm/text2brain-mirror (pinned in scripts/config/hf_manifest.json),
 runs through the upstream model code in text2brain/ with two fixes for transformers 4.x: the encoder is called with
 return_dict=False (text2brain/text2brain_model.py), and the checkpoint key encoder.embeddings.position_ids, a buffer that
 transformers no longer saves (it equals arange(512)), is dropped before the strict load (below). As upstream predict.py,

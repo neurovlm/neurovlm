@@ -67,7 +67,7 @@ map scaled to max 1), so every row shows activation in both maps (JSON `rows[].c
 SPECTER2 and NeuroQwen3-0.6B are frozen and always come from the release.
 
 The PNGs here are the `runs/final` renders, redrawn on 2026-10-12 at the template widths (two CPU renders from the
-caches were byte-identical to them, `scripts/REPRODUCTION.md`); Figs. 2, 4, 5, 6, S3 and S4 were redrawn from the same
+caches were byte-identical to them, `scripts/README.md`); Figs. 2, 4, 5, 6, S3 and S4 were redrawn from the same
 caches on 2026-10-13 (CPU) for the recall-axis label, the axial views of Figs. 6 / S4 and the Fig. 2 text table.  Later on 2026-10-13, Figs. 2, 3, 4 and S4 were regenerated with canonical [NETWORK] / [REGION] titles and calibrated maps, and Figs. 2 and 3 drew every map at 50 % of its own maximum (since check6: its top 5 % of voxels).  Figs. 2, 5, S2 and S4 were redrawn
 from the caches on 2026-10-13 (CPU) for the author's check6 items: the Fig. 2 layout, Fig. 5c's key and 5d's title,
 Fig. S2's "Gaussian kernel" label and Fig. S4's bars.  For check6, Fig. 3 was regenerated on one page with rule-picked rows
@@ -82,7 +82,7 @@ and S3 recompute theirs once (~3 min on a GPU).  Fig. 5b reads `../review/core/a
 
 ## Retrained weights (`--model-dir`)
 
-`--model-dir` (default `scripts/outputs/runs/final`, the layout of `scripts/train_pipeline.py`) replaces every trained
+`--model-dir` (default `scripts/outputs/runs/final`, the layout of `scripts/pipeline/train_pipeline.py`) replaces every trained
 component a figure uses; a missing file falls back to the released checkpoint with a warning (`_shared.RUN_FILES`; `.pt`
 = whole module or state dict, `.safetensors` = state dict loaded into the released architecture):
 
@@ -98,12 +98,12 @@ component a figure uses; a missing file falls back to the released checkpoint wi
 | PubMed split | `pmids_split.pt` | test split of Fig. 4, 5c, 6, S3 |
 | true latents | `latent_neuro.pt` | Fig. 4 top-row target `sigmoid(decoder(latent))` |
 
-The projector is loaded as in `scripts/validate_models.py` (`scripts/models/_common_models.neuro_projector_from_state`):
+The projector is loaded as in `scripts/pipeline/validate_models.py` (`scripts/models/_common_models.neuro_projector_from_state`):
 `config.json["projector"]` picks the Q-Former (absent or `qformer`) or the residual MLP (`mlp`).  Caches of a run carry
 `_m-<run>-<digest>`, where the digest hashes which run file each component comes from (name, size, mtime);
 `cache/model_sources_<tag>.json` decodes it.  Every generated map is multiplied by its model's global calibration factor
 and clipped at 1 before it is drawn, encoded or scored (`--map-calibration global`, the default; `--rescale-max` divides
-each map by its own maximum instead, see scripts/README.md "Map calibration"); map-panel caches carry `_cal-<rule>`.
+each map by its own maximum instead, see scripts/models/README.md "Map calibration"); map-panel caches carry `_cal-<rule>`.
 
 ## Evaluation exclusions
 
@@ -166,8 +166,8 @@ of n = 2,987, before the 16 leakage-audit papers were dropped, which move its me
 
 The eight hand-picked titles are less stable than the aggregate metrics. With the previous stage-14 recipe the packaged
 seed 3 titled the Salience map "Frontoparietal Network" (2 of 5 seeds named it "Salience Network"). With the current
-recipe (level-bank projection, map augmentation, title-token weight 5; `scripts/REPRODUCTION.md`, "Stage 14 recipe
-change") all five seeds do, and seed 3 (lowest final-epoch validation loss) is packaged again. Per-seed title accuracy
+recipe (level-bank projection, map augmentation, title-token weight 5; `scripts/models/README.md`,
+"Salience (Fig. 2)") all five seeds do, and seed 3 (lowest final-epoch validation loss) is packaged again. Per-seed title accuracy
 over the 119 labelled network maps: 0.739, 0.765, 0.748 (seed 3, selected), 0.765, 0.798 (previous recipe, same scorer:
 0.731, 0.739, 0.756, 0.723, 0.765).
 
@@ -303,7 +303,7 @@ text's 0.975) and 0.939 on NeuroVault (the caption's 0.94).
 
 ## Layout conventions
 
-Drawn at the journal template's text width, `FIG_FULL_W` = 5.15 in (`scripts/common.py`; S3 at half width, 2.57 in),
+Drawn at the journal template's text width, `FIG_FULL_W` = 5.15 in (`scripts/pipeline/common.py`; S3 at half width, 2.57 in),
 at most `FIG_MAX_H` = 4.59 in tall per page, every text >= 7 pt at print size; the figures in the response letter are
 printed at 6.5 in.  Generated and input texts are printed in full, wrapped by measured width, except Fig. 3's papers
 (title only since check7; the abstracts are in its JSON) and Fig. 2's six short examples (the three generated titles); Fig.

@@ -1,4 +1,4 @@
-"""Pinned Hugging Face inputs of this directory: revisions and sha256 from scripts/hf_manifest.json, read as a file (nothing
+"""Pinned Hugging Face inputs of this directory: revisions and sha256 from scripts/config/hf_manifest.json, read as a file (nothing
 is imported from scripts/). The same file sits in every review directory; keep the copies identical.
 
 Files the scripts read themselves come from ``hf_file`` (pinned revision, sha256-checked). bert_score takes no revision, so
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-MANIFEST = Path(__file__).resolve().parents[4] / "hf_manifest.json"
+MANIFEST = Path(__file__).resolve().parents[4] / "config" / "hf_manifest.json"
 # canonical [NETWORK] / [REGION] / [FUNCTION] names of the final run's stage-14 banks (scripts/models/_common_models.title_vocabulary)
 TITLE_VOCABULARY = MANIFEST.parent / "outputs" / "runs" / "final" / "title_vocabulary.json"
 NEURO_QWEN = "neurovlm/NeuroQwen3-0.6B"
@@ -56,12 +56,12 @@ def _entries(repo_id: str, *, files_only: bool = False) -> list[dict]:
 
 
 def hf_revision(repo_id: str) -> str:
-    """Main-branch revision of ``repo_id`` pinned in scripts/hf_manifest.json."""
+    """Main-branch revision of ``repo_id`` pinned in scripts/config/hf_manifest.json."""
     if "/" not in repo_id and not _entries(repo_id):  # short sentence-transformers names ("all-MiniLM-L6-v2")
         repo_id = f"sentence-transformers/{repo_id}"
     revs = {e["revision"] for e in _entries(repo_id) if e.get("ref", "main") == "main"}
     if len(revs) != 1:
-        raise KeyError(f"{repo_id} is not pinned in scripts/hf_manifest.json")
+        raise KeyError(f"{repo_id} is not pinned in scripts/config/hf_manifest.json")
     return revs.pop()
 
 
@@ -78,7 +78,7 @@ def hf_file(repo_id: str, path: str) -> Path:
     """``repo_id/path`` at its pinned revision (HF cache, else downloaded), sha256-checked."""
     rows = [e for e in _entries(repo_id, files_only=True) if e["path"] == path]
     if len(rows) != 1:
-        raise KeyError(f"{repo_id}/{path} is not pinned in scripts/hf_manifest.json")
+        raise KeyError(f"{repo_id}/{path} is not pinned in scripts/config/hf_manifest.json")
     e = rows[0]
     from huggingface_hub import hf_hub_download
 
@@ -133,7 +133,7 @@ def hf_cache_pinned(*repos: str, group: str = "figures") -> None:
     for repo in repos or LIBRARY_REPOS:
         rows = [e for e in _entries(repo, files_only=True) if e.get("hf_cache") and group in e.get("groups", [group])]
         if not rows:
-            bad.append(f"{repo}: no {group} entry in scripts/hf_manifest.json")
+            bad.append(f"{repo}: no {group} entry in scripts/config/hf_manifest.json")
         for e in rows:
             ref = e.get("ref", "main")
             p = Path(HF_HUB_CACHE) / f"{e['repo_type']}s--{repo.replace('/', '--')}" / "refs" / ref
@@ -263,13 +263,13 @@ def read_title_vocabulary(path: Path = TITLE_VOCABULARY) -> dict:
     checked against the canonical_semantic_banks.pt next to it."""
     path = Path(path)
     if not path.exists():
-        raise FileNotFoundError(f"{path} missing: scripts/validate_models.py (or a6_steering_tokens/build_title_vocabulary.py) "
+        raise FileNotFoundError(f"{path} missing: scripts/pipeline/validate_models.py (or a6_steering_tokens/build_title_vocabulary.py) "
                                 "builds it from the run's stage-14 banks")
     vocab = json.loads(path.read_text())
     banks = path.parent / str(vocab.get("source", {}).get("banks", ""))
     want = vocab.get("source", {}).get("banks_sha256")
     if want and banks.is_file() and _sha256(str(banks), banks.stat().st_size, banks.stat().st_mtime) != want:
-        raise RuntimeError(f"{path} was built from other banks than {banks}; rebuild it (scripts/validate_models.py)")
+        raise RuntimeError(f"{path} was built from other banks than {banks}; rebuild it (scripts/pipeline/validate_models.py)")
     return vocab
 
 

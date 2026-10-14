@@ -9,9 +9,9 @@ text into the captions, a test caption would share more verbatim text with its o
     --dapt-corpus "$HOME/efficient_ai/project/pubmed/pubmed_neuroimaging.parquet"   # GPU ~5 min (training captions, cached), CPU ~1 min
 ```
 
-Needs `scripts/outputs/validation/final/df_gen_canonical.parquet` (scripts/validate_models.py). The 2,971 stage-2 test captions are
+Needs `scripts/outputs/validation/final/df_gen_canonical.parquet` (scripts/pipeline/validate_models.py). The 2,971 stage-2 test captions are
 read from it; 2,971 training papers (seed 0, among those with a map, an abstract and a PubMed summary) are captioned here with the
-validation path and recipe (it imports `scripts/validate_models.py`: greedy, 128 new tokens, projection temperature 0.035,
+validation path and recipe (it imports `scripts/pipeline/validate_models.py`: greedy, 128 new tokens, projection temperature 0.035,
 repetition penalty 1.25, batches of 128 in PMID order, seed 123 + batch start, canonical [NETWORK] / [REGION] titles). A caption is
 its [NETWORK], [REGION] and [FUNCTION] captions together. References: the paper's title + abstract (pinned
 `neurovlm/neuro_image_papers` publications.parquet, the text NeuroQwen3 was pretrained on), its PubMed summary (the stage-13

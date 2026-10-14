@@ -17,7 +17,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import _a6_common as C  # noqa: E402
 
-sys.path.insert(0, str(HERE.parents[3]))  # scripts/
+sys.path.insert(0, str(HERE.parents[3] / "pipeline"))  # scripts/pipeline/
 from common import FIG_LETTER_W  # noqa: E402  response letter text width (6.5 in)
 
 TOKENS = {"[NETWORK]": ("a", "names the map's network"), "[REGION]": ("b", "names a region in the map"),

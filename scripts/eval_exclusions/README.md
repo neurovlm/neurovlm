@@ -61,11 +61,11 @@ by the `doi` column of `neurovault_images_meta` / `neurovault.pt['df_neuro']`; `
 
 ## How evaluations use it
 
-* `scripts/common.py`: `load_eval_exclusions()` → `{"pubmed_pmids": set[int], "neurovault": DataFrame,
+* `scripts/pipeline/common.py`: `load_eval_exclusions()` → `{"pubmed_pmids": set[int], "neurovault": DataFrame,
   "neurovault_dois", "neurovault_image_ids", "neurovault_collection_ids", ...}`; `apply_pubmed_exclusions(pmids)` and
   `apply_neurovault_exclusions(dois, image_ids=..., collection_ids=...)` return keep-masks (True = keep) and log the
   number dropped.
-* `scripts/validate_models.py` (every PubMed-test and NeuroVault evaluation, the generation sets and the CV folds;
+* `scripts/pipeline/validate_models.py` (every PubMed-test and NeuroVault evaluation, the generation sets and the CV folds;
   counts under `meta.exclusions` of `metrics.json` and in `report.md`) and `scripts/figures/main/fig3/4/5/6/S3` (cache
   files carry an `_excl` tag; counts under `eval_exclusions` in `<stem>_text.json`).
 * `scripts/figures/review/core/*/`: each isolated sub-directory reads the two CSVs by repo-relative path (its own copy of

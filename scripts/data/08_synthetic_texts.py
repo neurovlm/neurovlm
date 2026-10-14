@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # scripts/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))  # scripts/pipeline/
 from common import base_parser, finalize_args, get_logger, hf_pinned, timed  # noqa: E402
 
 STAGE = "data_08_synthetic_texts"

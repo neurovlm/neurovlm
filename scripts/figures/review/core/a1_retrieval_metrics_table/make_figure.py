@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 HERE = Path(__file__).resolve().parent
-FIG_LETTER_W = 6.5  # response letter text width (scripts/common.py)
+FIG_LETTER_W = 6.5  # response letter text width (scripts/pipeline/common.py)
 DATASETS = {"pubmed": "PubMed", "neurovault": "NeuroVault, selected image*", "neurovault_first": "NeuroVault, first image"}
 DIRECTIONS = {"text_to_brain": "Text → brain", "brain_to_text": "Brain → text"}
 # Table R2: PubMed only, one block of rows per candidate set ("hard_negatives" = only the test papers of the query's

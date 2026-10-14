@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Download every pinned Hugging Face input of NeuroVLM (scripts/hf_manifest.json) and check its sha256.
+"""Download every pinned Hugging Face input of NeuroVLM (scripts/config/hf_manifest.json) and check its sha256.
 
     .venv/bin/python scripts/data/fetch_hf.py                    # everything, into the package data dir
     .venv/bin/python scripts/data/fetch_hf.py --only pipeline    # training + validation inputs only
@@ -23,7 +23,7 @@ import sys
 import tarfile
 from pathlib import Path
 
-MANIFEST = Path(__file__).resolve().parents[1] / "hf_manifest.json"
+MANIFEST = Path(__file__).resolve().parents[1] / "config" / "hf_manifest.json"
 
 
 def sha256(path: Path) -> str:

@@ -12,4 +12,4 @@ Inputs: pinned HF publications, coordinates, split and pubmed_summary_qa; the re
 that `scripts/data/fetch_hf.py` puts in the data dir. Outputs: `removal_list.csv`, `neurovault_exclusions.csv`, `flagged_pairs.csv`,
 `max_similarity_*.csv`, `summary.json`, `summary_table.csv`, embeddings in `cache/`. Result: no DOI or PMID is shared; 16 test, 26 validation
 and 7 NeuroVault papers (29 maps) are removed; synthetic texts are at most 0.84 cosine from any held-out paper. The stage-11 leak of the
-synthetic maps and its fix: `scripts/README.md`, "Stage 11 split leak (fixed)".
+synthetic maps and its fix: `scripts/models/README.md`, "Stage 11 split leak (fixed)".

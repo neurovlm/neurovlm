@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[3]))
+sys.path.insert(0, str(HERE.parents[3] / "pipeline"))
 from common import FIG_FULL_W, FIG_LETTER_W, PAPER_FIG_DIR  # noqa: E402  paper (5.15 in) and response letter (6.5 in) text widths
 BLUE, ORANGE, AQUA, INK, INK2, GRID = "#2a78d6", "#eb6834", "#1baf7a", "#0b0b0b", "#52514e", "#e1e0d9"
 plt.rcParams.update({

@@ -12,8 +12,8 @@ $PY scripts/data/08_synthetic_texts.py --limit 6 --n-per-seed 2   # proof: re-cr
 $PY scripts/data/09_summaries.py                                  # proof: re-create 6 test-set summaries through the HF router
 ```
 
-## Inputs: `fetch_hf.py` and `scripts/hf_manifest.json`
-Training, validation and figures read only files pinned in `scripts/hf_manifest.json`: 120 files in 23 Hugging Face
+## Inputs: `fetch_hf.py` and `scripts/config/hf_manifest.json`
+Training, validation and figures read only files pinned in `scripts/config/hf_manifest.json`: 120 files in 23 Hugging Face
 repos (the `neurovlm` datasets and models plus SPECTER2, all-MiniLM-L6-v2, deberta-xlarge-mnli, Qwen3-0.6B-Base and
 wikitext), each with its commit, sha256, size, the name it gets in the data dir (`local_name`), its groups (`pipeline`,
 `figures`, `regenerate`, `extra`) and the scripts that read it. Three more repos are pinned by revision only (`pins`:
@@ -67,8 +67,8 @@ stage (`--smoke` also skips the fetch).  `--only 01 06`, `--skip 03`, `--skip-op
 | 08 | `08_synthetic_texts.py` (LLM proof) | `synthetic_texts.parquet` in `--out`, `examples/synthetic_texts_examples.md` | n/a | 12 requests, 6 s |
 | 09 | `09_summaries.py` (LLM proof) | `summaries.parquet` in `--out`, `examples/summaries_examples.md` | n/a | 6 requests, 3 s |
 
-¹ `run_all.py --smoke --force` on an RTX 5090 / 16 cores with HF caches populated.  Per-block timings and the
-extrapolations are in `time_estimates.json` (logs in `scripts/outputs/data_0N_*/timing*/timings.jsonl`).  Only 05, 06
+¹ `run_all.py --smoke --force` on an RTX 5090 / 16 cores with HF caches populated.  Per-block timings are logged
+in `scripts/outputs/data_0N_*/timing*/timings.jsonl`.  Only 05, 06
 and 07 (release) were run in full (into a scratch `--artifact-dir`); 01–04 were timed on subsets at full settings,
 because their real artifacts already exist in `~/.cache/neurovlm`.
 

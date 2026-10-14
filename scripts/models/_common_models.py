@@ -17,7 +17,7 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # scripts/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))  # scripts/pipeline/
 from common import (  # noqa: E402
     DEFAULT_OUT_ROOT, apply_pubmed_exclusions, artifacts_exist, base_parser, data_dir, finalize_args, get_logger, hf_pinned,
     hf_split_pmids, read_json, seed_worker, select_device, setup_torch, sha256_file, timed, write_json,
@@ -26,7 +26,7 @@ from common import (  # noqa: E402
 RUNS_ROOT = DEFAULT_OUT_ROOT / "runs"
 
 __all__ = [
-    # from scripts/common.py
+    # from scripts/pipeline/common.py
     "artifacts_exist", "base_parser", "data_dir", "finalize_args", "get_logger", "hf_pinned", "read_json", "select_device",
     "setup_torch", "sha256_file", "timed", "write_json",
     # run dirs, loaders, artifacts
@@ -433,7 +433,7 @@ def load_module_or_state(path: Path, *, builder=None, device="cpu"):
     return obj.to(device).eval()
 
 
-# released weights by name: (HF repo, file), loaded at the revision pinned in scripts/hf_manifest.json
+# released weights by name: (HF repo, file), loaded at the revision pinned in scripts/config/hf_manifest.json
 RELEASED = {
     "autoencoder": ("neurovlm/NeuroAutoEncoder", "autoencoder.safetensors"),
     "proj_head_text_infonce": ("neurovlm/ProjectionHeads", "proj_head_text_infonce.safetensors"),

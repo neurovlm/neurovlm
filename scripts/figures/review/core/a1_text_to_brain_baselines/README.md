@@ -8,7 +8,7 @@
 pinned HF data (`_hf_pins.py`), leakage exclusions (`scripts/eval_exclusions/`). External baselines: Neurosynth v7 (NiMARE, `~/nimare_data`), NeuroQuery
 (`fetch_neuroquery_model`), Harvard-Oxford atlas (nilearn), Text2Brain (below); their maps are cached in `outputs/cache/` (the Neurosynth term maps are reused by the a6_* analyses).
 **Text2Brain** (Ngo et al., MICCAI 2021): the released checkpoint (Google Drive, sha256 `08e8af9a...`) and the upstream source (github.com/ngohgia/text2brain @ 6f29389, MIT)
-are mirrored on `neurovlm/text2brain-mirror` (built by `mirror_text2brain.py`) and pinned in `scripts/hf_manifest.json` with SciBERT (`allenai/scibert_scivocab_uncased`; the checkpoint replaces every weight).
+are mirrored on `neurovlm/text2brain-mirror` (built by `mirror_text2brain.py`) and pinned in `scripts/config/hf_manifest.json` with SciBERT (`allenai/scibert_scivocab_uncased`; the checkpoint replaces every weight).
 `text2brain/` is the upstream model code with two fixes for transformers 4.x: the encoder is called with `return_dict=False` (otherwise `_, embedding = ...` unpacks
 the output's key names), and `_text2brain.py` drops the checkpoint key `encoder.embeddings.position_ids` (an `arange(512)` buffer no longer saved) before the strict load.
 Inputs follow the model's device instead of CUDA whenever a GPU is visible; maps are computed on the CPU (`--t2b-device`), one text at a time with "/" removed, as

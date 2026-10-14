@@ -9,7 +9,7 @@ from typing import Sequence
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # scripts/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))  # scripts/pipeline/
 from common import data_dir, hf_manifest  # noqa: E402
 
 SPECTER_REPOS = ("allenai/specter2_aug2023refresh_base", "allenai/specter2_aug2023refresh_adhoc_query")
@@ -76,7 +76,7 @@ def hf_cache_pinned(*repos: str, group: str = "regenerate") -> None:
     for repo in repos:
         rows = [e for e in hf_manifest()["files"] if e["repo"] == repo and e.get("hf_cache") and group in e["groups"]]
         if not rows:
-            bad.append(f"{repo}: no {group} entry in scripts/hf_manifest.json")
+            bad.append(f"{repo}: no {group} entry in scripts/config/hf_manifest.json")
         for e in rows:
             ref = Path(HF_HUB_CACHE) / f"{e['repo_type']}s--{repo.replace('/', '--')}" / "refs" / e["ref"]
             cur = ref.read_text().strip() if ref.exists() else None

@@ -13,7 +13,7 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # scripts/
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))  # scripts/pipeline/
 from common import (  # noqa: E402,F401  (some names are only re-exported for the fig scripts)
     DEFAULT_OUT_ROOT,
     FIG_FULL_W,
@@ -80,7 +80,7 @@ def fig_parser(description: str):
     p.add_argument("--paper", action="store_true", help="Also copy the PNG into paper/figures/.")
     p.add_argument("--released", action="store_true", help="Use the released weights (output: released/).")
     p.add_argument("--model-dir", type=Path, default=DEFAULT_RUN,
-                   help="Run directory of scripts/train_pipeline.py; missing checkpoints fall back to the released ones.")
+                   help="Run directory of scripts/pipeline/train_pipeline.py; missing checkpoints fall back to the released ones.")
     p.add_argument("--cache-dir", type=Path, default=CACHE_DIR, help="Panel-data cache.")
     p.add_argument("--n-jobs", type=int, default=min(8, os.cpu_count() or 1), help="CPU workers.")
     p.add_argument("--font-size", type=float, default=7.0, help="Smallest text size in pt.")
@@ -111,7 +111,7 @@ def finalize(args):
     if args.released:
         args.model_dir = None
     elif not Path(args.model_dir).is_dir():
-        raise FileNotFoundError(f"--model-dir {args.model_dir} is not a directory (train it with scripts/train_pipeline.py "
+        raise FileNotFoundError(f"--model-dir {args.model_dir} is not a directory (train it with scripts/pipeline/train_pipeline.py "
                                 "or pass --released)")
     out_given = args.out is not None
     args.out = args.out or FIG_OUT
@@ -376,7 +376,7 @@ def hf_cache_pinned(*repos: str, group: str = "figures") -> None:
     for repo in repos or LIBRARY_REPOS:
         rows = [e for e in hf_manifest()["files"] if e["repo"] == repo and e.get("hf_cache") and group in e["groups"]]
         if not rows:
-            bad.append(f"{repo}: no {group} entry in scripts/hf_manifest.json")
+            bad.append(f"{repo}: no {group} entry in scripts/config/hf_manifest.json")
         for e in rows:
             ref = Path(HF_HUB_CACHE) / f"{e['repo_type']}s--{repo.replace('/', '--')}" / "refs" / e["ref"]
             cur = ref.read_text().strip() if ref.exists() else None
@@ -415,7 +415,7 @@ def load_masker():
 
 def load_component(name: str, model_dir: Path | None = None, log=None):
     """One trained component from the run dir (whole-module .pt, state-dict .pt or .safetensors), else the released one
-    (at the revision pinned in scripts/hf_manifest.json)."""
+    (at the revision pinned in scripts/config/hf_manifest.json)."""
     import torch
 
     path = run_file(model_dir, name) if name in OVERRIDABLE else None

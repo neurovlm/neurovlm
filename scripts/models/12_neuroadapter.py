@@ -5,7 +5,7 @@ the synthetic anatomy pairs of stage 11 (docs/03_models/12_neuroadapter.ipynb).
     .venv/bin/python scripts/models/12_neuroadapter.py --run-name <run> [--smoke]
 
 --recipe anchored (default) adds head v2's loss on PubMed training pairs and keeps the epoch with the best PubMed
-validation recall AUC (scripts/README.md, "Anatomical head v2"); --recipe notebook is the notebook recipe.
+validation recall AUC (scripts/models/README.md, "Anatomical head v2"); --recipe notebook is the notebook recipe.
 Writes adapter_anat_full.{pt,safetensors} and adapter_anat_full.lineage.json (+ the cell-10 exports with --derivatives).
 """
 from __future__ import annotations

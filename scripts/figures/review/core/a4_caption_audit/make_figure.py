@@ -19,7 +19,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[3]))
+sys.path.insert(0, str(HERE.parents[3] / "pipeline"))
 from common import FIG_LETTER_W  # noqa: E402  response letter text width (6.5 in)
 BLUE, GRAY = "#2a78d6", "#898781"  # blue = the paper's input (title + abstract), gray = everything else
 INK, INK2, GRID, AXIS = "#0b0b0b", "#52514e", "#e1e0d9", "#c3c2b7"

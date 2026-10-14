@@ -1,13 +1,13 @@
 name: Pipeline smoke test
 
-# Runs scripts/smoke_pipeline.sh on CPU: stage 00 (NeuroQwen DAPT, one step) and every stage of scripts/train_pipeline.py
-# (08, 09, 20 fold 0, 11, 12, 13, 14) for one epoch of one batch on 64 samples, and reports coverage of the
-# reproduction code (.coveragerc). Full training takes hours on a GPU, so CI checks that the pipeline runs end to end,
-# not its numbers. Environment: CPython 3.12.12, scripts/requirements.lock with the CPU build of torch.
-# Inputs (no secrets, public downloads only): the train/ files of scripts/hf_manifest.json (about 8 GB), fetched from
-# the public Hugging Face repos at their pinned revisions and checked against their sha256, and the AAL atlas (checked
-# by sha256). Both are cached under a key on scripts/hf_manifest.json. The coverage report is uploaded as the
-# artifact coverage-smoke.
+# Runs scripts/pipeline/smoke_pipeline.sh on CPU: stage 00 (NeuroQwen DAPT, one step) and every stage of
+# scripts/pipeline/train_pipeline.py (08, 09, 20 fold 0, 11, 12, 13, 14) for one epoch of one batch on 64 samples, and
+# reports coverage of the reproduction code (.coveragerc). Full training takes hours on a GPU, so CI checks that the
+# pipeline runs end to end, not its numbers. Environment: CPython 3.12.12, scripts/config/requirements.lock with the
+# CPU build of torch. Inputs (no secrets, public downloads only): the train/ files of scripts/config/hf_manifest.json
+# (about 8 GB), fetched from the public Hugging Face repos at their pinned revisions and checked against their sha256,
+# and the AAL atlas (checked by sha256). Both are cached under a key on scripts/config/hf_manifest.json. The coverage
+# report is uploaded as the artifact coverage-smoke.
 
 on:
   push:
@@ -61,13 +61,13 @@ jobs:
           version: "0.9.26"
           enable-cache: true
           cache-dependency-glob: |
-            scripts/requirements.lock
+            scripts/config/requirements.lock
             pyproject.toml
 
-      - name: Environment (scripts/requirements.lock with the CPU build of torch)
+      - name: Environment (scripts/config/requirements.lock with the CPU build of torch)
         run: |
           uv venv .venv --python 3.12.12
-          grep -vE '^(nvidia-|cuda-|triton==)' scripts/requirements.lock > "$RUNNER_TEMP/requirements-cpu.txt"
+          grep -vE '^(nvidia-|cuda-|triton==)' scripts/config/requirements.lock > "$RUNNER_TEMP/requirements-cpu.txt"
           uv pip install --python .venv/bin/python --torch-backend cpu -r "$RUNNER_TEMP/requirements-cpu.txt" -e ".[full,test]"
           .venv/bin/python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda)"
 
@@ -78,7 +78,7 @@ jobs:
           path: |
             ~/.cache/huggingface/hub
             ~/nilearn_data/aal_SPM12
-          key: smoke-inputs-${{ runner.os }}-${{ hashFiles('scripts/hf_manifest.json') }}
+          key: smoke-inputs-${{ runner.os }}-${{ hashFiles('scripts/config/hf_manifest.json') }}
 
       - name: AAL atlas for stage 11 (checked by sha256)
         # Fallback: www.gin.cnrs.fr (the URL of nilearn.datasets.fetch_atlas_aal) does not send its intermediate
@@ -101,7 +101,7 @@ jobs:
         run: |
           .venv/bin/python - <<'PY'
           import json, os, pathlib
-          m = json.loads(pathlib.Path("scripts/hf_manifest.json").read_text())
+          m = json.loads(pathlib.Path("scripts/config/hf_manifest.json").read_text())
           m["files"] = [e for e in m["files"] if any(c.startswith("train/") for c in e.get("consumers", []))]
           pathlib.Path(os.environ["RUNNER_TEMP"], "train_manifest.json").write_text(json.dumps(m, indent=1))
           print(len(m["files"]), "files,", round(sum(e["size"] for e in m["files"]) / 1e9, 1), "GB")
@@ -115,14 +115,14 @@ jobs:
           path: |
             ~/.cache/huggingface/hub
             ~/nilearn_data/aal_SPM12
-          key: smoke-inputs-${{ runner.os }}-${{ hashFiles('scripts/hf_manifest.json') }}
+          key: smoke-inputs-${{ runner.os }}-${{ hashFiles('scripts/config/hf_manifest.json') }}
 
       - name: Smoke training on CPU (stage 00, then every train_pipeline.py stage, one epoch of one batch)
         env:
           HF_HUB_OFFLINE: "1"
           HF_DATASETS_OFFLINE: "1"
           SMOKE_COVERAGE: "1"
-        run: bash scripts/smoke_pipeline.sh --skip-data --no-validate --device cpu
+        run: bash scripts/pipeline/smoke_pipeline.sh --skip-data --no-validate --device cpu
 
       - name: Coverage of the reproduction code
         if: always()

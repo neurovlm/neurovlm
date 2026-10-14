@@ -25,7 +25,7 @@ import torch.nn.functional as F
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[4]
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(REPO / "scripts"))
+sys.path.insert(0, str(REPO / "scripts" / "pipeline"))
 from _baselines import NeuroQueryTextToMap, NeurosynthTextToMap  # noqa: E402
 from _text2brain import MIRROR, WEIGHTS, Text2BrainTextToMap  # noqa: E402
 from common import apply_pubmed_exclusions  # noqa: E402
@@ -147,7 +147,7 @@ REGION_RE = [(re.compile(r"(" + rx + r")" + REGION_TRAIL), parts.split()) for _,
 
 
 def deranged_indices(n: int, rng: np.random.Generator) -> np.ndarray:
-    """Permutation without fixed points (copy of scripts/validate_models.py)."""
+    """Permutation without fixed points (copy of scripts/pipeline/validate_models.py)."""
     perm = rng.permutation(n)
     fixed = np.flatnonzero(perm == np.arange(n))
     if len(fixed) > 1:

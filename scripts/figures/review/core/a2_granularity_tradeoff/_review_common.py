@@ -14,7 +14,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[5]
-PAPER_TEMP = 0.035  # canonical projection temperature (scripts/validate_models.py::eval_qformer)
+PAPER_TEMP = 0.035  # canonical projection temperature (scripts/pipeline/validate_models.py::eval_qformer)
 BASES = ("network", "region", "function")
 
 # caption cleanup as scripts/models/_common_models.py (validate_models.py)
@@ -566,7 +566,7 @@ def env_packages(names: Sequence[str] = ("torch", "transformers", "sentence_tran
     return out
 
 
-# --model-dir: the run directory (scripts/train_pipeline.py layout) holding every trained component. SPECTER2 and
+# --model-dir: the run directory (scripts/pipeline/train_pipeline.py layout) holding every trained component. SPECTER2 and
 # NeuroQwen3-0.6B are frozen: always the released ones.
 DEFAULT_MODEL_DIR = REPO / "scripts" / "outputs" / "runs" / "final"
 RUN_FILES = {

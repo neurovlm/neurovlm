@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 """Score retrained NeuroVLM components with the paper's metrics and compare them with the released checkpoints.
 
-    python scripts/validate_models.py --released                        # reference numbers for the HF checkpoints
-    python scripts/validate_models.py --run scripts/outputs/runs/final  # retrained run vs the reference
-    python scripts/validate_models.py --run ... --components ae,heads --max-samples 64   # smoke
+    python scripts/pipeline/validate_models.py --released                        # reference numbers for the HF checkpoints
+    python scripts/pipeline/validate_models.py --run scripts/outputs/runs/final  # retrained run vs the reference
+    python scripts/pipeline/validate_models.py --run ... --components ae,heads --max-samples 64   # smoke
 
 Components: ae (autoencoder), heads (InfoNCE retrieval), networks (network classification), text_to_brain
 (proj_head_text_mse + decoder), adapter (NeuroAdapter), qformer / qformer_pubmed (stage 2 / stage 1 brain-to-text
 projector, MLP or Q-Former), cv (5-fold CV models). The leakage-audit items in scripts/eval_exclusions/ are dropped
 unless --no-exclusions. Writes scripts/outputs/validation/<name>/{metrics.json,report.md}; the released reference is
 computed once into validation/released[_excl][_n<N>]/ and reused. Released weights, data and the scoring models (BERTScore,
-MiniLM) are read at the revisions pinned in scripts/hf_manifest.json; metrics.json["provenance"] records them with the
+MiniLM) are read at the revisions pinned in scripts/config/hf_manifest.json; metrics.json["provenance"] records them with the
 software, GPU, determinism settings and git commit. Captions are generated with Latin-script tokens only
 (_common_models.latin_script_suppress_tokens) and, after a [NETWORK] / [REGION] steering token, with a title from the
 run's stage-14 canonical names (_common_models.title_vocabulary / install_title_constraint; --free-titles turns that off);
@@ -30,8 +30,8 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))             # scripts/
-sys.path.insert(0, str(Path(__file__).resolve().parent / "models"))  # scripts/models/
+sys.path.insert(0, str(Path(__file__).resolve().parent))                 # scripts/pipeline/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "models"))  # scripts/models/
 from common import (DEFAULT_OUT_ROOT, EVAL_EXCLUSIONS_DIR, apply_neurovault_exclusions, apply_pubmed_exclusions, data_dir,  # noqa: E402
                     get_logger, hf_pinned, hf_pinned_dir, hf_split_pmids, provenance, read_json, select_device, setup_torch, timed,
                     write_json)

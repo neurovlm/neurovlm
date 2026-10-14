@@ -29,7 +29,7 @@ EXCLUSIONS_DIR = REPO / "scripts" / "eval_exclusions"
 
 
 def hf_file(repo_id: str, filename: str) -> Path:
-    """``repo_id/filename`` at the revision pinned in scripts/hf_manifest.json, sha256-checked (_hf_pins.py)."""
+    """``repo_id/filename`` at the revision pinned in scripts/config/hf_manifest.json, sha256-checked (_hf_pins.py)."""
     from _hf_pins import hf_file as pinned
 
     return pinned(repo_id, filename)

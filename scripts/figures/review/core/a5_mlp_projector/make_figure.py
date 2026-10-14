@@ -17,7 +17,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[4]
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(REPO / "scripts"))
+sys.path.insert(0, str(REPO / "scripts" / "pipeline"))
 from _a5_common import NEUTRAL, PALETTE, apply_style, read_json, save_fig, write_table  # noqa: E402
 from common import FIG_FULL_W, FIG_LETTER_W, PAPER_FIG_DIR  # noqa: E402  paper (5.15 in) and response letter (6.5 in) text widths
 

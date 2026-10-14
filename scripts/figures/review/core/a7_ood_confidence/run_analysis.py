@@ -320,7 +320,7 @@ def main(argv=None) -> int:
 
     # models + training reference
     ae, ih, th, t2b = (load_run_module(run, n) for n in ("autoencoder", "proj_head_image_infonce", "proj_head_text_infonce", "proj_head_text_mse"))
-    t2b_factor = json.loads((run / "map_calibration.json").read_text())["head"]  # global map calibration (scripts/README.md)
+    t2b_factor = json.loads((run / "map_calibration.json").read_text())["head"]  # global map calibration (scripts/models/README.md)
     specter = load_model("specter").to("cpu")
     split = torch.load(run / "pmids_split.pt", weights_only=False)
     split = {k: np.asarray(split[k]).astype(np.int64) for k in ("train", "val", "test")}

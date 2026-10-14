@@ -1,5 +1,5 @@
 {
- "about": "Primary (PASS/FAIL) validation metrics of runs/final (the revision's paper model) and of the released checkpoints, PubMed test n = 2,971 with the leakage-audit exclusions, maps calibrated (max). scripts/verify_reproduction.py compares a reproduction's validate_models.py metrics.json against 'final'.",
+ "about": "Primary (PASS/FAIL) validation metrics of runs/final (the revision's paper model) and of the released checkpoints, PubMed test n = 2,971 with the leakage-audit exclusions, maps calibrated (max). scripts/pipeline/verify_reproduction.py compares a reproduction's validate_models.py metrics.json against 'final'.",
  "sources": {
   "final": "scripts/outputs/validation/final/metrics.json (validate_models.py --run scripts/outputs/runs/final, 2026-10-13T03:12:01; Latin-script captions, canonical [NETWORK] / [REGION] titles; generated maps calibrated by the global factor of runs/final/map_calibration.json)",
   "released": "scripts/outputs/validation/final/released_reference/metrics.json (= validation/released_excl, with text_to_brain and the adapter rescored with --map-calibration global and the released models' own factors, scripts/outputs/released_map_calibration.json; the reference runs/final is validated against, 2026-10-13T03:16)",

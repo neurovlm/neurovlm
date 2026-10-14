@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-"""Compare a reproduction's validation metrics with the revision's numbers (scripts/reference_metrics.json).
+"""Compare a reproduction's validation metrics with the revision's numbers (scripts/config/reference_metrics.json).
 
-    .venv/bin/python scripts/verify_reproduction.py --name repro                       # validation/repro/metrics.json
-    .venv/bin/python scripts/verify_reproduction.py --metrics path/to/metrics.json --figures-dir scripts/figures/main/repro
+    .venv/bin/python scripts/pipeline/verify_reproduction.py --name repro                       # validation/repro/metrics.json
+    .venv/bin/python scripts/pipeline/verify_reproduction.py --metrics path/to/metrics.json --figures-dir scripts/figures/main/repro
 
 Every stage trains with deterministic kernels (common.setup_torch), so every primary (PASS/FAIL) metric of
 validate_models.py must equal the same metric of runs/final: "exact" = |delta| <= --tol (1e-4), else FAIL. This holds on
@@ -21,7 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-SCRIPTS_DIR = Path(__file__).resolve().parent
+SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 FIG_STEMS = ["fig2_network_examples", "fig3_newgen", "fig4_generative_metrics", "fig5_perf_quant", "fig6_autoencoder_qual",
              "figS2_difumo_v_ale", "figS3_recall_comparison", "figS4_clip_ica", "figS4_clip_ica_p2"]  # every page, as drawn
 
@@ -106,7 +106,7 @@ def main(argv=None):
     g.add_argument("--write-released-reference", type=Path, metavar="PATH",
                    help="Only write the released column of --reference as a validate_models.py --reference file and exit "
                         "(so a new machine need not re-evaluate the released checkpoints).")
-    p.add_argument("--reference", type=Path, default=SCRIPTS_DIR / "reference_metrics.json")
+    p.add_argument("--reference", type=Path, default=SCRIPTS_DIR / "config" / "reference_metrics.json")
     p.add_argument("--figures-dir", type=Path, default=None, help="make_all.py output dir to list (e.g. scripts/figures/main/<run>).")
     p.add_argument("--since", type=float, default=None, help="Epoch seconds; figures older than this are flagged as not regenerated.")
     p.add_argument("--tol", "--det-tol", dest="tol", type=float, default=1e-4, help="Largest |delta| that counts as exact.")

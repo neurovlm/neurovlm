@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # One-command reproduction of the NeuroVLM revision: locked environment -> data inputs from Hugging Face -> training ->
-# validation -> paper figures -> comparison with the revision's numbers (scripts/reference_metrics.json). Run from anywhere.
+# validation -> paper figures -> comparison with the revision's numbers (scripts/config/reference_metrics.json).
+# Run from anywhere.
 #
-#   bash scripts/reproduce.sh                              # all five CV folds, ~3 h on one RTX 5090 (plus the first download)
-#   bash scripts/reproduce.sh --cv-folds 0                 # one CV fold, ~2.5 h
-#   bash scripts/reproduce.sh --smoke                      # every stage tiny (~5 min), code path only
-#   bash scripts/reproduce.sh --home /scratch/nvlm_home    # isolated data dir (keep an existing ~/.cache/neurovlm untouched)
+#   bash scripts/pipeline/reproduce.sh                    # all five CV folds, ~2.5 h on one RTX 5090 (plus the download)
+#   bash scripts/pipeline/reproduce.sh --cv-folds 0       # one CV fold, ~2 h
+#   bash scripts/pipeline/reproduce.sh --smoke            # every stage tiny (~5 min), code path only
+#   bash scripts/pipeline/reproduce.sh --home DIR         # isolated data dir (an existing ~/.cache/neurovlm stays untouched)
 #
 # Data: scripts/data/fetch_hf.py downloads every input verbatim from the Hugging Face org neurovlm (and the third-party
-# models) at the commits pinned in scripts/hf_manifest.json and checks each sha256 (~23 GB on first use). A file already
-# in the data dir that differs from the pinned one stops the run; replace it with fetch_hf.py --overwrite.
+# models) at the commits pinned in scripts/config/hf_manifest.json and checks each sha256 (~23 GB on first use). A file
+# already in the data dir that differs from the pinned one stops the run; replace it with fetch_hf.py --overwrite.
 #
 # Options
 #   --external-dir DIR  optional local copies, linked into the data dir when missing there before the fetch (they must
@@ -21,13 +22,14 @@
 #   --data MODE         released (default, the only training input): the pinned HF files. scratch: also rerun data stages
 #                       01-07 into scripts/outputs/data_regenerated/ for provenance (run_all.py --regenerate); training
 #                       still uses the released inputs.
-#   --run-name NAME     run directory scripts/outputs/runs/NAME, validation NAME, figures scripts/figures/main/NAME (default: repro)
+#   --run-name NAME     run directory scripts/outputs/runs/NAME, validation NAME, figures scripts/figures/main/NAME
+#                       (default: repro). final: the model the response analyses read, figures in scripts/figures/main/
 #   --cv-folds LIST     CV folds that stage 20 trains and validate_models.py evaluates (default 0,1,2,3,4; ~9 min per fold
 #                       on one RTX 5090). The comparison takes fold 0 alone (vs fold 0 of runs/final) or all five (vs the
 #                       5-fold mean); Fig. 5a needs all five, else it draws the single-split model.
 #   --full              same as --cv-folds 0,1,2,3,4 (the default)
-#   --smoke             scripts/smoke_pipeline.sh + figure previews on 64 samples, fold 0 only; FAILs of the comparison are
-#                       expected
+#   --smoke             scripts/pipeline/smoke_pipeline.sh + figure previews on 64 samples, fold 0 only; FAILs of the
+#                       comparison are expected
 #   --offline           HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 (the HF cache must already hold every model and dataset)
 #   --device DEV        cuda (default), cpu
 #   --seeds-14 LIST     stage-14 seeds; the lowest validation loss is packaged (default 1,2,3,4,5, the paper model's recipe)
@@ -35,7 +37,7 @@
 # Steps are resumable: the fetch skips verified files, model stages skip outputs that exist (delete the run directory to retrain).
 # Logs and per-step wall times: scripts/outputs/reproduce/<run>/.
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."  # repository root
 ROOT=$(pwd)
 
 RUN=repro CV_FOLDS=0,1,2,3,4 SMOKE=0 OFFLINE=0 DEVICE=cuda SEEDS14=1,2,3,4,5 NEW_HOME="" DATA_MODE=released
@@ -58,7 +60,7 @@ while [ $# -gt 0 ]; do
     --skip-train) SKIP_TRAIN=1; shift ;;
     --skip-validate) SKIP_VALIDATE=1; shift ;;
     --skip-figures) SKIP_FIGURES=1; shift ;;
-    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
     *) echo "unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -81,18 +83,18 @@ step() {  # step <name> <command...>: run, tee the output to $LOGDIR/<name>.log,
   return $rc
 }
 
-# 1. environment: CPython 3.12.12 + the exact package set of scripts/requirements.lock
+# 1. environment: CPython 3.12.12 + the exact package set of scripts/config/requirements.lock
 PY="$ROOT/.venv/bin/python"
 if [ "$SKIP_ENV" = 0 ]; then
   command -v uv >/dev/null || { echo "uv not found; install it: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2; exit 1; }
   if [ ! -x "$PY" ]; then
     step env_create uv venv "$ROOT/.venv" --python 3.12.12
-    step env_install uv pip install --python "$PY" -r scripts/requirements.lock -e ".[full,test]"
+    step env_install uv pip install --python "$PY" -r scripts/config/requirements.lock -e ".[full,test]"
   fi
-  if diff <(grep -v '^#' scripts/requirements.lock) <(uv pip freeze --python "$PY" | grep -v '^-e ') > "$LOGDIR/freeze.diff"; then
-    log "environment matches scripts/requirements.lock"
+  if diff <(grep -v '^#' scripts/config/requirements.lock) <(uv pip freeze --python "$PY" | grep -v '^-e ') > "$LOGDIR/freeze.diff"; then
+    log "environment matches scripts/config/requirements.lock"
   else
-    log "WARNING: .venv differs from scripts/requirements.lock (see $LOGDIR/freeze.diff); remove .venv to rebuild it"
+    log "WARNING: .venv differs from scripts/config/requirements.lock (see $LOGDIR/freeze.diff); remove .venv to rebuild it"
   fi
 fi
 [ -x "$PY" ] || { echo "$PY missing (drop --skip-env)" >&2; exit 1; }
@@ -128,7 +130,7 @@ if [ -n "$EXTERNAL" ]; then  # optional local copies; fetch_hf.py below checks t
   fi
 fi
 
-# 3. data: every input verbatim from Hugging Face at the commits pinned in scripts/hf_manifest.json, sha256 checked
+# 3. data: every input verbatim from Hugging Face at the commits pinned in scripts/config/hf_manifest.json, sha256 checked
 # (neuro_vectors.pt = embedded_text/pubmed_images.pt, latent_specter2_adhoc.pt, synth.parquet, the NeuroVault scrape, ...).
 # A file in the data dir that differs from the pinned one stops the run: fetch_hf.py --overwrite replaces it.
 # --data scratch also reruns data stages 01-07 into scripts/outputs/data_regenerated/ (provenance; not used for training).
@@ -151,13 +153,13 @@ prefetch_atlases() {  # Fig. 4's parallel spin-test workers race on the first ne
 
 # 3-6. smoke: every stage tiny, figure previews (no review step: Fig. 5b's a3 input is not computed for smoke models)
 if [ "$SMOKE" = 1 ]; then
-  step smoke_pipeline bash scripts/smoke_pipeline.sh --device "$DEVICE" || log "smoke pipeline exit != 0 (validation FAILs on 64 samples are expected; check for tracebacks)"
-  step smoke_validate "$PY" scripts/validate_models.py --run scripts/outputs/runs/smoke --name smoke_all --max-samples 64 --folds "$CV_FOLDS" \
+  step smoke_pipeline bash scripts/pipeline/smoke_pipeline.sh --device "$DEVICE" || log "smoke pipeline exit != 0 (validation FAILs on 64 samples are expected; check for tracebacks)"
+  step smoke_validate "$PY" scripts/pipeline/validate_models.py --run scripts/outputs/runs/smoke --name smoke_all --max-samples 64 --folds "$CV_FOLDS" \
     --device "$DEVICE" --generation-batch 64 || true
   [ "$SKIP_FIGURES" = 1 ] || prefetch_atlases
   [ "$SKIP_FIGURES" = 1 ] || step smoke_figures "$PY" scripts/figures/main/make_all.py --model-dir scripts/outputs/runs/smoke \
     --max-samples 64 --continue-on-error --device "$DEVICE" || true
-  "$PY" scripts/verify_reproduction.py --name smoke_all --figures-dir scripts/figures/main/smoke/preview_n64 --since "$T_START" \
+  "$PY" scripts/pipeline/verify_reproduction.py --name smoke_all --figures-dir scripts/figures/main/smoke/preview_n64 --since "$T_START" \
     | tee "$LOGDIR/verify.log" || true
   log "smoke done in $(( $(date +%s) - T_START ))s (metrics of 1-epoch models FAIL by design; tracebacks would mean a broken path)"
   exit 0
@@ -166,15 +168,15 @@ fi
 # 4. training: 08 09 11 12 13 14 (stage 14: one run per seed, best validation loss packaged), then the CV stage 20 on
 # --cv-folds (folds already in the run directory are kept)
 if [ "$SKIP_TRAIN" = 0 ]; then
-  step train_models "$PY" scripts/train_pipeline.py --run-name "$RUN" --stages models --seeds-14 "$SEEDS14" --skip-data --no-validate --device "$DEVICE"
-  step train_cv "$PY" scripts/train_pipeline.py --run-name "$RUN" --only 20 --stage-args "--folds $CV_FOLDS" --skip-data --no-validate --device "$DEVICE"
+  step train_models "$PY" scripts/pipeline/train_pipeline.py --run-name "$RUN" --stages models --seeds-14 "$SEEDS14" --skip-data --no-validate --device "$DEVICE"
+  step train_cv "$PY" scripts/pipeline/train_pipeline.py --run-name "$RUN" --only 20 --stage-args "--folds $CV_FOLDS" --skip-data --no-validate --device "$DEVICE"
 fi
 
 # 5. validation (PubMed test with the leakage-audit exclusions) against the released numbers of reference_metrics.json
 REF="scripts/outputs/validation/released_reference/metrics.json"
 if [ "$SKIP_VALIDATE" = 0 ]; then
-  [ -e "$REF" ] || "$PY" scripts/verify_reproduction.py --write-released-reference "$REF"
-  step validate "$PY" scripts/validate_models.py --run "scripts/outputs/runs/$RUN" --name "$RUN" --reference "$REF" \
+  [ -e "$REF" ] || "$PY" scripts/pipeline/verify_reproduction.py --write-released-reference "$REF"
+  step validate "$PY" scripts/pipeline/validate_models.py --run "scripts/outputs/runs/$RUN" --name "$RUN" --reference "$REF" \
     --folds "$CV_FOLDS" --generation-batch 128 --device "$DEVICE" || log "validate_models.py reports a FAIL vs the released checkpoints"
 fi
 
@@ -183,6 +185,7 @@ fi
 # runs it for runs/final only and into the committed outputs, so it runs here with run_all.sh's flags into $LOGDIR.
 # Without the NeuroVault inputs, or if it fails, Fig. 5 is drawn as a, c, d.
 FIG_DIR="scripts/figures/main/$RUN"
+[ "$RUN" = final ] && FIG_DIR="scripts/figures/main"  # make_all.py draws runs/final next to the figure scripts
 A3_OUT="$LOGDIR/a3_neurovault_bounds"
 if [ "$SKIP_FIGURES" = 0 ]; then
   prefetch_atlases
@@ -206,6 +209,6 @@ fi
 
 # 7. comparison with runs/final
 rc=0
-"$PY" scripts/verify_reproduction.py --name "$RUN" --figures-dir "$FIG_DIR" --since "$T_START" | tee "$LOGDIR/verify.log" || rc=${PIPESTATUS[0]}
+"$PY" scripts/pipeline/verify_reproduction.py --name "$RUN" --figures-dir "$FIG_DIR" --since "$T_START" | tee "$LOGDIR/verify.log" || rc=${PIPESTATUS[0]}
 log "done in $(( $(date +%s) - T_START ))s; step times in $TIMINGS"
 exit $rc

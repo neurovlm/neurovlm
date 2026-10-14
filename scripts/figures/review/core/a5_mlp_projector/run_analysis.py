@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Residual-MLP projectors vs the released PubMed Q-Former for brain-to-text (reviewer 2.1, plan item O7).
 
-Training = scripts/models/13 with the projector swapped; evaluation = the qformer_pubmed component of scripts/validate_models.py.
+Training = scripts/models/13 with the projector swapped; evaluation = the qformer_pubmed component of scripts/pipeline/validate_models.py.
 Usage: run_analysis.py --variants mlp_m --device cuda   (GPU queue: run_variants.sh; smoke: --smoke --device cpu)
 """
 from __future__ import annotations
@@ -48,7 +48,7 @@ MAX_TOKENS, TRAIN_BATCH, EVAL_BATCH = 192, 32, 32
 EPOCHS, PEAK_LR, MIN_LR, WARMUP_FRAC = 30, 3e-4, 3e-5, 0.05
 ALIGN_WEIGHT, TOKEN_SPACE_WEIGHT, WEIGHT_DECAY = 0.35, 0.03, 0.03
 NUM_QUERIES, QF_HIDDEN, DROPOUT = 32, 512, 0.05
-# scripts/validate_models.py qformer_pubmed decoding
+# scripts/pipeline/validate_models.py qformer_pubmed decoding
 GEN_KW = dict(max_new_tokens=128, num_beams=1, do_sample=False, repetition_penalty=1.25, no_repeat_ngram_size=4)
 VALIDATOR_GEN_BATCH, VALIDATOR_ENCODE_BATCH, VALIDATOR_TEXT_BATCH = 512, 512, 32
 GPU_REF = {"steps_per_epoch": 704, "val_batches": 89}  # full 13 run, for the runtime extrapolation

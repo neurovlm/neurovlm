@@ -61,22 +61,31 @@ Generate coverage:
 pytest --cov=neurovlm --cov-report=term-missing
 ```
 
-## Verify training and notebooks after a refactor
+## Reproduction smoke test
 
-Two convenience scripts double-check the parts pytest's fast suite doesn't
-reach on its own:
+The paper's training pipeline has its own smoke test outside `tests/`: every stage for
+one batch on CPU, from the pinned Hugging Face inputs. CI runs it in
+`.github/workflows/smoke.yml`; see `scripts/README.md`, "Tests and CI".
 
 ```bash
-scripts/smoke_training.sh     # every training pipeline, real 1-epoch runs on tiny synthetic CPU data (~15s)
-scripts/smoke_notebooks.sh    # every notebook, executed end-to-end against real cached data (public|experimental|figures|all)
+.venv/bin/python scripts/data/fetch_hf.py --only pipeline   # pinned inputs, sha256-checked
+bash scripts/pipeline/smoke_pipeline.sh --device cpu          # ~5 min
 ```
 
-`smoke_training.sh` just runs `tests/integration/training` — already part of
-the default `pytest` run, but useful as a single fast command to point at
-after a refactor.
+## Verify training and notebooks after a refactor
 
-`smoke_notebooks.sh` is different: it's **not** part of the default `pytest`
-collection filter, requires network access and the same local
+Two commands double-check the parts pytest's fast suite doesn't reach on its own:
+
+```bash
+python -m pytest tests/integration/training -v   # every training pipeline, real 1-epoch runs on tiny synthetic CPU data (~15s)
+python -m pytest tests/notebooks -v              # every notebook, executed end-to-end against real cached data
+```
+
+The training integration tests are already part of the default `pytest` run;
+the first command is a single fast check to point at after a refactor.
+
+The notebook smoke tests are different: they are **not** part of the default `pytest`
+collection filter, require network access and the same local
 data/model cache the notebooks themselves use (`neurovlm.data.fetch_data`),
 and can take significant wall time (some figure-reproduction notebooks
 legitimately run for tens of minutes even at smoke scale). Every notebook
@@ -86,13 +95,13 @@ original notebook's directory with `NEUROVLM_SMOKE=1`, which caps training to a
 single epoch over a couple of batches (see `tests/notebooks/smoke_bootstrap.py`)
 so real data/model code paths get exercised in seconds instead of hours. This
 proves the notebook's code still runs after a refactor; it does not validate
-numerical quality.
+numerical quality. `-k` selects a subset: `-k "01_tutorials or 02_data or 03_models"`
+(public docs), `-k experimental`, `-k figures`, or one notebook, `-k 00_quickstart`.
 
-To test a specific notebook, use `scripts/smoke_notebooks.sh -k 00_quickstart`.
-To only generate its Python script, run:
+To only generate a notebook's Python script, run:
 
 ```bash
-python scripts/export_notebook.py docs/01_tutorials/00_quickstart.ipynb
+python tests/notebooks/export_notebook.py docs/01_tutorials/00_quickstart.ipynb
 ```
 
 Exports go to Git-ignored `docs/generated/notebooks/` by default; `-o` chooses

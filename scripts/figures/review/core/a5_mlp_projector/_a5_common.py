@@ -95,7 +95,7 @@ def sha_key(*parts: Any) -> str:
 
 
 def setup_torch(seed: int) -> None:
-    """Seeds + the CUDA speed flags of scripts/common.py::setup_torch (TF32, cudnn.benchmark), as in scripts/models/13."""
+    """Seeds + the CUDA speed flags of scripts/pipeline/common.py::setup_torch (TF32, cudnn.benchmark), as in scripts/models/13."""
     import torch
 
     seed_all(seed)
@@ -293,7 +293,7 @@ def match_lm_token_norm(vis, target_norm: float):
     return vis * (target / norm)
 
 
-# brain-to-text metrics (scripts/validate_models.py)
+# brain-to-text metrics (scripts/pipeline/validate_models.py)
 FABRICATION_PATTERNS = {
     "sample_size": re.compile(r"\b[nN]\s*=\s*\d+|\b\d+\s+(?:participants|subjects|patients|healthy|volunteers|adults|children)\b"),
     "p_value": re.compile(r"\bp\s*[<=>]\s*0?\.\d+|\bp\s*[<=>]\s*\d\.\d+e-\d+", re.IGNORECASE),
@@ -319,7 +319,7 @@ def deranged_indices(n: int, rng: np.random.Generator) -> np.ndarray:
 
 
 def validity_checks(texts: Sequence[str]) -> dict:
-    """Output-validity checks of scripts/validate_models.py: degenerate, duplicated, fabricated specifics."""
+    """Output-validity checks of scripts/pipeline/validate_models.py: degenerate, duplicated, fabricated specifics."""
     stripped = [re.sub(r"^\s*\[[A-Z]+\]\s*", "", str(t)) for t in texts]
     stripped = [re.sub(r"\s+", " ", t).strip() for t in stripped]
     n = max(len(stripped), 1)
