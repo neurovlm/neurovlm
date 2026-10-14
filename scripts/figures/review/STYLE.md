@@ -76,7 +76,7 @@ Sources: the author's hand edits to `response_letter.tex` (git diff), the paper 
 | test set | test PMIDs |
 | map | spatial prediction |
 | hard negatives | same domain, same-domain |
-| linear (ridge) regression, with how it differs from the projection head | ridge regression alone, when the reviewer asked for linear regression |
+| NeuroVLM (linear head) for the ridge baseline and NeuroVLM (non-linear head) for the model, with how the two heads differ | ridge regression or linear regression as a separate method |
 | settings chosen on the validation set | choosing the recipe on the validation set only, recipe |
 | calibrated (rescale only if calibration fails) | rescaled to peak at one, post hoc |
 | 1.3: NeuroVault evaluation | Reviewer 1, comment 1.3: NeuroVault evaluation |
