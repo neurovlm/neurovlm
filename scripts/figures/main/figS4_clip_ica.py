@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Fig. S4: contrastive and generative labels of UK Biobank and HCP ICA components (docs/figures/19_ica_networks.ipynb),
-both cohorts on one page. The input maps show one axial slice, or with --views xyz sagittal, coronal and axial slices
-(figS4_clip_ica_3slices).
+both cohorts on one page. The input maps show sagittal, coronal and axial slices, or with --views z one axial slice
+(figS4_clip_ica_1slice).
 
     .venv/bin/python scripts/figures/main/figS4_clip_ica.py
     .venv/bin/python scripts/figures/main/figS4_clip_ica.py --views xyz
@@ -119,7 +119,7 @@ def parse_args():
     p = fig_parser("Fig. S4: HCP / UKB ICA component labelling.")
     p.add_argument("--num-beams", type=int, default=10)
     p.add_argument("--views", choices=sorted(MAP_W), default="xyz",
-                   help="Slices of the input maps: z = one axial slice, xyz = sagittal, coronal and axial (_3slices).")
+                   help="Slices of the input maps: xyz = sagittal, coronal and axial (default), z = one axial slice (_1slice).")
     return finalize(p.parse_args())
 
 
@@ -316,7 +316,7 @@ def main():
     payload = compute(args, device)
     with timed("render", log, args.cache_dir, stage=STEM):
         fig, rows = render(args, payload)
-        finish(fig, STEM if args.views == "z" else f"{STEM}_3slices", args, log, components=COMPONENTS,
+        finish(fig, STEM if args.views == "xyz" else f"{STEM}_1slice", args, log, components=COMPONENTS,
                text_dump={"text_in_figure": "complete (no truncation)", "cohorts": rows})
 
 
