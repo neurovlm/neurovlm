@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-"""Reviewer 3.2 figure from the outputs of run_analysis.py: a) captions with study-specific details, b) retrieval vs generation
-(cosine to the paper's own text; dashed = another paper's text), c) closeness to the training texts (collapse check).
+"""Reviewer 3.3 figure (Fig. S8, granularity of generated captions) from the outputs of run_analysis.py, three square panels:
+a) captions naming a study detail, b) MiniLM cosine with the paper's own text (dashed = another paper's text),
+c) MiniLM cosine with the nearest training text (collapse check).
 
 Writes outputs/a2_granularity_tradeoff.{png,svg}. CPU, a few seconds.
 """
@@ -50,6 +51,7 @@ def boxes(ax, keys, values, width):
             bp["boxes"][0].set_facecolor(STYLE[k][1])
             bp["boxes"][0].set_edgecolor(INK if k == "real" else INK2)
     ax.set_xticks(range(len(DOMAINS)), list(DOMAINS.values()))
+    ax.set_xlim(-0.5, len(DOMAINS) - 0.5)
     ax.tick_params(axis="x", length=0)
     ax.grid(axis="x", visible=False)
 
@@ -66,8 +68,9 @@ def main() -> None:
     res = json.loads((out / "metrics.json").read_text())["results"]
     if args.paper:
         plt.rcParams["xtick.labelsize"] = 7  # PubMed and NeuroVault fit side by side
-    fig, axes = plt.subplots(1, 3, figsize=(FIG_FULL_W, 3.4) if args.paper else (FIG_LETTER_W, 3.05), layout="constrained",
-                             gridspec_kw={"width_ratios": [0.95, 1.1, 1.2] if args.paper else [1.2, 0.95, 1.1]})
+    fig, axes = plt.subplots(1, 3, figsize=(FIG_FULL_W, 2.4) if args.paper else (FIG_LETTER_W, 2.66), layout="constrained")
+    for ax in axes:
+        ax.set_box_aspect(1)  # square panels
 
     # a: share of captions with >= 1 study-specific detail (population, age group, task, sample size, ...)
     ax, keys, w = axes[0], ["retrieved", "stage1", "stage2_raw", "stage2"], 0.2
@@ -79,23 +82,23 @@ def main() -> None:
     ax.set_xticks(range(len(DOMAINS)), list(DOMAINS.values()))
     ax.tick_params(axis="x", length=0)
     ax.set_ylim(0, 70)
-    ax.set_ylabel("captions naming a study detail (%)")
-    ax.set_title("a  Study-specific\n    details", loc="left", fontweight="bold")
+    ax.set_ylabel("captions (%)")
+    ax.set_title("a  Naming a\n    study detail", loc="left", fontweight="bold")
 
-    # b: retrieval vs generation, cosine to the paper's own text; dashed = mean cosine to another paper's text
+    # b: retrieved and generated captions, cosine with the paper's own text; dashed = mean cosine with another paper's text
     ax, keys, w = axes[1], ["retrieved", "stage2"], 0.36
     boxes(ax, keys, [[per[(d, k)]["minilm_cos_truth"].to_numpy() for k in keys] for d in DOMAINS], w)
     for xs, d in zip(positions(len(keys), w), DOMAINS):
         for x, k in zip(xs, keys):
             ax.hlines(per[(d, k)]["minilm_cos_truth_null"].mean(), x - w / 2, x + w / 2, colors=INK, linestyles=(0, (2, 1.5)), lw=1.2, zorder=5)
-    ax.set_ylabel("cosine to the paper's own text")
-    ax.set_title("b  Retrieval vs\n    generation", loc="left", fontweight="bold")
+    ax.set_ylabel("MiniLM cosine")
+    ax.set_title("b  Paper's\n    own text", loc="left", fontweight="bold")
 
     # c: closeness to the training texts (collapse check)
     ax, keys = axes[2], ["stage1", "stage2_raw", "stage2", "real"]
     boxes(ax, keys, [[coll[d].loc[coll[d]["model"] == k, "nn_cos"].to_numpy() for k in keys] for d in DOMAINS], 0.19)
-    ax.set_ylabel("cosine to the nearest training text")
-    ax.set_title("c  Closeness to\n    training texts", loc="left", fontweight="bold")
+    ax.set_ylabel("MiniLM cosine")
+    ax.set_title("c  Nearest\n    training text", loc="left", fontweight="bold")
 
     handles = [Patch(facecolor=c, edgecolor=INK if k == "real" else "none", label=lab) for k, (lab, c) in STYLE.items()]
     handles.append(Line2D([], [], color=INK, ls=(0, (2, 1.5)), lw=1.2, label="another paper's text (b, null)"))

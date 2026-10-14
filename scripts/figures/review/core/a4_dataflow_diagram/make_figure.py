@@ -29,7 +29,7 @@ STYLE = {  # box kind -> (fill, edge, linestyle)
     "frozen": ("#f1f0ed", "#8a8984", "--"),
     "eval": ("#fdeee7", "#eb6834", "-"),
 }
-W, H = FIG_LETTER_W, 4.92
+W, H = FIG_LETTER_W, 5.10
 FS = 8.0  # every text (pt)
 LH = FS * 1.25 / 72  # line height (inches)
 plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"], "savefig.dpi": 300})
@@ -48,7 +48,7 @@ def main() -> None:
     args = p.parse_args()
     out, paper = args.out, args.paper
     if paper:  # 7 pt, narrower columns, long lines broken
-        W, H, FS = FIG_FULL_W, 4.52, 7.0
+        W, H, FS = FIG_FULL_W, 4.72, 7.0
         LH = FS * 1.25 / 72
     c = json.loads((out / "dataflow_counts.json").read_text())
     ex = c["eval_exclusions"]
@@ -117,8 +117,12 @@ def main() -> None:
                                                f"val {k(c['split_val'])}", f"test {k(c['split_test'])}"])
     synth = box(xs, anat["t"] + 0.08, ws, "prep", "Synthetic pairs", ["atlas regions and", "training papers:",
                                                                       f"{k(c['synth_rows'])} text–map pairs"])
-    ext = box(xs, lm["b"] - 0.1, ws, "data", "NeuroVault +\nnetwork atlases",
-              ["group maps;", f"{c['network_atlases']} atlases"] if paper else [f"group maps; {c['network_atlases']} atlases"])
+    atl = [f"{c['network_atlases']} atlases and", f"{c['network_ica_sets']} ICA sets"]
+    if not paper:
+        atl = [" ".join(atl)]
+    cur = box(xs, synth["b"] - 0.1, ws, "prep", "Curated texts",
+              [f"{k(c['qformer_canonical_rows'])} concept texts,", f"{k(c['stage2_rows_kept'])} kept"])
+    ext = box(xs, min(lm["b"], cur["b"]) - 0.1, ws, "data", "NeuroVault +\nnetwork atlases", ["group maps;"] + atl)
     ev = box(xe, L[0], we, "eval", "Held-out sets", ["never used", "for training"] if paper else ["never used for training"], h=L[0] - ext["b"])
 
     def section(top, name, lines):
@@ -142,6 +146,9 @@ def main() -> None:
     arrow([(synth["r"], anat["cy"]), (anat["l"], anat["cy"])])
     xa = pub["l"] + 0.2
     arrow([(xa, pub["b"]), (xa, synth["t"])])
+    xg = (anat["r"] + st2["l"]) / 2  # gap between the two model lanes
+    yg = (lm["t"] + st2["b"]) / 2  # gap between the language model and stage 2
+    arrow([(cur["r"], cur["cy"]), (xg, cur["cy"]), (xg, yg), (st2["l"] + 0.3, yg), (st2["l"] + 0.3, st2["b"])])
     # model -> model
     arrow([(ae["cx"], ae["b"]), (heads["cx"], heads["t"])])
     arrow([(heads["cx"], heads["b"]), (anat["cx"], anat["t"])], label="init", lpos=(heads["cx"] + 0.06, (heads["b"] + anat["t"]) / 2), lha="left")

@@ -127,7 +127,8 @@ def count_everything(timings: dict[str, float], run: Path, exclusions: bool = Tr
     c["network_maps"] = int(len(labels))
     c["network_maps_labelled"] = int((~ica).sum())
     c["network_ica_components"] = int(ica.sum())
-    c["network_atlases"] = int(labels["atlas_name"].nunique())
+    c["network_atlases"] = int(labels.loc[~ica, "atlas_name"].nunique())
+    c["network_ica_sets"] = int(labels.loc[ica, "atlas_name"].nunique())
     c["qwen_corpus_articles_model_card"] = QWEN_CORPUS_ARTICLES_MODEL_CARD
     c["qwen_dapt_records"] = QWEN_DAPT_RECORDS
     return c
