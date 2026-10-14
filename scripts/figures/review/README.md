@@ -70,6 +70,16 @@ edit, rebuild the marked copy, re-measure the line numbers on it (words of the o
 stay as `[AUTHOR: ...]` placeholders, bold in the text with a red-on-yellow note (`\authornote`) in the letter and
 red on yellow in the paper (`\authorfact`).
 
+## Overleaf export
+
+`.venv/bin/python scripts/figures/review/export_overleaf.py` copies both letters and every file they read into
+`../../../../paper/response/` (figures and the 2.12 `_parts.tex` into `figures/`, `paper/sn-article-diff.pdf` as
+`manuscript_marked.pdf`), rewrites the paths in the copied .tex files relative to that folder, removes files left from
+an earlier export and prints what it copied, without touching the repo files.  Upload the `response/` folder to the
+Overleaf project and compile `response_letter_with_manuscript.tex` (letter and marked manuscript) or `response_letter.tex`
+(letter only) as the main document.  Overleaf cannot rebuild `manuscript_marked.pdf`, so after any paper change rebuild
+the marked paper and the letters as above and export again.
+
 ## What goes where
 
 *Supplement* = a supplementary figure or table in the manuscript; *reviewer letter* = evidence in the response letter.
