@@ -1,7 +1,7 @@
 {
   "generated": "2026-10-07T10:09:33",
   "generator": "docs/figures_review/a4_leakage_audit/run_analysis.py --write-exclusions scripts/eval_exclusions",
-  "audit_outputs": "/home/rph/neurovlm_reviews/neurovlm/docs/figures_review/a4_leakage_audit/outputs",
+  "audit_outputs": "docs/figures_review/a4_leakage_audit/outputs",
   "thresholds": {
     "title_token_set_ratio": 95,
     "title_strict_token_sort_ratio": 90,

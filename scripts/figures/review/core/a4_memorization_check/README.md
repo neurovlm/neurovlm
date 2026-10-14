@@ -6,7 +6,7 @@ text into the captions, a test caption would share more verbatim text with its o
 
 ```bash
 .venv/bin/python scripts/figures/review/core/a4_memorization_check/run_analysis.py --device cuda \
-    --dapt-corpus /home/rph/efficient_ai/project/pubmed/pubmed_neuroimaging.parquet   # GPU ~5 min (training captions, cached), CPU ~1 min
+    --dapt-corpus "$HOME/efficient_ai/project/pubmed/pubmed_neuroimaging.parquet"   # GPU ~5 min (training captions, cached), CPU ~1 min
 ```
 
 Needs `scripts/outputs/validation/final/df_gen_canonical.parquet` (scripts/validate_models.py). The 2,971 stage-2 test captions are

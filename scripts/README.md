@@ -485,6 +485,35 @@ Against the previous, non-deterministic final, stages 08, 09, 11, 12 and 20 are 
 same files apart from four BERTScore values (delta <= 6e-7, hash seed, since fixed with `PYTHONHASHSEED=0`). Details
 and limits: [REPRODUCTION.md](REPRODUCTION.md).
 
+## Publishing the release
+
+`push_hf_release.py` publishes the final artifacts on the Hugging Face org `neurovlm`, one commit per repo. Without
+`--execute` it is a dry run that only reads the Hub. It lists every upload (repo, path, size, sha256, local file), the
+commit messages (git commit, `hf_manifest.json` sha256 and date of the run), the checks and the manifest entries it would
+re-pin. `models` puts runs/final under the names the library loaders read (NeuroAutoEncoder, ProjectionHeads and
+NeuroAdapter with `map_calibration.json`, NeuroQformer = stage 14 with `canonical_semantic_banks.pt` and
+`title_vocabulary.json`, NeuroQformer-PubMed = stage 13) and the 20 fold checkpoints in the new
+`neurovlm/NeuroVLM-cv-folds`. `neuroqwen` uploads the stage-00 export to `neurovlm/NeuroQwen3-0.6B`, and `corpus` the
+redacted DAPT corpus to the new dataset `neurovlm/pubmed_neuroimaging_corpus`. Each card gets a "Revision 2026-10"
+section and keeps the rest. `--execute` refuses on a dirty git tree, a file whose sha256 is not the validated run's
+(`EXPECTED_SHA256`, checked against REPRODUCTION.md, `title_vocabulary.json` and `map_calibration.json`), an e-mail
+address in a parquet, csv, json or md upload, weights the installed `neurovlm` loaders cannot read, a smoke or tied-head
+NeuroQwen export, and the corpus without `--yes`. The stage-13/14 packages hold the MLP projector, which
+`src/neurovlm/resources/loaders.py` cannot load yet (it builds a Q-Former), so the models push stays refused until that
+loader reads `config.json["projector"]` or `--allow-loader-mismatch` is given. After the commits the script reads every
+sha256 back from the Hub, and `--update-manifest` re-pins the pushed repos in `hf_manifest.json` (`--pin-only` does it
+later for the current heads). Commit the manifest and run `fetch_hf.py` to re-pin the HF cache. From then on "released"
+in `validate_models.py` means the new weights. If runs/final changes (NeuroQwen retrain, then stages 13 and 14), validate
+it, update REPRODUCTION.md and paste the output of `--print-lock` into `EXPECTED_SHA256`. Run each command without
+`--execute` first.
+
+```bash
+.venv/bin/python scripts/push_hf_release.py --only models --execute --update-manifest
+.venv/bin/python scripts/push_hf_release.py --only neuroqwen --neuroqwen-dir scripts/outputs/runs/neuroqwen/neuroqwen \
+    --execute --update-manifest                                               # after the NeuroQwen retrain
+.venv/bin/python scripts/push_hf_release.py --only corpus --execute --yes --update-manifest
+```
+
 ## Continuous integration
 
 Two workflows run on pull requests to `main`, need no secrets (public Hugging Face repos only) and use the locked

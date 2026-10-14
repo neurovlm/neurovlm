@@ -64,8 +64,7 @@ Each "Changes to the manuscript" line names the paper section and its lines in t
 the letter unchanged, appends the marked manuscript with pdfpages (each page gets the target `ms.<page>`, opened to
 fit the window) and defines `\mslink`, so each reference links to the page that holds it (46 numbered lines per manuscript
 page in the marked PDF as in the clean one, so line l is on page (l + 22) / 46 as `\numexpr` rounds it).  After a paper
-edit, rebuild the marked copy, re-measure the line numbers on it (words of the old and new marked PDFs aligned, as in
-scratchpad z94/marked_map.py), update manuscript_changes.md and the changes lines, and rebuild both PDFs.  Facts only the authors can supply
+edit, rebuild the marked copy, re-measure the line numbers on it (words of the old and new marked PDFs aligned), update manuscript_changes.md and the changes lines, and rebuild both PDFs.  Facts only the authors can supply
 stay as `[AUTHOR: ...]` placeholders, bold in the text with a red-on-yellow note (`\authornote`) in the letter and
 red on yellow in the paper (`\authorfact`).
 

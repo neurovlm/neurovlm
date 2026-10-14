@@ -1,6 +1,6 @@
 # Style guide for the NeuroVLM response letter
 
-Sources: the author's hand edits to `response_letter.tex` (git diff), the paper (`sn-article.tex`), `check5.md` (General) and the author's standing rules. Apply it to every rewrite of the letter. A machine-checkable version is `z52/style_rules.json` in the session scratchpad.
+Sources: the author's hand edits to `response_letter.tex` (git diff), the paper (`sn-article.tex`), `check5.md` (General) and the author's standing rules. Apply it to every rewrite of the letter.
 
 ## Voice
 

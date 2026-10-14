@@ -651,7 +651,7 @@ def write_exclusions(dest: Path, rm_agg: pd.DataFrame, nv_excl: pd.DataFrame, re
     prov = {
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "generator": "scripts/figures/review/core/a4_leakage_audit/run_analysis.py --write-exclusions " + str(dest),
-        "audit_outputs": str(out),
+        "audit_outputs": os.path.relpath(Path(out).resolve(), Path(__file__).resolve().parents[5]),  # repo-relative
         "thresholds": {"title_token_set_ratio": a["title_threshold"], "title_strict_token_sort_ratio": 90, "title_strict_min_chars": 25,
                        "minilm_cosine": a["embed_threshold"], "coordinate_jaccard": a["jaccard_threshold"], "coordinate_min_peaks": 5,
                        "minilm_model": "sentence-transformers/all-MiniLM-L6-v2 (title + '. ' + abstract, max_seq_length 256)"},

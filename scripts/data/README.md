@@ -8,6 +8,8 @@ $PY scripts/data/run_all.py               # same as fetch_hf.py (--from-hf is th
 $PY scripts/data/run_all.py --regenerate --smoke   # every stage on 64 samples (~1 min) -> scripts/outputs/data_0N_*/smoke_artifacts/
 $PY scripts/data/run_all.py --regenerate --skip-optional   # provenance: stages 01-07 -> scripts/outputs/data_regenerated/
 $PY scripts/data/07_transform_text.py --regenerate --batch-size 32 --artifact-dir scripts/outputs/data_regenerated
+$PY scripts/data/08_synthetic_texts.py --limit 6 --n-per-seed 2   # proof: re-create synthetic texts through the HF router
+$PY scripts/data/09_summaries.py                                  # proof: re-create 6 test-set summaries through the HF router
 ```
 
 ## Inputs: `fetch_hf.py` and `scripts/hf_manifest.json`
@@ -62,6 +64,8 @@ stage (`--smoke` also skips the fetch).  `--only 01 06`, `--skip 03`, `--skip-op
 | 05 | `05_cogatlas.py` (optional) | `latent_cogatlas.pt` | 4.7 s | 2.5 s (measured) |
 | 06 | `06_n_grams.py` | `ngram_matrix.npy`, `ngram_labels.npy`, `ngram_emb.pt`, `ngram_cache/` | 4.6 s | 25 s (measured) |
 | 07 | `07_transform_text.py` | `neuro_summaries.{jsonl,parquet}`, `neuro_summaries_sample.csv` | 2.6 s | 2.2 s release (measured); LLM see below |
+| 08 | `08_synthetic_texts.py` (LLM proof) | `synthetic_texts.parquet` in `--out`, `examples/synthetic_texts_examples.md` | n/a | 12 requests, 6 s |
+| 09 | `09_summaries.py` (LLM proof) | `summaries.parquet` in `--out`, `examples/summaries_examples.md` | n/a | 6 requests, 3 s |
 
 ¹ `run_all.py --smoke --force` on an RTX 5090 / 16 cores with HF caches populated.  Per-block timings and the
 extrapolations are in `time_estimates.json` (logs in `scripts/outputs/data_0N_*/timing*/timings.jsonl`).  Only 05, 06
@@ -135,6 +139,8 @@ graph; the 300 nodes with the highest degree centrality; SPECTER2 of `term[SEP]d
 ### 07 — LLM topic summaries
 * Default (`--from-release`): writes the released `load_dataset("pubmed_summaries")` (30,826 rows, this notebook's
   output) to the notebook's three files.
+* The released summaries were made with Llama-3.3-70B-Instruct (dataset card of `neurovlm/pubmed_summary_qa`). `--regenerate`
+  keeps the notebook's local model. `09_summaries.py` calls Llama-3.3-70B-Instruct through the Hugging Face router.
 * `--regenerate`: `meta-llama/Meta-Llama-3.1-8B-Instruct` (gated, ~16 GB, needs `HF_TOKEN`) in bf16, left padding,
   chat template with the notebook's system prompt, `temperature=0.3, top_p=0.9, top_k=50`, 256 new tokens, batch 16.
   Prompts run longest first; the jsonl is appended after every batch and a rerun resumes from it.  `--model`,
@@ -147,3 +153,37 @@ graph; the 300 nodes with the highest degree centrality; SPECTER2 of `term[SEP]d
 * LLM runtime: Qwen3-0.6B, 128 abstracts x 256 new tokens, batch 16: 63.8 s (332 tok/s) -> ≈ 4.3 h for 30,826.
   Llama-3.1-8B was not measured (weights not available here); decoding scales with weight size (~13x), so ≈ 55 h at
   batch 16 and ≈ 15–20 h at batch 48–64.
+
+### 08 — synthetic texts (LLM proof of concept)
+The curated [NETWORK]/[REGION]/[FUNCTION] texts of stage 14 and the LLM rows of `synth.parquet` came from one prompt,
+the synthetic-text prompt of `docs/01_data/07_transform_text_gen.ipynb` (cell 8), sent to Qwen3.5-27B through the
+Hugging Face Inference router with sampling, so that one concept gets several re-wordings. The original generation code
+was not kept. This script repeats the process and is not run by `run_all.py` (it needs a token and the router bills it).
+* Seeds: region names of the nilearn atlases (AAL SPM12 as in stage 11, labels written out without hemisphere, and
+  Harvard-Oxford cortical and subcortical), Cognitive Atlas concept names (pinned `cogatlas.parquet`, without stage 05's
+  two dropped terms), and the network names of the `networks` dataset (the eight standard names of `network_text.parquet`,
+  then the atlas names of `networks_arrays.pkl.gz` without ICA components). 131 network, 108 region and 908 function
+  seeds after removing duplicates.
+* Call (cell 9): `InferenceClient(base_url="https://router.huggingface.co/v1")`, chat completion, system message = the
+  prompt, user message = the seed alone, `temperature 0.1, top_p 0.9, max_tokens 512`, thinking off
+  (`chat_template_kwargs`), JSON reply parsed into title and description, 4 retries. `--model` (default the notebook's
+  `Qwen/Qwen3.5-27B:cheapest`), `--n-per-seed`, `--temperature`, `--top-p`, `--max-new-tokens`, `--workers`.
+* Output `--out/synthetic_texts.parquet`: `level, seed, sample, title, description, raw_text, model, text, model_title,
+  settings, timestamp`. As in `synth.parquet`, `title` is the seed and `text` is `seed [sep] description` in lower case.
+* `--limit N` (default 6): N/3 seeds per level, seeds with a released text of the same name first, in random order
+  (`--seed`). The run then writes `examples/synthetic_texts_examples.md` with each output, the released text of the
+  same name and their MiniLM cosine. `--limit 0` runs every seed and writes no examples.
+* Proof (2026-10-13, `--limit 6 --n-per-seed 2`): both `Qwen/Qwen3.5-27B` and `Qwen/Qwen3.5-27B:cheapest` answered
+  through the router. Cosine to the released text of the same name 0.84 to 0.92 (12 texts), against a median of 0.48
+  to all released texts.
+
+### 09 — PubMed summaries (LLM proof of concept)
+* The summary prompt of `docs/02_data/07_transform_text.ipynb` (cell 3) as system message, `title[SEP]abstract` of the
+  pinned `publications.parquet` as user message, `meta-llama/Llama-3.3-70B-Instruct` through the router (`--model`),
+  `temperature 0.3, top_p 0.9, max_tokens 256` and `top_k 50` sent as an extra field (`--top-k 0` leaves it out).
+  Decoding samples, so the text differs on each run. Not run by `run_all.py`.
+* `--limit N` (default 6): random test-set papers (`--seed`) that have both released summaries. The run writes
+  `examples/summaries_examples.md` with the new summary next to `neuro_summaries.parquet` and `pubmed_summary_qa.parquet`
+  and their MiniLM cosine. `--limit 0` summarizes every paper. Output `--out/summaries.parquet`.
+* Proof (2026-10-13): mean cosine 0.91 to the released `neuro_summaries.parquet` text of the same paper, against 0.39
+  for other papers. New summaries are longer (180 words against 128). `pubmed_summary_qa.parquet` (59 words) gives 0.83.
