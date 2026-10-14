@@ -82,10 +82,10 @@ The same table opens [`RESPONSE.md`](RESPONSE.md).
 | Granularity / projection, figure with 3 panels | 3.3, 3.5 | supplement | `a2_granularity_tradeoff` |
 | NeuroVault bounds and map types, figure with 2 panels and a table | 1.3, 2.3, 2.8 | supplement | `a3_neurovault_bounds` |
 | Leakage audit, table | 2.4, 1.2 | reviewer letter; one sentence in Methods | `a4_leakage_audit` |
-| Dataset counts and per-stage sizes, tables | 1.2, 2.2, 1.5 | reviewer letter | `a4_counts_table` |
+| Dataset counts and per-stage sizes, tables | 1.2, 2.2, 1.5 | reviewer letter (per-stage sizes table; the counts are stated in 1.2 "Final counts") | `a4_counts_table` |
 | Data-flow diagram | 1.2, 2.2 | supplement | `a4_dataflow_diagram` |
 | Table-caption audit, example table and figure | 3.8 | reviewer letter; one sentence in the Discussion | `a4_caption_audit` |
-| MLP projector versus Qformer, figure with 3 panels | 2.1 | supplement (the MLP is the stage 1 and stage 2 projector) | `a5_mlp_projector` |
+| MLP projector versus Qformer, figure with 3 panels | 2.1 | reviewer letter only (the manuscript names the MLP projector and no longer discusses the Q-Former) | `a5_mlp_projector` |
 | Context-free encoder (word2vec), figure with 2 panels | 3.4, 3.7 | supplement | `a5_encoder_swap` |
 | Latent dimensions, figure with 2 panels | 3.5, 3.1 | supplement | `a6_latent_interpretation` |
 | Perturbation probes, figure with 3 panels and a table. Loss ablation, table | 3.5 | probes in the reviewer letter, loss ablation in the supplement (Table S10) | `a6_perturbation_probes`, `a5_loss_ablation` |
