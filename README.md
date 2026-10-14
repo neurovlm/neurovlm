@@ -121,6 +121,24 @@ Analyses are organized as Jupyter notebooks:
 4. `docs/figures`: Preprint-v3 evaluation and figure reproduction
 5. `docs/experimental`: Retained exploratory evaluation, atlas-free CNN, and data-preparation research
 
+## Revision
+
+The revision in response to the reviewers adds headless, pinned reproductions of the paper under `scripts/` (start
+with `scripts/README.md`):
+
+- `scripts/hf_manifest.json` and `scripts/data/fetch_hf.py`: every Hugging Face input pinned to a revision and checked
+  against its sha256.
+- `scripts/train_pipeline.py` and `scripts/models/`: the training stages with deterministic kernels;
+  `scripts/validate_models.py` compares a run with the released checkpoints.
+- `scripts/figures/main/`: one script per paper figure.
+- `scripts/reproduce.sh`, `scripts/requirements.lock` and `scripts/Dockerfile`: one-command reproduction, documented in
+  `scripts/REPRODUCTION.md`.
+- `scripts/figures/review/`: the reviewer analyses (`core/`) and the response letter (`RESPONSE.md`,
+  `response_letter.tex`).
+
+CI runs the offline test suite (`.github/workflows/tests.yml`) and `scripts/smoke_pipeline.sh`, every training stage at
+smoke scale on CPU (`.github/workflows/smoke.yml`), both in the locked environment.
+
 ## License
 
 Apache-2.0 (`LICENSE`).

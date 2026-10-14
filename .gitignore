@@ -7,7 +7,12 @@
 __MACOSX/
 .ipynb_checkpoints/
 .coverage
+.coverage.*
+coverage.xml
+coverage-*.xml
 htmlcov/
+htmlcov-*/
+.ruff_cache/
 dist/
 build/
 docs/_build/
@@ -45,3 +50,17 @@ scripts/figures/review/*.out
 scripts/figures/review/*.toc
 OPEN_ITEMS.md
 .venv/
+
+# LaTeX build files (the response letter in scripts/figures/review/ and any other .tex)
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.run.xml
+*.synctex.gz
+*.toc
+*.xdv

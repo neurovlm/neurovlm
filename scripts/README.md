@@ -24,7 +24,7 @@ scripts/
   validate_models.py     paper metrics of a run vs the released checkpoints (PASS/FAIL)
   reproduce.sh           one-command reproduction (requirements.lock, Dockerfile), see Reproducibility
   verify_reproduction.py a reproduction's metrics vs runs/final (reference_metrics.json)
-  smoke_pipeline.sh      train_pipeline.py --smoke (smoke_training.sh, smoke_notebooks.sh: library tests, tests/README.md)
+  smoke_pipeline.sh      00 --smoke, then train_pipeline.py --smoke; run by CI (smoke_training.sh, smoke_notebooks.sh: tests/README.md)
   figures/main/          one script per paper figure (Figs. 2-6, S2-S4), see figures/main/README.md
   figures/review/        response to reviewers, see figures/review/README.md
   outputs/               (git-ignored) runs/<run>/, validation/<name>/, timings
@@ -484,3 +484,30 @@ Against the previous, non-deterministic final, stages 08, 09, 11, 12 and 20 are 
 0.9487). An earlier pair of runs with the previous stage-14 recipe (c and d, 2026-10-09/10) was byte-identical in the
 same files apart from four BERTScore values (delta <= 6e-7, hash seed, since fixed with `PYTHONHASHSEED=0`). Details
 and limits: [REPRODUCTION.md](REPRODUCTION.md).
+
+## Continuous integration
+
+Two workflows run on pull requests to `main`, need no secrets (public Hugging Face repos only) and use the locked
+environment: CPython 3.12.12, `requirements.lock` without the CUDA wheels and torch 2.14.1 from the CPU index
+(`uv pip install --torch-backend cpu`), `PYTHONHASHSEED=0`, `CUBLAS_WORKSPACE_CONFIG=:4096:8`, no GPU.
+
+* `.github/workflows/tests.yml`: the offline test suite, `pytest -m "not network and not requires_data and not
+  requires_pretrained and not requires_specter and not slow"`, with `HF_HUB_OFFLINE=1` (tests that download data or
+  weights carry the `network`/`requires_*` markers); coverage of `neurovlm`, uploaded as the artifact `coverage-tests`.
+* `.github/workflows/smoke.yml` (when `scripts/`, `src/`, `pyproject.toml` or `.coveragerc` change): fetches the `train/`
+  inputs of `hf_manifest.json` with `fetch_hf.py` (54 files, 8.1 GB, pinned and sha256-checked) and the AAL atlas
+  (sha256-checked; nilearn's server fails TLS verification, so the workflow falls back to an unverified download and
+  relies on the hashes), caches both under a key on `hf_manifest.json`, then runs
+  `SMOKE_COVERAGE=1 bash scripts/smoke_pipeline.sh --skip-data --no-validate --device cpu` and uploads the coverage of
+  the reproduction code (`.coveragerc`) as the artifact `coverage-smoke`. It checks that every stage runs, not its
+  numbers.
+
+Local dry run of both jobs (fresh clone, fresh `.venv` from the lock, empty `HOME`, 16 CPU cores, 2026-10-13):
+
+| job | step | time | result |
+|---|---|---|---|
+| tests | environment from the lock (empty uv cache) | 16 s | torch 2.14.1+cpu |
+| tests | offline suite | 14 s | 349 passed, 1 skipped (CUDA), 97 deselected; `neurovlm` coverage 46.8 % |
+| smoke | AAL atlas | 3 s | sha256 OK (unverified-TLS fallback used) |
+| smoke | `fetch_hf.py`, train/ inputs, empty cache / warm cache | 125 s / 44 s | 54 ok, 0 mismatch |
+| smoke | `smoke_pipeline.sh` (00, 08, 09, 20, 11, 12, 13, 14) | 280 s | every stage exit 0; reproduction-code coverage 35.7 % |

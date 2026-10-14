@@ -1,10 +1,10 @@
 # Coverage counts only the code that trains the paper's models and draws its figures: the pinned-input fetch, the
-# training stages (08, 09, 11, 12, 13, 14, 20) with their helpers, the pipeline driver, validation, the reproduction
+# training stages (00, 08, 09, 11, 12, 13, 14, 20) with their helpers, the pipeline driver, validation, the reproduction
 # check, the main and supplementary figure scripts, and the library modules those scripts import ([report] include).
 # Everything else is left out ([run] omit): the CNN, the atlas-free data, the notebook-era trainers and evaluators, the
 # runtime and retrieval API, the data stages 01-07 (they regenerate the released inputs), the review analyses, notebooks,
 # docs and tutorials.
-# Used by tests.yml (pytest --cov) and smoke.yml (coverage run of the pipeline smoke test, subprocesses included).
+# Used by tests.yml (pytest --cov) and smoke.yml (scripts/smoke_pipeline.sh under coverage, subprocesses included).
 [run]
 # scripts/data, scripts/models and scripts/figures/main have no __init__.py, so they are listed for unrun files to count
 source =
@@ -52,6 +52,7 @@ include =
     # training: shared helpers, pipeline driver, stages and their helpers, validation, reproduction check
     scripts/common.py
     scripts/train_pipeline.py
+    scripts/models/00_neuroqwen_dapt.py
     scripts/models/08_autoencoder.py
     scripts/models/09_projection_head.py
     scripts/models/11_anatomical_atlases.py

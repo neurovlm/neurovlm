@@ -1,10 +1,13 @@
 name: Pipeline smoke test
 
-# Trains every model of the paper pipeline (scripts/train_pipeline.py: stages 08, 09, 20 fold 0, 11, 12, 13, 14) for one
-# epoch of one batch on 64 samples, on CPU, and reports coverage of the reproduction code (.coveragerc).
-# Full training takes hours on a GPU, so CI checks that the pipeline runs end to end, not its numbers.
-# Inputs: the training files of scripts/hf_manifest.json, fetched from the public Hugging Face repos at their pinned
-# revisions and checked against their sha256 (no token); the AAL atlas comes from nilearn.
+# Runs scripts/smoke_pipeline.sh on CPU: stage 00 (NeuroQwen DAPT, one step) and every stage of scripts/train_pipeline.py
+# (08, 09, 20 fold 0, 11, 12, 13, 14) for one epoch of one batch on 64 samples, and reports coverage of the
+# reproduction code (.coveragerc). Full training takes hours on a GPU, so CI checks that the pipeline runs end to end,
+# not its numbers. Environment: CPython 3.12.12, scripts/requirements.lock with the CPU build of torch.
+# Inputs (no secrets, public downloads only): the train/ files of scripts/hf_manifest.json (about 8 GB), fetched from
+# the public Hugging Face repos at their pinned revisions and checked against their sha256, and the AAL atlas (checked
+# by sha256). Both are cached under a key on scripts/hf_manifest.json. The coverage report is uploaded as the
+# artifact coverage-smoke.
 
 on:
   push:
@@ -25,6 +28,9 @@ on:
       - ".github/workflows/smoke.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: smoke-${{ github.ref }}
   cancel-in-progress: true
@@ -32,17 +38,19 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
     env:
       CUDA_VISIBLE_DEVICES: ""
       PYTHONHASHSEED: "0"
+      CUBLAS_WORKSPACE_CONFIG: ":4096:8"
       TOKENIZERS_PARALLELISM: "false"
       HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Free disk space (the training inputs take about 7 GB, twice for files copied into the data dir)
+      - name: Free disk space (inputs about 8 GB, the files copied into the data dir 3.6 GB, the cache archive about 8 GB)
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h .
@@ -51,6 +59,10 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.9.26"
+          enable-cache: true
+          cache-dependency-glob: |
+            scripts/requirements.lock
+            pyproject.toml
 
       - name: Environment (scripts/requirements.lock with the CPU build of torch)
         run: |
@@ -59,21 +71,27 @@ jobs:
           uv pip install --python .venv/bin/python --torch-backend cpu -r "$RUNNER_TEMP/requirements-cpu.txt" -e ".[full,test]"
           .venv/bin/python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda)"
 
-      - name: Cache Hugging Face models and the AAL atlas
-        uses: actions/cache@v4
+      - name: Restore the Hugging Face inputs and the AAL atlas from the cache
+        id: inputs-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
-            ~/.cache/huggingface/hub/models--*
+            ~/.cache/huggingface/hub
             ~/nilearn_data/aal_SPM12
-          key: smoke-inputs-${{ hashFiles('scripts/hf_manifest.json') }}
+          key: smoke-inputs-${{ runner.os }}-${{ hashFiles('scripts/hf_manifest.json') }}
 
       - name: AAL atlas for stage 11 (checked by sha256)
-        # www.gin.cnrs.fr does not send its intermediate certificate, so nilearn's own download fails verification
+        # Fallback: www.gin.cnrs.fr (the URL of nilearn.datasets.fetch_atlas_aal) does not send its intermediate
+        # certificate, so verified downloads (nilearn's own, or curl's) fail. The step tries a verified download, then an
+        # unverified one, and accepts the files only if their sha256 matches; nilearn then finds them in ~/nilearn_data.
         run: |
           d="$HOME/nilearn_data/aal_SPM12"
-          if [ ! -f "$d/aal/atlas/AAL.nii" ]; then
+          url="https://www.gin.cnrs.fr/AAL_files/aal_for_SPM12.tar.gz"
+          if [ ! -f "$d/aal/atlas/AAL.nii" ] || [ ! -f "$d/aal/atlas/AAL.xml" ]; then
             mkdir -p "$d"
-            curl -fsSL --insecure https://www.gin.cnrs.fr/AAL_files/aal_for_SPM12.tar.gz | tar -xz -C "$d"
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/aal.tar.gz" "$url" \
+              || curl -fsSL --retry 3 --insecure -o "$RUNNER_TEMP/aal.tar.gz" "$url"
+            tar -xzf "$RUNNER_TEMP/aal.tar.gz" -C "$d"
           fi
           printf '%s  %s\n' \
             91e8ec62a293c2a28c8e7343f37abb978ab941c5e26fbc496945c66d073a2cd8 "$d/aal/atlas/AAL.nii" \
@@ -88,13 +106,23 @@ jobs:
           pathlib.Path(os.environ["RUNNER_TEMP"], "train_manifest.json").write_text(json.dumps(m, indent=1))
           print(len(m["files"]), "files,", round(sum(e["size"] for e in m["files"]) / 1e9, 1), "GB")
           PY
-          .venv/bin/python scripts/data/fetch_hf.py --manifest "$RUNNER_TEMP/train_manifest.json"
+          .venv/bin/python -m coverage run --parallel-mode scripts/data/fetch_hf.py --manifest "$RUNNER_TEMP/train_manifest.json"
 
-      - name: Smoke training on CPU (every stage, one epoch of one batch)
+      - name: Save the inputs to the cache (before training, so a failed smoke run keeps them)
+        if: steps.inputs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cache/huggingface/hub
+            ~/nilearn_data/aal_SPM12
+          key: smoke-inputs-${{ runner.os }}-${{ hashFiles('scripts/hf_manifest.json') }}
+
+      - name: Smoke training on CPU (stage 00, then every train_pipeline.py stage, one epoch of one batch)
         env:
           HF_HUB_OFFLINE: "1"
           HF_DATASETS_OFFLINE: "1"
-        run: .venv/bin/python -m coverage run scripts/train_pipeline.py --smoke --force --skip-data --no-validate --device cpu
+          SMOKE_COVERAGE: "1"
+        run: bash scripts/smoke_pipeline.sh --skip-data --no-validate --device cpu
 
       - name: Coverage of the reproduction code
         if: always()
@@ -102,9 +130,22 @@ jobs:
           .venv/bin/python -m coverage combine || true
           .venv/bin/python -m coverage report
           .venv/bin/python -m coverage xml -o coverage-smoke.xml
+          .venv/bin/python -m coverage html -d htmlcov-smoke
 
-      - name: Upload coverage to Codecov
+      - name: Upload the coverage report
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-smoke
+          path: |
+            coverage-smoke.xml
+            htmlcov-smoke/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload coverage to Codecov (optional, never fails the job)
+        if: always()
+        continue-on-error: true
         uses: codecov/codecov-action@v4
         with:
           files: ./coverage-smoke.xml

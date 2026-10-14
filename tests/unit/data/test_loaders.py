@@ -13,6 +13,9 @@ from neurovlm.data import (
     _without_grad,
 )
 
+# These tests download the released datasets and the brain mask from the public Hugging Face repos (about 4 GB), so
+# the offline CI suite (tests.yml) deselects them; run them with `pytest -m network`.
+
 
 class TestWithoutGrad:
     """Tests for _without_grad utility function."""
@@ -141,6 +144,8 @@ class TestLoadDataset:
         with pytest.raises(ValueError):
             load_dataset(dataset_name)
 
+    @pytest.mark.network
+    @pytest.mark.requires_data
     @pytest.mark.parametrize(
         "dataset_name",
         [
@@ -156,6 +161,8 @@ class TestLoadDataset:
         result = load_dataset(dataset_name)
         assert isinstance(result, pd.DataFrame)
 
+    @pytest.mark.network
+    @pytest.mark.requires_data
     @pytest.mark.parametrize(
         "dataset_name",
         ["pubmed_images", "neurovault_images"],
@@ -170,6 +177,8 @@ class TestLoadDataset:
         else:
             assert isinstance(result, (torch.Tensor, np.ndarray))
 
+    @pytest.mark.network
+    @pytest.mark.requires_data
     def test_load_dataset_networks(self):
         """Test loading networks dataset."""
         result = load_dataset("networks")
@@ -194,6 +203,8 @@ class TestLoadLatent:
         with pytest.raises(ValueError):
             load_latent(latent_name)
 
+    @pytest.mark.network
+    @pytest.mark.requires_data
     @pytest.mark.parametrize(
         "latent_name",
         [
@@ -218,6 +229,8 @@ class TestLoadLatent:
             if isinstance(result[0], torch.Tensor):
                 assert not result[0].requires_grad
 
+    @pytest.mark.network
+    @pytest.mark.requires_data
     def test_load_latent_returns_no_grad(self):
         """Test that loaded latents have no gradients."""
         result = load_latent("pubmed_text")
@@ -236,11 +249,17 @@ class TestLoadLatent:
         check_no_grad(result)
 
 
+    @pytest.mark.network
+    @pytest.mark.requires_data
     def test_load_latent_networks_neuro(self):
         """Test loading network neuro latents (dict structure)."""
         result = load_latent("networks_neuro")
         # Should be a nested dict
         assert isinstance(result, dict)
+
+
+@pytest.mark.network
+@pytest.mark.requires_pretrained
 class TestLoadMasker:
     """Tests for load_masker function."""
 
@@ -260,6 +279,8 @@ class TestLoadMasker:
         assert type(masker1) == type(masker2)
 
 
+@pytest.mark.network
+@pytest.mark.requires_data
 class TestDataIntegration:
     """Integration tests for data loading."""
 
