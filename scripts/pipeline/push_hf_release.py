@@ -132,11 +132,13 @@ HERE = {
                              "`map_calibration.json`.",
     "neurovlm/NeuroQformer": "`model.safetensors` and `config.json` hold the stage-14 MLP projector with the frozen image head "
                              "and the canonical banks, which are also in `canonical_semantic_banks.pt`. `title_vocabulary.json` "
-                             "lists the titles the decoder may write. Loading needs a loader that reads "
-                             "`config.json[\"projector\"]` (`load_projector` in NeuroVLM's `scripts/models/_common_models.py`).",
+                             "lists the titles the decoder may write. Loading needs `neurovlm` with `ResidualMLPProjector` "
+                             "(October 2026, `NeuroQFormer.from_state_dict_payload` reads `config.json[\"projector\"]`). "
+                             "`load_projector` in NeuroVLM's `scripts/models/_common_models.py` reads the package too.",
     "neurovlm/NeuroQformer-PubMed": "`model.safetensors` and `config.json` hold the stage-13 MLP projector (best validation "
-                                    "epoch), with canonical projection off. Loading needs a loader that reads "
-                                    "`config.json[\"projector\"]` (`load_projector` in NeuroVLM's `scripts/models/_common_models.py`).",
+                                    "epoch), with canonical projection off. Loading needs `neurovlm` with `ResidualMLPProjector` "
+                                    "(October 2026, `NeuroQFormer.from_state_dict_payload` reads `config.json[\"projector\"]`). "
+                                    "`load_projector` in NeuroVLM's `scripts/models/_common_models.py` reads the package too.",
     CV_REPO: "First release of these checkpoints.",
 }
 
@@ -815,7 +817,8 @@ def run(args, run_dir: Path, stage: Path) -> int:
             print(f"    {f}")
         if fails and not args.allow_loader_mismatch:
             blockers.append(f"{len(fails)} planned weight files do not load with the installed neurovlm loaders "
-                            "(update src/neurovlm/resources/loaders.py or pass --allow-loader-mismatch)")
+                            "(update NeuroQFormer.from_state_dict_payload in src/neurovlm/models/qformer.py or pass "
+                            "--allow-loader-mismatch)")
     if any(r.repo == CORPUS_REPO for r in releases) and not args.yes:
         blockers.append("the corpus upload publishes 1.23 M PubMed records: pass --yes")
     try:

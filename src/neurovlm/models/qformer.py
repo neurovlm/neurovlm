@@ -79,6 +79,132 @@ class QFormer(nn.Module):
         return F.normalize(self.align_head(x).float(), dim=1)
 
 
+class ResidualBlock(nn.Module):
+    """Pre-LN residual MLP block: x + Linear(Dropout(GELU(Linear(LN(x)))))."""
+
+    def __init__(self, width: int, expansion: int = 2, dropout: float = 0.05):
+        super().__init__()
+        self.norm = nn.LayerNorm(width)
+        self.fc1 = nn.Linear(width, width * expansion)
+        self.act = nn.GELU()
+        self.drop = nn.Dropout(dropout)
+        self.fc2 = nn.Linear(width * expansion, width)
+
+    def forward(self, x):
+        return x + self.fc2(self.drop(self.act(self.fc1(self.norm(x)))))
+
+
+class ResidualMLPProjector(nn.Module):
+    """Residual MLP soft-prompt projector, a drop-in for :class:`QFormer` without attention.
+
+    Same interface: ``forward(raw, semantic) -> [B, num_queries, lm_dim]`` and
+    ``semantic_from_visual``. LN(raw) ++ LN(semantic) -> Linear -> ``depth`` pre-LN residual
+    blocks -> LN -> Linear(width, num_queries * lm_dim, no bias) -> + learned per-query
+    embedding -> LayerNorm(lm_dim). ``head="single"`` emits one token repeated ``num_queries``
+    times. The released NeuroQformer and NeuroQformer-PubMed packages use this projector
+    (``config.json["projector"] == "mlp"``).
+    """
+
+    def __init__(
+        self,
+        image_dim: int = 384,
+        semantic_dim: int = 384,
+        lm_dim: int = 1024,
+        num_queries: int = 32,
+        *,
+        width: int = 704,
+        depth: int = 2,
+        expansion: int = 2,
+        dropout: float = 0.05,
+        head: str = "tokens",
+        align_hidden: int = 512,
+    ):
+        super().__init__()
+        if head not in ("tokens", "single"):
+            raise ValueError(f"head must be 'tokens' or 'single', got {head!r}")
+        self.image_dim = int(image_dim)
+        self.semantic_dim = int(semantic_dim)
+        self.lm_dim = int(lm_dim)
+        self.num_queries = int(num_queries)
+        self.width = int(width)
+        self.depth = int(depth)
+        self.expansion = int(expansion)
+        self.head_kind = head
+        self.dropout = float(dropout)
+        self.align_hidden = int(align_hidden)
+        self.norm_raw = nn.LayerNorm(image_dim)
+        self.norm_sem = nn.LayerNorm(semantic_dim)
+        self.in_proj = nn.Linear(image_dim + semantic_dim, width)
+        self.blocks = nn.ModuleList(
+            [ResidualBlock(width, expansion, dropout) for _ in range(depth)]
+        )
+        self.out_norm = nn.LayerNorm(width)
+        self.head = nn.Linear(
+            width, num_queries * lm_dim if head == "tokens" else lm_dim, bias=False
+        )
+        self.query_pos = nn.Parameter(torch.randn(1, num_queries, lm_dim) * 0.02)
+        self.token_norm = nn.LayerNorm(lm_dim)
+        self.align_head = nn.Sequential(
+            nn.LayerNorm(lm_dim),
+            nn.Linear(lm_dim, align_hidden),
+            nn.GELU(),
+            nn.Linear(align_hidden, semantic_dim),
+        )
+
+    def forward(self, raw_images, semantic_images):
+        dtype = self.in_proj.weight.dtype
+        x = torch.cat(
+            [self.norm_raw(raw_images.to(dtype)), self.norm_sem(semantic_images.to(dtype))],
+            dim=-1,
+        )
+        h = self.in_proj(x)
+        for block in self.blocks:
+            h = block(h)
+        t = self.head(self.out_norm(h))
+        if self.head_kind == "tokens":
+            t = t.view(t.size(0), self.num_queries, self.lm_dim)
+        else:
+            t = t.unsqueeze(1).expand(-1, self.num_queries, -1)
+        return self.token_norm(t + self.query_pos)
+
+    def semantic_from_visual(self, visual_tokens):
+        x = visual_tokens.to(dtype=self.in_proj.weight.dtype).mean(dim=1)
+        return F.normalize(self.align_head(x).float(), dim=1)
+
+    def projector_config(self) -> dict[str, int | float | str]:
+        """Constructor arguments for ``ResidualMLPProjector(**config)``."""
+        return {
+            "image_dim": self.image_dim,
+            "semantic_dim": self.semantic_dim,
+            "lm_dim": self.lm_dim,
+            "num_queries": self.num_queries,
+            "width": self.width,
+            "depth": self.depth,
+            "expansion": self.expansion,
+            "dropout": self.dropout,
+            "head": self.head_kind,
+            "align_hidden": self.align_hidden,
+        }
+
+    @classmethod
+    def config_from_state(cls, state: dict) -> dict[str, int | str]:
+        """Constructor arguments read off a bare ``ResidualMLPProjector`` state dict."""
+        w_in, head, pos = state["in_proj.weight"], state["head.weight"], state["query_pos"]
+        depth = len({k.split(".")[1] for k in state if k.startswith("blocks.")})
+        width, lm_dim, num_queries = int(w_in.shape[0]), int(pos.shape[2]), int(pos.shape[1])
+        return {
+            "image_dim": int(state["norm_raw.weight"].shape[0]),
+            "semantic_dim": int(state["norm_sem.weight"].shape[0]),
+            "lm_dim": lm_dim,
+            "num_queries": num_queries,
+            "width": width,
+            "depth": depth,
+            "expansion": int(state["blocks.0.fc1.weight"].shape[0]) // width if depth else 2,
+            "head": "tokens" if int(head.shape[0]) == num_queries * lm_dim else "single",
+            "align_hidden": int(state["align_head.1.weight"].shape[0]),
+        }
+
+
 def _canonical_basis_name(basis: str | None) -> str:
     basis = "all" if basis is None else str(basis).lower()
     return {
@@ -163,17 +289,18 @@ class CanonicalProjection(nn.Module):
 
 
 class NeuroQFormer(nn.Module):
-    """QFormer plus frozen image-semantic projection and canonical projection.
+    """Projector plus frozen image-semantic projection and canonical projection.
 
     The wrapped module accepts raw autoencoder latents at inference. If semantic
     inputs are not supplied, it computes image semantics with ``proj_head_image``
     and optionally projects them onto a frozen canonical embedding bank before
-    calling the underlying QFormer.
+    calling the underlying projector (a :class:`QFormer` or a
+    :class:`ResidualMLPProjector`).
     """
 
     def __init__(
         self,
-        qformer: QFormer | None = None,
+        qformer: QFormer | ResidualMLPProjector | None = None,
         proj_head_image: nn.Module | None = None,
         canonical_banks: dict[str, torch.Tensor] | None = None,
         *,
@@ -293,6 +420,16 @@ class NeuroQFormer(nn.Module):
         """Return the constructor values needed for a standalone reload."""
 
         qformer = self.qformer
+        if isinstance(qformer, ResidualMLPProjector):
+            return {
+                "architecture": "NeuroQFormer",
+                "projector": "mlp",
+                **qformer.projector_config(),
+                "projection_temp": self.projection_temp,
+                "canonical_basis": self.canonical_basis,
+                "use_canonical_projection": self.use_canonical_projection,
+                "projection_type": type(self.proj_head_image).__name__,
+            }
         return {
             "architecture": "NeuroQFormer",
             "image_dim": int(qformer.image_dim),
@@ -316,9 +453,27 @@ class NeuroQFormer(nn.Module):
         *,
         map_location: str | torch.device = "cpu",
     ) -> "NeuroQFormer":
-        """Instantiate from a saved payload or raw state dict."""
+        """Instantiate from a saved payload or raw state dict.
+
+        ``config["projector"]`` selects the projector: ``"mlp"`` builds a
+        :class:`ResidualMLPProjector` from the config (or from the state dict
+        shapes), anything else the :class:`QFormer`.
+        """
         state = payload.get("model_state_dict", payload.get("state_dict", payload))
-        config = payload.get("config", payload.get("architecture", {}))
+        config = dict(payload.get("config", payload.get("architecture", {})))
+
+        projector = None
+        if config.get("projector", "qformer") == "mlp" or "qformer.in_proj.weight" in state:
+            inner = {
+                str(k)[len("qformer."):]: v
+                for k, v in state.items()
+                if str(k).startswith("qformer.")
+            }
+            shape = ResidualMLPProjector.config_from_state(inner)
+            shape.update({k: config[k] for k in shape if k in config})
+            projector = ResidualMLPProjector(**shape)
+            for key in ("image_dim", "semantic_dim", "lm_dim", "num_queries"):
+                config[key] = shape[key]
 
         def _bank(name: str) -> torch.Tensor:
             key = f"canonical_projection.{name}_bank"
@@ -341,6 +496,7 @@ class NeuroQFormer(nn.Module):
 
         canonical_banks = {name: _bank(name) for name in CanonicalProjection.bank_names}
         model = cls(
+            qformer=projector,
             proj_head_image=proj_head_image,
             canonical_banks=canonical_banks,
             image_dim=config.get("image_dim", 384),

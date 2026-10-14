@@ -264,5 +264,6 @@ weights the installed `neurovlm` loaders cannot read. `--update-manifest` then r
 - The published NeuroQwen3-0.6B was trained before stage 00 removed the evaluation papers from its corpus, which holds
   2,906 of the 2,971 test papers. Stages 13 and 14 still use it. `figures/review/core/a4_memorization_check` tests
   whether captions copy the abstracts.
-- The stage 13 and 14 packages hold the MLP projector, which `src/neurovlm/resources/loaders.py` cannot load yet, so
-  `push_hf_release.py --only models` stays refused until the loader reads `config.json["projector"]`.
+- The stage 13 and 14 packages hold the MLP projector. `neurovlm` loads them since `src/neurovlm/models/qformer.py`
+  gained `ResidualMLPProjector` (October 2026): `NeuroQFormer.from_state_dict_payload` reads `config.json["projector"]`.
+  Older installs fail on `NeuroQformer` and `NeuroQformer-PubMed` with a state-dict size error.
