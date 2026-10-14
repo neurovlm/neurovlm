@@ -1,12 +1,15 @@
 #!/usr/bin/env python
-"""A7 (comment 1.4): are out-of-distribution (OOD) maps and texts far from the training set in NeuroVLM's embedding spaces?
+"""A7 (comment 1.4): a warning for out-of-distribution (OOD) maps and texts, with thresholds fixed on the validation split.
 
-Final run models, CPU, ~2-4 min.  Method and outputs: README.md.
+Maps are flagged when the correlation with their autoencoder reconstruction is below its validation 2.5th percentile or the
+Mahalanobis distance of their latent from the training latents is above its validation 97.5th percentile; texts when the cosine to
+the nearest training abstract is below its validation 5th percentile.  Final run models, CPU, ~3 min.  Method and outputs: README.md.
     CUDA_VISIBLE_DEVICES="" .venv/bin/python scripts/figures/review/core/a7_ood_confidence/run_analysis.py
 """
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -25,15 +28,20 @@ log = get_logger("a7_ood")
 REPO = HERE.parents[4]
 MAP_SETS = ("rot90", "rotation", "spin", "shuffle", "noise", "x100", "x0.01")
 TEXT_SETS = ("wikitext", "recipes")
-LABEL = {"id_test": "ID: test maps", "rot90": "rotated 90°", "rotation": "rotated (random)", "spin": "surface spin",
+LABEL = {"id_val": "ID: validation maps", "id_test": "ID: test maps", "id_val_text": "ID: validation abstracts", "rot90": "rotated 90°", "rotation": "rotated (random)", "spin": "surface spin",
          "shuffle": "voxel shuffle", "noise": "white noise", "x100": "map × 100", "x0.01": "map × 0.01",
          "id_test_text": "ID: test abstracts", "wikitext": "WikiText", "recipes": "recipes"}
-SCORES = ("input_knn", "recon", "encoder_knn", "encoder_maha", "contrastive_knn", "contrastive_maha",  # pipeline order
-          "latent_norm_score", "recon_per_nz", "recon_per_energy", "recon_support")  # AE latent norm; sparsity-normalised errors
-SCORE_NAME = {"input_knn": "input kNN", "recon": "AE recon. error", "encoder_knn": "encoder kNN", "encoder_maha": "encoder Mahal.",
-              "contrastive_knn": "contrastive kNN", "contrastive_maha": "contrastive Mahal.", "latent_norm_score": "AE latent norm",
+SCORES = ("corr_recon", "encoder_maha", "recon", "input_knn", "encoder_knn", "contrastive_knn", "contrastive_maha", "map_text_cos", "rec_max",
+          "latent_norm_score", "recon_per_nz", "recon_per_energy", "recon_support",  # maps (encoder_* and contrastive_* also for text)
+          "max_cos_specter2", "max_cos_shared", "t2b_peak")  # text
+LOW_IS_OOD = {"corr_recon", "map_text_cos", "rec_max", "max_cos_specter2", "max_cos_shared", "t2b_peak"}  # similarities and peaks
+SCORE_NAME = {"corr_recon": "AE recon. correlation", "encoder_maha": "encoder Mahal.", "recon": "AE recon. 1 - cos", "input_knn": "input kNN",
+              "encoder_knn": "encoder kNN", "contrastive_knn": "contrastive kNN", "contrastive_maha": "contrastive Mahal.",
+              "map_text_cos": "nearest training text", "rec_max": "recon. peak", "latent_norm_score": "AE latent norm",
               "recon_per_nz": "recon. SSE / non-zero voxels", "recon_per_energy": "recon. SSE / map energy",
-              "recon_support": "recon. error on non-zero voxels"}
+              "recon_support": "recon. error on non-zero voxels", "max_cos_specter2": "nearest training abstract",
+              "max_cos_shared": "nearest training abstract (shared)", "t2b_peak": "calibrated map peak"}
+FLAG_Q = 0.025  # maps: each of the two detector scores flags 2.5 % of the validation maps (5 % together); text: 5 %
 K = 10
 NZ_REL = 1e-3  # "non-zero" = above 0.1 % of the map maximum
 RECIPES = [
@@ -250,35 +258,41 @@ def auroc(neg: np.ndarray, pos: np.ndarray) -> float:
     return float((r.sum() - len(pos) * (len(pos) + 1) / 2) / (len(pos) * len(neg)))
 
 
-def detect(neg: np.ndarray, pos: np.ndarray) -> float:
-    """Share of OOD scores above the 95th percentile of the ID scores (5 % false alarms by construction)."""
-    return float((pos > np.quantile(neg, 0.95)).mean())
+def detect(ref: np.ndarray, x: np.ndarray, q: float = 0.95) -> float:
+    """Share of scores ``x`` above the q-quantile of the validation scores ``ref`` (5 % of validation inputs at q = 0.95)."""
+    return float((x > np.quantile(ref, q)).mean())
 
 
-def boot_ci(neg: np.ndarray, pos: np.ndarray, n_boot: int, rng) -> dict:
-    """Detection rate at the ID 95th percentile and AUROC with 95 % bootstrap CIs (ID and OOD both resampled: the threshold varies too)."""
+def boot_ci(ref: np.ndarray, neg: np.ndarray, pos: np.ndarray, n_boot: int, rng) -> dict:
+    """Share of OOD inputs flagged at the validation 95th percentile and AUROC of test (``neg``) vs OOD (``pos``), with 95 % bootstrap
+    CIs (validation, test and OOD inputs resampled: the threshold varies too)."""
     boots = []
     for _ in range(n_boot):
-        n, p = rng.choice(neg, len(neg)), rng.choice(pos, len(pos))
-        boots.append((detect(n, p), auroc(n, p)))
+        r, n, p = rng.choice(ref, len(ref)), rng.choice(neg, len(neg)), rng.choice(pos, len(pos))
+        boots.append((detect(r, p), auroc(n, p)))
     (d_lo, a_lo), (d_hi, a_hi) = np.quantile(boots, [0.025, 0.975], axis=0)
-    return {"detection_at_id95": detect(neg, pos), "det_lo": d_lo, "det_hi": d_hi, "auroc": auroc(neg, pos), "ci_lo": a_lo, "ci_hi": a_hi}
+    return {"flagged": detect(ref, pos), "flagged_lo": d_lo, "flagged_hi": d_hi, "auroc": auroc(neg, pos), "ci_lo": a_lo, "ci_hi": a_hi}
 
 
-def strata(neg, pos, nz_neg, nz_pos, edges) -> tuple[float, list[dict]]:
-    """Sparsity control: an ID 95th-percentile threshold per non-zero-voxel stratum (``edges`` = ID quintiles).
+def tail_share(ref: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """Share of the validation scores ``ref`` below each score in ``x`` (0.975 = beyond all but 2.5 % of validation inputs)."""
+    return np.searchsorted(np.sort(ref), x, side="left") / len(ref)
 
-    Returns the pooled detection rate (each OOD map against the threshold of its own stratum) and one row per stratum."""
-    bn, bp = np.digitize(nz_neg, edges), np.digitize(nz_pos, edges)
-    bounds, thr = np.r_[0, edges, np.inf], np.quantile(neg, 0.95)
+
+def strata(ref, pos, nz_ref, nz_pos, edges) -> tuple[float, list[dict]]:
+    """Sparsity control: a validation 95th-percentile threshold per non-zero-voxel stratum (``edges`` = validation quintiles).
+
+    Returns the pooled flag rate (each OOD map against the threshold of its own stratum) and one row per stratum."""
+    bn, bp = np.digitize(nz_ref, edges), np.digitize(nz_pos, edges)
+    bounds, thr = np.r_[0, edges, np.inf], np.quantile(ref, 0.95)
     rows = []
     for b in range(len(edges) + 1):
-        t, p = np.quantile(neg[bn == b], 0.95), pos[bp == b]
-        rows.append({"stratum": b + 1, "nonzero_from": bounds[b], "nonzero_to": bounds[b + 1], "n_id": int((bn == b).sum()), "n_ood": len(p),
-                     "id_false_alarm_global_threshold": float((neg[bn == b] > thr).mean()), "id_threshold": float(t),
-                     "detection_global_threshold": float((p > thr).mean()) if len(p) else np.nan,
-                     "detection_stratum_threshold": float((p > t).mean()) if len(p) else np.nan})
-    thr_b = np.array([r["id_threshold"] for r in rows])
+        t, p = np.quantile(ref[bn == b], 0.95), pos[bp == b]
+        rows.append({"stratum": b + 1, "nonzero_from": bounds[b], "nonzero_to": bounds[b + 1], "n_val": int((bn == b).sum()), "n_ood": len(p),
+                     "val_flagged_global_threshold": float((ref[bn == b] > thr).mean()), "val_threshold": float(t),
+                     "flagged_global_threshold": float((p > thr).mean()) if len(p) else np.nan,
+                     "flagged_stratum_threshold": float((p > t).mean()) if len(p) else np.nan})
+    thr_b = np.array([r["val_threshold"] for r in rows])
     return float((pos > thr_b[bp]).mean()), rows
 
 
@@ -305,7 +319,8 @@ def main(argv=None) -> int:
     from _hf_pins import load_model
 
     # models + training reference
-    ae, ih, th = (load_run_module(run, n) for n in ("autoencoder", "proj_head_image_infonce", "proj_head_text_infonce"))
+    ae, ih, th, t2b = (load_run_module(run, n) for n in ("autoencoder", "proj_head_image_infonce", "proj_head_text_infonce", "proj_head_text_mse"))
+    t2b_factor = json.loads((run / "map_calibration.json").read_text())["head"]  # global map calibration (scripts/README.md)
     specter = load_model("specter").to("cpu")
     split = torch.load(run / "pmids_split.pt", weights_only=False)
     split = {k: np.asarray(split[k]).astype(np.int64) for k in ("train", "val", "test")}
@@ -320,10 +335,13 @@ def main(argv=None) -> int:
         Zt_tr = l2(th(E_tr))
     log.info("training reference: %d maps, %d texts", len(L_tr), len(E_tr))
 
-    # ID test maps (exclusions applied) + OOD sources
+    # ID validation maps (thresholds) and test maps (control), exclusions applied, + OOD sources
+    val, excl_val = heldout_pmids("val", exclusions=not args.no_exclusions, log=log.info)
+    val = val[np.isin(val, lat_pm)]
     test, excl = heldout_pmids("test", exclusions=not args.no_exclusions, log=log.info)
     test = test[np.isin(test, lat_pm)]
-    X_id = load_pubmed_maps(test).numpy()
+    assert np.isin(val, split["val"]).all() and np.isin(test, split["test"]).all()
+    X_val, X_id = load_pubmed_maps(val).numpy(), load_pubmed_maps(test).numpy()
     src_pm = np.sort(rng.choice(test, size=min(args.n_ood, len(test)), replace=False))
     X_src = X_id[np.searchsorted(test, src_pm)]
     brain = Brain()
@@ -370,85 +388,133 @@ def main(argv=None) -> int:
         supp = Xt > NZ_REL * Xt.max(dim=1, keepdim=True).values
         nz, sse, energy = supp.sum(dim=1), ((R - Xt) ** 2).sum(dim=1), (Xt ** 2).sum(dim=1)
         norm = L.norm(dim=1)
-        return {"recon": (1 - cos(R, Xt, dim=1)).numpy(), "cos_recon": cos(R, Xt, dim=1).numpy(), "recon_per_nz": (sse / nz).numpy(), "recon_per_energy": (sse / energy).numpy(),
+        flat = torch.ones_like(Xt[:1])  # a constant map: the cosine of a map with it is mean / root mean square
+        return {"corr_recon": pearson(R, Xt), "recon": (1 - cos(R, Xt, dim=1)).numpy(), "cos_recon": cos(R, Xt, dim=1).numpy(),
+                "cos_flat_input": cos(Xt, flat, dim=1).numpy(), "cos_flat_recon": cos(R, flat, dim=1).numpy(),
+                "recon_per_nz": (sse / nz).numpy(), "recon_per_energy": (sse / energy).numpy(),
                 "recon_support": (1 - cos(R * supp, Xt * supp, dim=1)).numpy(), "nonzero": nz.numpy(),
                 "latent_norm": norm.numpy(), "latent_norm_score": np.abs(np.log(norm.numpy() / norm_tr)),
                 "latent_dist_mean": (L - mu).norm(dim=1).numpy(), "latent_cos_mean": cos(L, mu[None], dim=1).numpy(),
                 "latent_detail": ((L - mu) @ U_detail).norm(dim=1).numpy(), "rare_energy_input": ((Xt ** 2 * rare).sum(dim=1) / energy).numpy(),
-                "rec_corr_input": pearson(R, Xt), "rec_corr_mean_map": pearson(R, mean_map), "rec_max": R.max(dim=1).values.numpy(),
+                "rec_corr_mean_map": pearson(R, mean_map), "rec_max": R.max(dim=1).values.numpy(),
                 "rec_corr_source": np.nan if X_src_rows is None else pearson(R, torch.from_numpy(X_src_rows))}
     maha_t = {"contrastive": Mahalanobis(Zt_tr), "encoder": Mahalanobis(E_tr)}
     rows, emb = [], {}
-    for name, X in {"id_test": X_id, **ood}.items():
+    for name, X in {"id_val": X_val, "id_test": X_id, **ood}.items():
         L, Z, R = embed_maps(X)
         emb[name] = (L, Z)
-        rows.append(pd.DataFrame({"modality": "map", "set": name, "ood": name != "id_test",
+        rows.append(pd.DataFrame({"modality": "map", "set": name, "ood": name in MAP_SETS, "map_text_cos": 1 - knn_dist(Z, Zt_tr, k=1),
                                   "input_knn": knn_dist(X, X_tr, ref_normalised=True, chunk=256), "contrastive_knn": knn_dist(Z, Z_tr),
                                   "contrastive_maha": maha["contrastive"](Z), "encoder_knn": knn_dist(L, L_tr), "encoder_maha": maha["encoder"](L),
-                                  **map_columns(X, L, R, None if name == "id_test" else X_src[meta["src"][name]]),
-                                  "nonzero_vs_source": np.nan if name == "id_test" else nonzero(X) / np.maximum(nonzero(X_src[meta["src"][name]]), 1),
-                                  "item": [str(p) for p in test] if name == "id_test" else [str(src_pm[i]) for i in meta["src"][name]]}))
+                                  **map_columns(X, L, R, X_src[meta["src"][name]] if name in MAP_SETS else None),
+                                  "nonzero_vs_source": nonzero(X) / np.maximum(nonzero(X_src[meta["src"][name]]), 1) if name in MAP_SETS else np.nan,
+                                  "item": [str(p) for p in {"id_val": val, "id_test": test}[name]] if name not in MAP_SETS
+                                  else [str(src_pm[i]) for i in meta["src"][name]]}))
 
     del X_tr
 
     # text
-    E_id = l2(load_specter_latents(test))
+    E_val, E_id = l2(load_specter_latents(val)), l2(load_specter_latents(test))
     texts = {"wikitext": load_wikitext(args.n_ood, args.seed), "recipes": RECIPES}
     rows_id = load_pubmed_text_rows(test[:16])
     live = l2(encode_specter(specter, [f"{a} [SEP] {b}" for a, b in zip(rows_id["name"], rows_id["description"])]))
     specter_check = float((live * E_id[:16]).sum(dim=1).min())  # precomputed == live "title [SEP] abstract"
-    for name, E in {"id_test_text": E_id, **{k: l2(encode_specter(specter, v)) for k, v in texts.items()}}.items():
+    for name, E in {"id_val_text": E_val, "id_test_text": E_id, **{k: l2(encode_specter(specter, v)) for k, v in texts.items()}}.items():
         with torch.no_grad():
             Z = l2(th(E))
+            peak = torch.sigmoid(ae.decoder(t2b(E))).amax(dim=1).clamp(max=1 / t2b_factor) * t2b_factor  # calibrated map peak
         emb[name] = (E, Z)
-        rows.append(pd.DataFrame({"modality": "text", "set": name, "ood": name != "id_test_text", "contrastive_knn": knn_dist(Z, Zt_tr),
+        rows.append(pd.DataFrame({"modality": "text", "set": name, "ood": name in TEXT_SETS, "contrastive_knn": knn_dist(Z, Zt_tr), "t2b_peak": peak.numpy(),
                                   "contrastive_maha": maha_t["contrastive"](Z), "encoder_knn": knn_dist(E, E_tr), "encoder_maha": maha_t["encoder"](E),
                                   "max_cos_specter2": 1 - knn_dist(E, E_tr, k=1), "max_cos_shared": 1 - knn_dist(Z, Zt_tr, k=1),
-                                  "item": [str(p) for p in test] if name == "id_test_text" else texts[name]}))
+                                  "item": [str(p) for p in {"id_val_text": val, "id_test_text": test}[name]] if name not in TEXT_SETS else texts[name]}))
     df = pd.concat(rows, ignore_index=True)
     df.to_parquet(out / "scores.parquet", index=False)
 
-    # primary: detection rate at the ID 95th percentile (5 % false alarms); secondary: AUROC. Maps also get a sparsity-matched
-    # detection rate (ID threshold per quintile of the ID non-zero-voxel count) and the per-stratum rates (sparsity_strata.csv)
-    id_nz = df.loc[df["set"] == "id_test", "nonzero"].to_numpy()
-    edges = np.quantile(id_nz, [0.2, 0.4, 0.6, 0.8])
+    # every score: share flagged at the validation 95th percentile (5 % of validation inputs; similarities flagged when low) and AUROC
+    # of test vs OOD inputs. Maps also get a sparsity-matched rate (validation threshold per quintile of the validation non-zero-voxel
+    # count, sparsity_strata.csv)
+    val_nz = df.loc[df["set"] == "id_val", "nonzero"].to_numpy()
+    edges = np.quantile(val_nz, [0.2, 0.4, 0.6, 0.8])
     arows, srows = [], []
-    for modality, id_name, sets in (("map", "id_test", MAP_SETS), ("text", "id_test_text", TEXT_SETS)):
+    for modality, (val_name, id_name), sets in (("map", ("id_val", "id_test"), MAP_SETS), ("text", ("id_val_text", "id_test_text"), TEXT_SETS)):
         for score in SCORES:
-            neg = df.loc[df["set"] == id_name, score].to_numpy()
-            if np.isnan(neg).all():
+            sign = -1.0 if score in LOW_IS_OOD else 1.0
+            ref, neg = (sign * df.loc[df["set"] == k, score].to_numpy() for k in (val_name, id_name))
+            if np.isnan(ref).all():
                 continue
             for s in sets:
-                pos = df.loc[df["set"] == s, score].to_numpy()
-                r = {"modality": modality, "set": s, "score": score, "n_id": len(neg), "n_ood": len(pos), **boot_ci(neg, pos, args.n_boot, rng),
-                     "detection_sparsity_matched": np.nan, "id95_threshold": float(np.quantile(neg, 0.95)),
-                     "id_median": float(np.median(neg)), "ood_median": float(np.median(pos))}
+                pos = sign * df.loc[df["set"] == s, score].to_numpy()
+                r = {"modality": modality, "set": s, "score": score, "n_val": len(ref), "n_test": len(neg), "n_ood": len(pos),
+                     "flagged_test": detect(ref, neg), **boot_ci(ref, neg, pos, args.n_boot, rng), "flagged_sparsity_matched": np.nan,
+                     "threshold_val": sign * float(np.quantile(ref, 0.95)), "val_median": sign * float(np.median(ref)),
+                     "test_median": sign * float(np.median(neg)), "ood_median": sign * float(np.median(pos))}
                 if modality == "map":
-                    r["detection_sparsity_matched"], st = strata(neg, pos, id_nz, df.loc[df["set"] == s, "nonzero"].to_numpy(), edges)
+                    r["flagged_sparsity_matched"], st = strata(ref, pos, val_nz, df.loc[df["set"] == s, "nonzero"].to_numpy(), edges)
                     srows += [{"set": s, "score": score, **x} for x in st]
                 arows.append(r)
     det = pd.DataFrame(arows)
     det.to_csv(out / "detection.csv", index=False, float_format="%.4f")
-
-    # cosine scores (higher = more in-distribution): maps cos(map, its autoencoder reconstruction) = 1 - recon; text max cosine to the
-    # training abstracts, in the SPECTER2 space (figure) and in the shared space. Flagged = below the held-out 5th percentile (5 % false alarms)
-    frows = []
-    for modality, id_name, sets, score in (("map", "id_test", MAP_SETS, "cos_recon"), ("text", "id_test_text", TEXT_SETS, "max_cos_specter2"),
-                                           ("text", "id_test_text", TEXT_SETS, "max_cos_shared")):
-        neg = df.loc[df["set"] == id_name, score].to_numpy()
-        for s in (id_name, *sets):
-            pos = df.loc[df["set"] == s, score].to_numpy()
-            b = boot_ci(-neg, -pos, args.n_boot, rng) if s != id_name else {"detection_at_id95": float((pos < np.quantile(neg, 0.05)).mean())}
-            frows.append({"modality": modality, "set": s, "score": score, "n": len(pos), "threshold_id5": float(np.quantile(neg, 0.05)),
-                          "median": float(np.median(pos)), "flagged": b["detection_at_id95"], "flagged_lo": b.get("det_lo", np.nan),
-                          "flagged_hi": b.get("det_hi", np.nan), "auroc": b.get("auroc", np.nan)})
-    pd.DataFrame(frows).to_csv(out / "flagged_cosine.csv", index=False, float_format="%.4f")
     pd.DataFrame(srows).to_csv(out / "sparsity_strata.csv", index=False, float_format="%.4f")
 
-    # mechanism: per-set medians (maps), the training-latent reference, and each rotated map against its own unrotated source
+    # the detector (figure): a map is flagged when the correlation with its autoencoder reconstruction is below its validation 2.5th
+    # percentile or the Mahalanobis distance of its latent above its validation 97.5th percentile; a text when its cosine to the
+    # nearest training abstract is below its validation 5th percentile. AUROC: the larger validation tail share of the two map scores
+    cols = {"map": ("corr_recon", "encoder_maha"), "text": ("max_cos_specter2",)}
+
+    def thresholds(modality, v):
+        if modality == "text":
+            return {"max_cos_specter2": float(np.quantile(v["max_cos_specter2"], 0.05))}
+        return {"corr_recon": float(np.quantile(v["corr_recon"], FLAG_Q)), "encoder_maha": float(np.quantile(v["encoder_maha"], 1 - FLAG_Q))}
+
+    def flags(modality, v, x):
+        """(flagged, flagged by the similarity, flagged by the latent distance) for inputs x, thresholds from the validation scores v."""
+        t = thresholds(modality, v)
+        low = x[cols[modality][0]] < t[cols[modality][0]]
+        far = x["encoder_maha"] > t["encoder_maha"] if modality == "map" else np.zeros_like(low)
+        return low | far, low, far
+
+    def atypical(modality, v, x):
+        """The larger validation tail share of the detector's scores (flagged above 0.975 for maps, 0.95 for text)."""
+        a = tail_share(-v[cols[modality][0]], -x[cols[modality][0]])
+        return np.maximum(a, tail_share(v["encoder_maha"], x["encoder_maha"])) if modality == "map" else a
+
+    frows = []
+    for modality, (val_name, id_name), sets in (("map", ("id_val", "id_test"), MAP_SETS), ("text", ("id_val_text", "id_test_text"), TEXT_SETS)):
+        v = {c: df.loc[df["set"] == val_name, c].to_numpy() for c in cols[modality]}
+        neg = atypical(modality, v, {c: df.loc[df["set"] == id_name, c].to_numpy() for c in cols[modality]})
+        for s in (val_name, id_name, *sets):
+            x = {c: df.loc[df["set"] == s, c].to_numpy() for c in cols[modality]}
+            f, f_sim, f_dist = flags(modality, v, x)
+            boots = []  # validation (threshold), test and OOD inputs resampled
+            for _ in range(args.n_boot if s != val_name else 0):
+                n_v = len(v[cols[modality][0]])
+                iv, ix = rng.integers(0, n_v, n_v), rng.integers(0, len(f), len(f))
+                boots.append(flags(modality, {c: a[iv] for c, a in v.items()}, {c: a[ix] for c, a in x.items()})[0].mean())
+            lo, hi = np.quantile(boots, [0.025, 0.975]) if boots else (np.nan, np.nan)
+            frows.append({"modality": modality, "set": s, "n": len(f), "flagged": f.mean(), "flagged_lo": lo, "flagged_hi": hi,
+                          "auroc": auroc(neg, atypical(modality, v, x)) if s in sets else np.nan,
+                          "flagged_by_similarity": f_sim.mean(), "flagged_by_latent_distance": f_dist.mean(),
+                          **{f"median_{c}": float(np.median(x[c])) for c in cols[modality]},
+                          **{f"threshold_{c}": t for c, t in thresholds(modality, v).items()}})
+    flag = pd.DataFrame(frows)
+    flag.to_csv(out / "flagged.csv", index=False, float_format="%.4f")
+
+    # why white noise passed the previous score: cos(map, reconstruction) without centering, flagged below the test 5th percentile.
+    # A dense non-negative map and its flat reconstruction share a large constant component (their cosine with a constant map)
     maps = df[df["modality"] == "map"]
+    old_thr = float(np.quantile(maps.loc[maps["set"] == "id_test", "cos_recon"], 0.05))
+    diag = []
+    for s, g in maps.groupby("set", sort=False):
+        r = {"set": s, "n": len(g), "previous_threshold_cos_recon": old_thr, "previously_flagged": float((g["cos_recon"] < old_thr).mean())}
+        for c in ("cos_recon", "corr_recon", "encoder_maha", "cos_flat_input", "cos_flat_recon"):
+            r.update({f"{c}_p05": g[c].quantile(0.05), f"{c}_median": g[c].median(), f"{c}_p95": g[c].quantile(0.95)})
+        diag.append(r)
+    pd.DataFrame(diag).to_csv(out / "diagnosis.csv", index=False, float_format="%.4f")
+
+    # mechanism: per-set medians (maps), the training-latent reference, and each rotated map against its own unrotated source
     mech_cols = ["nonzero", "latent_norm", "latent_dist_mean", "latent_cos_mean", "latent_detail", "encoder_maha", "contrastive_knn", "recon",
-                 "rec_corr_input", "rec_corr_source", "rec_corr_mean_map", "rec_max", "rare_energy_input"]
+                 "corr_recon", "rec_corr_source", "rec_corr_mean_map", "rec_max", "rare_energy_input"]
     maps.groupby("set", sort=False)[mech_cols].median().to_csv(out / "mechanism.csv", float_format="%.4f")
     id_rec = maps[maps["set"] == "id_test"].set_index("item")["recon"]
     with torch.no_grad():
@@ -464,10 +530,12 @@ def main(argv=None) -> int:
                  "share_recon_above_own_source": {s: float((maps.loc[maps["set"] == s, "recon"].to_numpy()
                                                             > id_rec.loc[maps.loc[maps["set"] == s, "item"]].to_numpy()).mean())
                                                   for s in ("rot90", "rotation", "spin", "shuffle")}}
-    sparsity = {"id_nonzero_quintile_edges": edges, "id_nonzero_range": [int(id_nz.min()), int(id_nz.max())],
+    id_nz = maps.loc[maps["set"] == "id_test", "nonzero"].to_numpy()
+    sparsity = {"val_nonzero_quintile_edges": edges, "id_nonzero_range": [int(id_nz.min()), int(id_nz.max())],
                 "nonzero_vs_source_range": {s: [float(v.min()), float(np.median(v)), float(v.max())] for s in MAP_SETS
                                             for v in [maps.loc[maps["set"] == s, "nonzero_vs_source"].to_numpy()]},
-                "spearman_vs_nonzero_id": {c: float(spearmanr(maps.loc[maps["set"] == "id_test", c], id_nz)[0]) for c in ("recon", "latent_norm")}}
+                "spearman_vs_nonzero_id": {c: float(spearmanr(maps.loc[maps["set"] == "id_test", c], id_nz)[0])
+                                           for c in ("corr_recon", "recon", "encoder_maha", "latent_norm")}}
 
     # inspection: collapse, distance to the source embedding, nearest training items of collapsed sets
     from _hf_pins import load_dataset
@@ -526,16 +594,20 @@ def main(argv=None) -> int:
         d = det[det["set"] == s].set_index("score")
         row = {"OOD set": LABEL[s], "n": int(d["n_ood"].iloc[0])}
         for score in SCORES:
-            row[SCORE_NAME[score]] = f"{100 * d.loc[score, 'detection_at_id95']:.0f}% ({d.loc[score, 'auroc']:.2f})" if score in d.index else "--"
+            row[SCORE_NAME[score]] = f"{100 * d.loc[score, 'flagged']:.0f}% ({d.loc[score, 'auroc']:.2f})" if score in d.index else "--"
         wide.append(row)
     wide = pd.DataFrame(wide)
     wide.to_csv(out / "a7_ood_table_full.csv", index=False)
-    caption = ("OOD detection with the final NeuroVLM models: share of OOD inputs above the 95th percentile of the held-out test-input "
-               f"score (maps n = {int((df['set'] == 'id_test').sum())}, abstracts n = {int((df['set'] == 'id_test_text').sum())}; 5\\% "
-               "false alarms by construction) and, in parentheses, the AUROC. Reference = training split; kNN = 1 $-$ mean cosine to the "
+    caption = ("OOD detection with the final NeuroVLM models: share of OOD inputs beyond the 95th percentile of the validation score "
+               f"(maps n = {int((df['set'] == 'id_val').sum())}, abstracts n = {int((df['set'] == 'id_val_text').sum())}; 5\\% of "
+               "validation inputs; similarities and peaks flagged when low) and, in parentheses, the AUROC against the held-out test inputs "
+               f"(maps n = {int((df['set'] == 'id_test').sum())}, abstracts n = {int((df['set'] == 'id_test_text').sum())}). "
+               "Reference = training split; AE recon. correlation = Pearson $r$ of the map and its autoencoder reconstruction; kNN = 1 $-$ mean cosine to the "
                "10 nearest training items; Mahal. = Mahalanobis distance (Ledoit--Wolf). Input = raw voxels; encoder = projection-head input "
                "(autoencoder latent for maps, SPECTER2 for text); contrastive = shared InfoNCE space. AE latent norm = $|\\log(\\|z\\| / "
-               "\\mathrm{median}_\\mathrm{train}\\|z\\|)|$; SSE = squared reconstruction error; non-zero voxels = above 0.1\\% of the map maximum.")
+               "\\mathrm{median}_\\mathrm{train}\\|z\\|)|$; SSE = squared reconstruction error; non-zero voxels = above 0.1\\% of the map maximum; "
+               "nearest training text = cosine of the map's shared-space embedding to the nearest training abstract; calibrated map peak = "
+               "peak of the text's generated map after the global calibration.")
     tex = ["\\begin{table*}[t]", "\\centering", f"\\caption{{{caption}}}", "\\label{tab:a7_ood_full}", "\\resizebox{\\textwidth}{!}{%",
            "\\begin{tabular}{lr" + "l" * (wide.shape[1] - 2) + "}", "\\toprule", " & ".join(wide.columns) + " \\\\", "\\midrule"]
     for i, r in wide.iterrows():
@@ -550,6 +622,17 @@ def main(argv=None) -> int:
         "models": {"run_dir": str(run.relative_to(REPO)), "specter": "released (frozen) SPECTER2 adhoc_query"},
         "reference": {"split": "train", "n_maps": int(len(L_tr)), "n_texts": int(len(E_tr))},
         "id_control": {"split": "test", "n": int(len(test)), "exclusions": excl},
+        "thresholds": {"split": "val", "n": int(len(val)), "exclusions": excl_val},
+        "detector": {"maps": f"flagged when corr(map, reconstruction) < validation {100 * FLAG_Q:g}th percentile or the Mahalanobis "
+                             f"distance of the autoencoder latent from the training latents > validation {100 * (1 - FLAG_Q):g}th percentile",
+                     "text": "flagged when the SPECTER2 cosine to the nearest training abstract < validation 5th percentile",
+                     "thresholds": {c: float(flag.loc[flag["set"] == v, f"threshold_{c}"].iloc[0])
+                                    for v, c in (("id_val", "corr_recon"), ("id_val", "encoder_maha"), ("id_val_text", "max_cos_specter2"))},
+                     "flagged": dict(zip(flag["set"], flag["flagged"].round(4)))},
+        "white_noise_diagnosis": {"previous_score": "cos(map, reconstruction), flagged below the test 5th percentile", "previous_threshold": old_thr,
+                                  **{f"{s}_{k}": float(maps.loc[maps["set"] == s, c].median()) for s in ("id_test", "noise")
+                                     for k, c in (("cos_recon", "cos_recon"), ("corr_recon", "corr_recon"), ("cos_input_with_constant_map", "cos_flat_input"),
+                                                  ("cos_recon_with_constant_map", "cos_flat_recon"))}},
         "consistency_checks": {"max_abs_diff_cached_train_latents_vs_final_encoder": lat_check,
                                "median_contrastive_knn_train_leave_one_out": train_loo_knn,
                                "median_contrastive_knn_id_test": float(df.loc[df["set"] == "id_test", "contrastive_knn"].median()),
@@ -567,7 +650,8 @@ def main(argv=None) -> int:
         "n_boot": args.n_boot, "k": K, "seed": args.seed, "packages": env_packages(), "wall_seconds": time.perf_counter() - t0})
     with pd.option_context("display.width", 220, "display.max_columns", 20):
         print(pd.DataFrame(insp).drop(columns=["mean", "std"], errors="ignore").to_string(float_format=lambda v: f"{v:.3f}"))
-        print(det.pivot(index="set", columns="score", values="detection_at_id95").to_string(float_format=lambda v: f"{v:.3f}"))
+        print(det.pivot(index="set", columns="score", values="flagged").to_string(float_format=lambda v: f"{v:.3f}"))
+        print(flag.to_string(float_format=lambda v: f"{v:.3f}"))
         print(maps.groupby("set", sort=False)[mech_cols].median().to_string(float_format=lambda v: f"{v:.3f}"))
         print(pd.DataFrame(nn_rows).to_string())
         print({k: {kk: (round(vv, 3) if isinstance(vv, float) else vv) for kk, vv in v.items()} for k, v in prev_diag.items()})

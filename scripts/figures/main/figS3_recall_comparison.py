@@ -294,21 +294,22 @@ def compute(args, device):
 
 def auc_table(ax, rows, fs):
     """AUC table in the empty lower right of a square recall panel, below the chance diagonal: per model a colour
-    handle, its name and its text→image and image→text AUC, under a solid and a dashed line sample."""
+    handle, its name and its text→image and image→text AUC; the two AUC columns sit under one "AUC" header that spans
+    them and, below it, a solid and a dashed line sample (one per column)."""
     a_in = ax.get_position().width * ax.figure.get_figwidth()
     pitch = fs * 1.3 / 72.0
     num_w = text_width_in("0.00", fs)
     num_r = [a_in - 0.06 - num_w - 0.1, a_in - 0.06]  # right edges of the two AUC columns
+    num_c = [r - num_w / 2 for r in num_r]  # their centres
     x_name = num_r[0] - num_w - 0.1 - max(text_width_in(name, fs) for name, *_ in rows)
 
     def at(x_in, y_in):
         return x_in / a_in, y_in / a_in
 
     kw = dict(transform=ax.transAxes, fontsize=fs, va="center")
+    ax.text(*at(sum(num_c) / 2, 0.05 + (len(rows) + 1.5) * pitch), "AUC", ha="center", **kw)  # over both columns
     y = 0.05 + (len(rows) + 0.5) * pitch
-    ax.text(*at(x_name, y), "AUC", ha="left", **kw)
-    for r, ls in zip(num_r, ("-", "--")):
-        c = r - num_w / 2
+    for c, ls in zip(num_c, ("-", "--")):
         ax.plot(*zip(at(c - 0.1, y), at(c + 0.1, y)), transform=ax.transAxes, color="black", ls=ls, lw=1.0)
     for i, (name, col, auc_t2i, auc_i2t) in enumerate(rows):
         y = 0.05 + (len(rows) - i - 0.5) * pitch
