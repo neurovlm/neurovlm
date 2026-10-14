@@ -1,15 +1,16 @@
 #!/usr/bin/env python
-"""Fig. 2: atlas networks, their text-to-brain maps and brain-to-text captions. One page: the true (atlas) map and the
-map generated from the description of each of the eight networks (sagittal, coronal and axial), the complete generated
-Network, Anatomy and Cognition texts of the two with the cleanest generations (pick_full) and the three generated titles
-of the other six. The complete descriptions and generated texts of all eight go to a supplementary table,
-fig2_texts_table.{tex,md}; --text-pages also draws them as figure pages 2+.
+"""Fig. 2: atlas networks, their text-to-brain maps and brain-to-text captions. One page, one row per network: its name
+above the true (atlas) map and the map generated from its description (sagittal, coronal and axial, one scale), then
+the Network, Anatomy and Cognition texts generated from the true map, complete for the two with the cleanest
+generations (pick_full) and the three titles for the other six. The complete descriptions and generated texts of all
+eight go to a supplementary table, fig2_texts_table.{tex,md}; --text-pages also draws them as figure pages 2+.
 
     .venv/bin/python scripts/figures/main/fig2_network_examples.py
 """
 from __future__ import annotations
 
 import re
+from itertools import groupby
 
 import numpy as np
 from _shared import (
@@ -27,10 +28,10 @@ COMPONENTS = ("specter", "autoencoder", "proj_head_text_mse", "qformer_canonical
 BASIS_LABEL = {"network": "Network", "region": "Anatomy", "function": "Cognition"}  # the three generated titles
 VIEWS = "xyz"  # sagittal, coronal and axial
 N_FULL = 2  # networks printed with their complete texts
-LINE_SPACING = 1.1  # text lines, in font sizes
-MAP_COL, COL_GAP = 1.1, 0.09  # page 1, inches: maps column of the complete examples; gap between its columns
-GUTTER, CELL_GAP = 0.5, 0.1  # page 1, inches: label gutter of the other six; gap between their cells
-TRUE, T2B, B2T = "True", "Generated (text-to-brain)", "Generated (brain-to-text)"  # map and text labels
+LINE_SPACING = 1.08  # text lines, in font sizes
+MAP_W, MAP_GAP, TEXT_GAP, COL_GAP = 0.63, 0.05, 0.12, 0.08  # page 1, inches: map width, gaps after the maps and texts
+ROW_PAD = 0.03  # page 1, inches: space above and below each row rule
+TRUE, T2B, B2T = "True", ("Generated", "(text-to-brain)"), "Generated (brain-to-text)"  # column headers
 LABEL_GRAY, RULE_GRAY = "#5f5e5a", "#b4b2ab"
 
 # (atlas, map name, display title): the reference rows of the paper figure
@@ -44,8 +45,8 @@ REFS = [
     ("Du", "FPN-A", "Frontoparietal Control Network"),
     ("Du", "SAL/PMN", "Salience Network"),
 ]
-NAMES = {"Default Mode Network": "Default mode network", "Frontoparietal Control Network": "Frontoparietal control",
-         "Salience Network": "Salience"}  # names on page 1 (the table keeps the titles)
+NAMES = {"Default Mode Network": "Default mode", "Frontoparietal Control Network": "Frontoparietal",
+         "Salience Network": "Salience"}  # names on page 1, no wider than the two maps (the table keeps the titles)
 REF_SHORT = {"Emo/Interoception1": "Interoception", "Emo/Interoception2": "Interoception",
              "Emo/Interoception3": "Interoception", "Emo/Interoception4": "Interoception", "default mode": "Default mode"}
 
@@ -202,17 +203,31 @@ def pick_full(refs, captions, n=N_FULL):
     return sorted(order[:n]), [{"titles_named": a, "word_pair_overlap": round(b, 3)} for a, b in scores]
 
 
-def column_widths(captions, total, fs):
+def run_in(title, body, width, fs):
+    """Bold run-in title ('Title.') and the body, wrapped to width: lines of (word, style)."""
+    tokens = [(w, "title") for w in f"{title or '(no title)'}.".split()] + [(w, "body") for w in str(body).split()]
+    return rich_lines(tokens, width, fs)
+
+
+def column_widths(captions, rest, total, fs):
     """Widths of the Network | Anatomy | Cognition columns (summing to total, inches) that need the fewest lines for the
-    longest of the complete texts, ties broken by the fewest lines in all (1 % steps)."""
+    complete texts (captions), ties broken by the fewest title lines of the others (rest; 1 % steps)."""
+    memo = {}
+
+    def n_lines(title, body, w):
+        key = (title, body, round(w, 4))
+        if key not in memo:
+            memo[key] = len(run_in(title, body, w, fs) if body else wrap_measured(title or "(no title)", w, fs, weight="bold"))
+        return memo[key]
+
     best = None
-    for a in range(30, 46):  # percent of total for Network, then Anatomy
-        for b in range(24, 35):
+    for a in range(28, 47):  # percent of total for Network, then Anatomy
+        for b in range(22, 40):
             ws = (a * total / 100, b * total / 100, (100 - a - b) * total / 100)
-            n = [len(wrap_measured(t or "(no title)", w, fs, weight="bold")) + len(wrap_measured(body, w, fs))
-                 for caps in captions for (t, body), w in zip(caps, ws)]
-            if best is None or (max(n), sum(n)) < best[0]:
-                best = ((max(n), sum(n)), ws)
+            full = [max(n_lines(t, body, w) for (t, body), w in zip(caps, ws)) for caps in captions]
+            titles = sum(n_lines(t, None, w) for caps in rest for (t, _), w in zip(caps, ws))
+            if best is None or (sum(full), titles) < best[0]:
+                best = ((sum(full), titles), ws)
     return best[1]
 
 
@@ -223,85 +238,72 @@ def map_height(width):
 
 
 def overview_page(refs, shown, coords, captions, full, masker, fs):
-    """Page 1. Top: the networks in ``full``, one row each, the network's name, its true (atlas) map and the map generated
-    from its description in the left column, the complete generated texts in Network | Anatomy | Cognition columns.
-    Below: the other six in two rows of three cells, each the name, the two maps side by side and the three generated
-    titles. ``shown``: per network the two drawn maps and their thresholds."""
+    """Page 1: one row per network, the networks in ``full`` first. Columns: the true map and the generated map (the
+    network's name above them), then the Network, Anatomy and Cognition texts generated from the true map, complete for
+    the networks in ``full`` (bold run-in titles) and their titles for the others. ``shown``: per network the two drawn
+    maps and their thresholds."""
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
 
     W, lh, name_fs = FIG_FULL_W, fs * LINE_SPACING / 72, fs + 1
-    ops = []  # ("text", x, y, line, size, weight, color, ha) | ("rule", x0, x1, y) | ("map", i, k, x, y, w, h); y from the top
+    ops = []  # ("text", x, baseline, [(run, weight), ...], size, color, ha) | ("rule", x0, x1, y) | ("map", i, k, x, y, w, h); y from the top
 
-    def put(x, y, lines, size=fs, weight="normal", color="black", ha="left"):
-        """Lines from y down; returns the y below them."""
+    def put(x, base, lines, size=fs, weight="normal", color="black", ha="left"):
+        """Lines from the baseline base down."""
         for k, line in enumerate(lines):
-            ops.append(("text", x, y + k * size * LINE_SPACING / 72, line, size, weight, color, ha))
-        return y + len(lines) * size * LINE_SPACING / 72
+            runs = [(line, weight)] if isinstance(line, str) else line
+            ops.append(("text", x, base + k * size * LINE_SPACING / 72, runs, size, color, ha))
 
-    def wrap(s, w, size=fs, weight="normal"):
-        return wrap_measured(s, w, size, weight=weight)
+    order = list(full) + [i for i in range(len(refs)) if i not in full]
+    mx = [k * (MAP_W + MAP_GAP) for k in range(2)]  # left edges of the true and generated maps
+    x_text = 2 * MAP_W + MAP_GAP + TEXT_GAP
+    widths = column_widths([captions[i] for i in full], [captions[i] for i in order[len(full):]],
+                           W - x_text - 2 * COL_GAP - 0.01, fs)
+    xs = [x_text + sum(widths[:k]) + k * COL_GAP for k in range(3)]
 
-    def name(i):
-        return NAMES.get(refs[i][2], refs[i][2])
+    # column headers, two tiers: "Generated" | brain-to-text above, "True", "(text-to-brain)" and the texts below
+    b1 = 0.02 + 0.8 * fs / 72
+    b2 = b1 + lh + 0.04
+    put(mx[0] + MAP_W / 2, b2, [TRUE], color=LABEL_GRAY, ha="center")
+    put(mx[1] + MAP_W / 2, b1, [T2B[0]], color=LABEL_GRAY, ha="center")
+    put(mx[1] + MAP_W / 2, b2, [T2B[1]], color=LABEL_GRAY, ha="center")
+    put((xs[0] + W) / 2, b1, [B2T], color=LABEL_GRAY, ha="center")
+    ops.append(("rule", xs[0], W, b1 + 0.045))
+    for x, b in zip(xs, BASES):
+        put(x, b2, [BASIS_LABEL[b]], color=LABEL_GRAY)
+    y = b2 + 0.06
+    ops.append(("rule", 0, W, y))
 
-    # complete examples: maps column | three text columns under one header
-    widths = column_widths([captions[i] for i in full], W - MAP_COL - 3 * COL_GAP, fs)
-    xs = [MAP_COL + COL_GAP + sum(widths[:k]) + k * COL_GAP for k in range(3)]
-    y = put((xs[0] + W) / 2, 0.01, [B2T], color=LABEL_GRAY, ha="center")
-    ops.append(("rule", xs[0], W, y + 0.01))
-    y = max(put(x, y + 0.03, [BASIS_LABEL[b]], color=LABEL_GRAY) for x, b in zip(xs, BASES))
-    ops += [("rule", x, x + w, y + 0.01) for x, w in zip(xs, widths)]
-    y += 0.05
-    h_big = map_height(MAP_COL)
-    for i in full:
-        y0 = y
-        yl = put(0, y0, wrap(name(i), MAP_COL, name_fs, "bold"), name_fs, "bold") + 0.02
-        yl = put(0, yl, [TRUE], color=LABEL_GRAY)
-        ops.append(("map", i, 0, 0, yl, MAP_COL, h_big))
-        yl = put(0, yl + h_big + 0.04, wrap(T2B, MAP_COL), color=LABEL_GRAY)
-        ops.append(("map", i, 1, 0, yl, MAP_COL, h_big))
-        yl += h_big
-        for x, w, (t, body) in zip(xs, widths, captions[i]):
-            yt = put(x, y0, wrap(t or "(no title)", w, weight="bold"), weight="bold")
-            yl = max(yl, put(x, yt, wrap(body, w)))
-        y = yl + 0.05
-        ops.append(("rule", 0, W, y))
-        y += 0.06
-
-    # the others: gutter of labels | three cells per row
-    cell = (W - GUTTER - 2 * CELL_GAP) / 3
-    mw = (cell - 0.04) / 2
-    h_small = map_height(mw)
-    rest = [i for i in range(len(refs)) if i not in full]
-    for r0 in range(0, len(rest), 3):
-        row = rest[r0:r0 + 3]
-        cx = [GUTTER + j * (cell + CELL_GAP) for j in range(len(row))]
-        y = max(put(x, y, wrap(name(i), cell, name_fs, "bold"), name_fs, "bold") for x, i in zip(cx, row)) + 0.01
-        labels = [wrap(TRUE, mw), wrap(T2B, mw)]
-        n = max(map(len, labels))
-        for x in cx:
-            for k, lab in enumerate(labels):
-                put(x + k * (mw + 0.04), y + (n - len(lab)) * lh, lab, color=LABEL_GRAY)
-        y += n * lh
-        ops += [("map", i, k, x + k * (mw + 0.04), y, mw, h_small) for x, i in zip(cx, row) for k in range(2)]
-        y = put(0, y + h_small + 0.03, [B2T], color=LABEL_GRAY)
-        for k, b in enumerate(BASES):
-            put(0, y, [BASIS_LABEL[b]], color=LABEL_GRAY)
-            y = max(put(x, y, wrap(captions[i][k][0] or "(no title)", cell, weight="bold"), weight="bold")
-                    for x, i in zip(cx, row))
-        y += 0.05
-        if r0 + 3 < len(rest):
+    h_map = map_height(MAP_W)
+    for r, i in enumerate(order):
+        y0 = y + ROW_PAD
+        base = y0 + 0.8 * name_fs / 72
+        name = wrap_measured(NAMES.get(refs[i][2], refs[i][2]), 2 * MAP_W + MAP_GAP, name_fs, weight="bold")
+        put(0, base, name, name_fs, "bold")
+        y_map = y0 + len(name) * name_fs * LINE_SPACING / 72 + 0.015
+        ops += [("map", i, k, mx[k], y_map, MAP_W, h_map) for k in range(2)]
+        h = y_map + h_map - y0
+        for x, w, (t, body) in zip(xs, widths, captions[i]):  # first line on the name's baseline
+            if i in full:
+                lines = [[(" ".join(wd for wd, _ in grp), "bold" if st == "title" else "normal")
+                          for st, grp in groupby(line, key=lambda tok: tok[1])] for line in run_in(t, body, w, fs)]
+            else:
+                lines = wrap_measured(t or "(no title)", w, fs, weight="bold")
+            put(x, base, lines, weight="bold")
+            h = max(h, base - y0 + (len(lines) - 1) * lh + 0.25 * fs / 72)
+        y = y0 + h + ROW_PAD
+        if r < len(order) - 1:
             ops.append(("rule", 0, W, y))
-        y += 0.06
-    H = y - 0.06
+    H = y
 
     fig = plt.figure(figsize=(W, H))
     for op in ops:
-        if op[0] == "text":
-            _, x, yt, line, size, weight, color, ha = op
-            fig.text(x / W, 1 - (yt + 0.8 * size / 72) / H, line, fontsize=size, fontweight=weight, color=color,
-                     ha=ha, va="baseline")
+        if op[0] == "text":  # runs of one weight each, a space between them
+            _, x, yb, runs, size, color, ha = op
+            for k, (text, weight) in enumerate(runs):
+                text += " " if k < len(runs) - 1 else ""
+                fig.text(x / W, 1 - yb / H, text, fontsize=size, fontweight=weight, color=color, ha=ha, va="baseline")
+                x += text_width_in(text, size, weight)
         elif op[0] == "rule":
             _, x0, x1, yr = op
             fig.add_artist(Line2D([x0 / W, x1 / W], [1 - yr / H] * 2, transform=fig.transFigure, color=RULE_GRAY, lw=0.5))
@@ -310,7 +312,8 @@ def overview_page(refs, shown, coords, captions, full, masker, fs):
             vec, thr = shown[i][k]
             draw_brain_views(fig, masker.inverse_transform(vec), (x, H - yt - h, w, h), views=VIEWS,
                              cut_coords=coords[i], threshold=thr, vmin=0.0, vmax=None)
-    return fig, round(H, 2)
+    return fig, round(H, 2), {"map_width_in": MAP_W, "map_height_in": round(h_map, 3),
+                              "text_columns_in": [round(w, 3) for w in widths]}
 
 
 STYLE = {"name": dict(fontweight="bold", color=BLUE), "label": dict(color="#52514e"), "title": dict(fontweight="bold"),
@@ -419,20 +422,21 @@ def render(args, payload):
     shown = [(display_vector(t), display_vector(p)) for t, p in zip(true, pred)]  # (atlas, generated): (map, threshold)
     coords = [map_cuts(masker, a[0], g[0], refs[i][2]) for i, (a, g) in enumerate(shown)]
     full, scores = pick_full(refs, captions)
-    fig1, h1 = overview_page(refs, shown, coords, captions, full, masker, fs)
+    fig1, h1, sizes = overview_page(refs, shown, coords, captions, full, masker, fs)
     pages = [(fig1, h1)] + (text_pages(refs, captions, fs) if args.text_pages else [])
     text_dump = {"text_in_figure": "page 1: the complete generated texts of the full examples, the three generated titles "
                                    "of the others; complete texts of all in fig2_texts_table.{tex,md}"
                                    + (" and on pages 2+" if args.text_pages else ""),
-                 "labels": {"true map": TRUE, "generated map": T2B, "generated texts": B2T},
+                 "labels": {"true map": TRUE, "generated map": " ".join(T2B), "generated texts": B2T},
                  "full_examples": {"networks": [refs[i][2] for i in full],
                                    "rule": "the two networks with the most of their three generated titles (network, "
                                            "anatomy, cognition) named verbatim in the input description, ties broken by "
                                            "the share of the description's word pairs that the three generated texts "
                                            "repeat (pick_full)",
                                    "scores": {refs[i][2]: sc for i, sc in enumerate(scores)}},
-                 "views": "sagittal, coronal and axial (VIEWS = 'xyz'); full examples: true map above the map generated "
-                          "from the description; the others: true map left, generated map right",
+                 "views": "sagittal, coronal and axial (VIEWS = 'xyz'), one row per network: true map left, the map "
+                          "generated from the description right, all maps at one scale",
+                 "layout_in": sizes,
                  "map_display": MAP_DISPLAY_RULE, "map_calibration": payload["map_calibration"], "pages": {}, "rows": []}
     for k, (_, h) in enumerate(pages):
         text_dump["pages"][f"{STEM if k == 0 else f'{STEM}_p{k + 1}'}.png"] = {"height_in": h}

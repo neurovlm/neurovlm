@@ -63,9 +63,10 @@ VERBS = set("involves involve involving includes include including spans spannin
 MARKER_PT = 4.5  # density markers, diameter in pt
 LINE_SPACING = 1.0
 # column widths, inches: the shared y label with the tick labels, each density strip (gap between them), group bar, true
-# title, each map column (sagittal above axial); the generated text takes the rest of FIG_FULL_W
-YAXIS_W, STRIP_W, STRIP_GAP, BAR_W, TITLE_W, MAP_W = 0.37, 0.28, 0.06, 0.15, 1.15, 0.4
-MAP_VIEWS = "xz"
+# title, each map column (sagittal, coronal and axial stacked at one scale; 0.34 keeps the page at 6.82 in, so it and
+# its caption fit the 7.67 in text height); the generated text takes the rest of FIG_FULL_W
+YAXIS_W, STRIP_W, STRIP_GAP, BAR_W, TITLE_W, MAP_W = 0.37, 0.28, 0.06, 0.15, 1.15, 0.34
+MAP_VIEWS, VIEW_GAP = "xyz", 0.02  # sagittal, coronal, axial, top to bottom; gap between views, inches
 COMPONENTS = ("specter", "proj_head_text_mse", "autoencoder", "proj_head_text_infonce", "proj_head_image_infonce",
               "qformer_canonical", "canonical_semantic_banks", "neuroqwen")
 
@@ -454,9 +455,10 @@ def render(args, rows: list[dict], payload):
     fig_w = FIG_FULL_W
 
     # (name, width, gap after) in inches, after the y label and tick labels; the generated text takes the rest and sets
-    # the row heights
+    # the row heights. The wider gap between the map columns keeps the "Generation" header (wider than its column)
+    # clear of the "True" header
     widths = [("density_image", STRIP_W, STRIP_GAP), ("density_text", STRIP_W, 0.03), ("group_bar", BAR_W, 0.02),
-              ("true_title", TITLE_W, 0.05), ("generated_maps", MAP_W, 0.04), ("true_maps", MAP_W, 0.06)]
+              ("true_title", TITLE_W, 0.04), ("generated_maps", MAP_W, 0.07), ("true_maps", MAP_W, 0.04)]
     cols, x = {}, YAXIS_W
     for name, w, gap in widths:
         cols[name] = (x, w)
@@ -472,7 +474,7 @@ def render(args, rows: list[dict], payload):
     titles = [wrap_measured(r["title"], cols["true_title"][1], fs, weight="bold", hyphens=True) for r in rows]
     n_lines = [max(len(gt) + len(gb), len(tl)) for (gt, gb), tl in zip(gen, titles)]
     map_wmm, map_hmm = brain_views_mm(MAP_VIEWS, vertical=True)
-    map_h = MAP_W * map_hmm / map_wmm + 0.02  # the two stacked views and their gap
+    map_h = MAP_W * map_hmm / map_wmm + VIEW_GAP * (len(MAP_VIEWS) - 1)  # the stacked views and their gaps
     row_h = [max(k * lh_in, map_h) + pad for k in n_lines]
     gaps = [group_gap if i and rows[i]["group"] != rows[i - 1]["group"] else 0.0 for i in range(n)]
     fig_h = header_h + sum(row_h) + sum(gaps) + 0.02
@@ -520,7 +522,7 @@ def render(args, rows: list[dict], payload):
         coords = shared_cuts((imgs["generated"], imgs["true"]), (shown["generated"][1], shown["true"][1]))
         for name, k in (("generated_maps", "generated"), ("true_maps", "true")):
             draw_brain_views(fig, imgs[k], (cols[name][0], top - h + pad / 2, cols[name][1], h - pad), views=MAP_VIEWS,
-                             cut_coords=coords, vertical=True, threshold=shown[k][1],
+                             cut_coords=coords, vertical=True, gap_in=VIEW_GAP, threshold=shown[k][1],
                              vmin=display_vmin(shown[k][1], float(shown[k][0].max())), vmax=float(shown[k][0].max()))
         n_gen = text_block(fig, cols["generated_text"][0], top, [(gen[i][0], {"fontweight": "bold"}), (gen[i][1], {})],
                            fs, lh_in)
@@ -545,7 +547,8 @@ def text_dump(args, payload, selection: dict) -> dict:
             "cut_coords_rule": "per row and view (sagittal x, coronal y, axial z, mm): the slice maximising the product "
                                "of the generated and the true map's drawn activation summed over that slice (values "
                                "above the display threshold, each map scaled to max 1); both maps are drawn at the "
-                               "same cuts, sagittal above axial (rows[].cut_coords)",
+                               "same cuts, sagittal, coronal and axial top to bottom at one mm-to-inch scale "
+                               "(rows[].cut_coords)",
             "text_in_figure": "generated text complete; true text = the paper's complete title (the abstract is in "
                               "rows[].abstract); each Low row's check is in rows[].checks.low_check (caption only)",
             "density": "left strips on one cosine axis: Gaussian KDE (Scott bandwidth) of each quality cosine over the "

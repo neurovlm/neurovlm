@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 """Fig. S4: contrastive and generative labels of UK Biobank and HCP ICA components (docs/figures/19_ica_networks.ipynb),
-both cohorts on one page.
+both cohorts on one page. The input maps show one axial slice, or with --views xyz sagittal, coronal and axial slices
+(figS4_clip_ica_3slices).
 
     .venv/bin/python scripts/figures/main/figS4_clip_ica.py
+    .venv/bin/python scripts/figures/main/figS4_clip_ica.py --views xyz
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ STEM = "figS4_clip_ica"
 log = get_logger(STEM)
 COHORTS = (("UKBICA", "UK Biobank"), ("HCPICA", "Human Connectome Project"))
 NETS_REF = ("visual", "language", "sensorimotor", "default mode", "frontoparietal")  # one row each
+MAP_W = {"z": 0.44, "xyz": 0.74}  # inches: input map column per --views
 COMPONENTS = ("specter", "autoencoder", "proj_head_text_infonce", "proj_head_image_infonce", "qformer_canonical",
               "canonical_semantic_banks", "neuroqwen")
 
@@ -115,6 +118,8 @@ NETS = {
 def parse_args():
     p = fig_parser("Fig. S4: HCP / UKB ICA component labelling.")
     p.add_argument("--num-beams", type=int, default=10)
+    p.add_argument("--views", choices=sorted(MAP_W), default="z",
+                   help="Slices of the input maps: z = one axial slice, xyz = sagittal, coronal and axial (_3slices).")
     return finalize(p.parse_args())
 
 
@@ -193,11 +198,11 @@ def compute(args, device):
     return payload
 
 
-def axial_cut(img) -> float:
-    """The axial slice (z, mm) holding the most drawn activation of img."""
-    v = np.nan_to_num(np.asarray(img.get_fdata(), dtype=float))
-    k = int(np.argmax(np.clip(v, 0, None).sum(axis=(0, 1))))
-    return float(img.affine[2, 2] * k + img.affine[2, 3])  # diagonal affine (the masker's MNI grid)
+def peak_cut(img, axis: int = 2) -> float:
+    """The slice along axis (0 x, 1 y, 2 z; mm) holding the most drawn activation of img."""
+    v = np.clip(np.nan_to_num(np.asarray(img.get_fdata(), dtype=float)), 0, None)
+    k = int(np.argmax(v.sum(axis=tuple(a for a in range(3) if a != axis))))
+    return float(img.affine[axis, axis] * k + img.affine[axis, 3])  # diagonal affine (the masker's MNI grid)
 
 
 def run_in_lines(title: str | None, body: str, *, font_pt: float, width_in: float) -> tuple[str | None, float, list[str]]:
@@ -214,8 +219,8 @@ def run_in_lines(title: str | None, body: str, *, font_pt: float, width_in: floa
 
 
 def render(args, payload):
-    """Both cohorts on one page: per network row the input map (axial, the slice with the most activation), the
-    top-5 contrastive labels and the complete generated text with its title run in."""
+    """Both cohorts on one page: per network row the input map (args.views, each the slice with the most activation),
+    the top-5 contrastive labels and the complete generated text with its title run in."""
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
     from _shared import load_masker
@@ -226,7 +231,7 @@ def render(args, payload):
     # inches: cohort label | input map | bars | text (the rest)
     fig_w = FIG_FULL_W
     x0, label_w = 0.02, 0.14
-    widths, col_gaps = [0.44, 0.93], [0.03, 0.07]
+    widths, col_gaps = [MAP_W[args.views], 0.93], [0.03, 0.07]
     widths.append(fig_w - x0 - label_w - 0.02 - sum(widths) - sum(col_gaps))
     line_spacing = 1.05  # the page also holds the section heading and the caption
     lh_in = fs / 72.0 * line_spacing
@@ -262,9 +267,9 @@ def render(args, payload):
             h_in = row_h[cohort][ri]
             y_mid = y_top_in - h_in / 2
             img = masker.inverse_transform(r["input_map"])
-            coords = [0.0, 0.0, axial_cut(img)]
+            coords = [peak_cut(img, a) if v in args.views else 0.0 for a, v in enumerate("xyz")]
             # map and bars the same size in every row, centred in it
-            draw_brain_views(fig, img, (x0 + label_w, y_mid - min_h / 2, widths[0], min_h), views="z",
+            draw_brain_views(fig, img, (x0 + label_w, y_mid - min_h / 2, widths[0], min_h), views=args.views,
                              cut_coords=coords, threshold=1e-3, vmin=0.0, vmax=1.0)
             bar_h = min_h
             ax = fig.add_axes([xs[1][0], (y_mid - bar_h / 2) / fig_h, xs[1][1], bar_h / fig_h])
@@ -297,7 +302,7 @@ def render(args, payload):
             for li, line in enumerate(lines):
                 ax.text(indent if li == 0 else 0, base - li * lh_in, line, ha="left", va="baseline", fontsize=fs)
             dump[cohort].append({k: v for k, v in r.items() if k != "input_map"} |
-                                {"generated_lines_in_figure": len(lines), "view": "z",
+                                {"generated_lines_in_figure": len(lines), "view": args.views,
                                  "cut_coords": [float(c) for c in coords]})
             y_top_in -= h_in
         y_top_in -= group_gap
@@ -311,7 +316,7 @@ def main():
     payload = compute(args, device)
     with timed("render", log, args.cache_dir, stage=STEM):
         fig, rows = render(args, payload)
-        finish(fig, STEM, args, log, components=COMPONENTS,
+        finish(fig, STEM if args.views == "z" else f"{STEM}_3slices", args, log, components=COMPONENTS,
                text_dump={"text_in_figure": "complete (no truncation)", "cohorts": rows})
 
 

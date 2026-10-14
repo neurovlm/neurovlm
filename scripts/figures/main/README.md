@@ -27,22 +27,23 @@ panels, plus `model_sources`: the checkpoint file of each component) next to its
 
 | paper figure | script | files | model components (from `runs/final`) |
 |---|---|---|---|
-| Fig. 2 networks: text-to-brain and brain-to-text | `fig2_network_examples.py` | `fig2_network_examples.*` (the figure, one page: the true and generated maps of the eight networks in sagittal, coronal and axial views, the complete Network, Anatomy and Cognition texts of two networks in three columns, the three generated titles of the other six); `fig2_texts_table.{tex,md}` (supplementary table: complete input and generated texts; `--text-pages` also draws them as figure pages `_p2`-`_p4`) | autoencoder, text-to-brain head v2, stage 2 projector (MLP) |
+| Fig. 2 networks: text-to-brain and brain-to-text | `fig2_network_examples.py` | `fig2_network_examples.*` (the figure, one page, one row per network under one set of column headers: the network's name above its true and generated maps in sagittal, coronal and axial views at one scale, then the Network, Anatomy and Cognition texts generated from the true map, complete with bold run-in titles for Auditory and Default mode, the three titles for the other six; 5.147 x 6.63 in); `fig2_texts_table.{tex,md}` (supplementary table: complete input and generated texts; `--text-pages` also draws them as figure pages `_p2`-`_p4`) | autoencoder, text-to-brain head v2, stage 2 projector (MLP) |
 | Fig. 3 NeuroVault examples | `fig3_newgen.py` | `fig3_newgen.*` (one page, six rows) | text-to-brain head v2, autoencoder, InfoNCE heads, stage 2 projector |
 | Fig. 4 generative metrics (PubMed test) | `fig4_generative_metrics.py` | `fig4_generative_metrics.*` | row a: autoencoder + latents, head v2; row b: stage 2 projector, InfoNCE heads; deberta-xlarge-mnli / MiniLM scorers |
 | Fig. 5 contrastive / autoencoder / networks | `fig5_perf_quant.py` | `fig5_perf_quant.*` | CV folds, autoencoder, InfoNCE heads; b: read from the a3 bounds analysis (same final components, checked) |
 | Fig. 6 autoencoder reconstructions | `fig6_autoencoder_qual.py` | `fig6_autoencoder_qual.*` | autoencoder, split |
 | Fig. S2 Gaussian kernel vs DiFuMo | `figS2_difumo_v_ale.py` | `figS2_difumo_v_ale.*` | none (data only) |
 | Fig. S3 model comparison | `figS3_recall_comparison.py` | `figS3_recall_comparison.*` | autoencoder, InfoNCE heads; NiCLIP / NeuroConText from their own checkpoints |
-| Fig. S4 ICA components (HCP, UK Biobank) | `figS4_clip_ica.py` | `figS4_clip_ica.*` (one page: UK Biobank above, HCP below) | autoencoder, InfoNCE heads, stage 2 projector |
+| Fig. S4 ICA components (HCP, UK Biobank) | `figS4_clip_ica.py` | `figS4_clip_ica.*` (one page: UK Biobank above, HCP below; input maps one axial slice, 6.13 in tall); `--views xyz` draws `figS4_clip_ica_3slices.*` (sagittal, coronal and axial input slices, 6.54 in tall, same bars and texts; not run by `make_all.py`) | autoencoder, InfoNCE heads, stage 2 projector |
 
-**Fig. 3 layout and labels.** One page, 5.15 x 6.73 in at 7 pt (the original, 6.7 x 3.9 in, used ~3.5 pt text).  The
+**Fig. 3 layout and labels.** One page, 5.15 x 6.82 in at 7 pt (the original, 6.7 x 3.9 in, used ~3.5 pt text).  The
 six complete generated texts need about 5.7 in at this width, so Fig. 3 is the one figure above `FIG_MAX_H` (4.59 in);
 it fits the 7.67 in text height with its caption.  Columns (check7): the densities of both quality cosines over all 305
 NeuroVault papers side by side on one axis labelled "Cosine similarity" (Image: paper text vs generated map, Text:
 generated text vs true map, shared space; dashed: thirds; each row one marker in its group colour, all markers on one
 vertical line, the cosines themselves are in the JSON), one bar per group, the paper's title (no abstract), the
-generated and the true map (sagittal above axial), and the complete generated text.  High / Medium / Low means both
+generated and the true map (check8: sagittal, coronal and axial stacked at one mm-to-inch scale, 0.34 in wide, the
+width at which the page and its caption fit the text height), and the complete generated text.  High / Medium / Low means both
 cosines lie in the top / middle / bottom third.  Rows (`select_rows`): per third, nearest the third's centre in
 percentile space first, among the papers whose generated text is clean (`text_check`: a title of the stage-14 bank of
 its level, no code-like character, no word used fewer than twice in the 30,826 PubMed titles and abstracts and in no
@@ -72,7 +73,9 @@ from the caches on 2026-10-13 (CPU) for the author's check6 items: the Fig. 2 la
 Fig. S2's "Gaussian kernel" label and Fig. S4's bars.  For check6, Fig. 3 was regenerated on one page with rule-picked rows
 (GPU, ~3 min) and Fig. 6 redrawn with the submitted figure's order, slices and NeuroVault maps (CPU).  For check7, Fig. 3
 was redrawn from its cache (CPU) with titles only, wider densities on one shared axis, aligned markers, no cosine column
-and no Low labels, and rows that also need a clean generated text.  Also for check7, Figs. 4, S3 and S4 were redrawn from their caches (CPU): Fig. 4 with a paired-difference box under each box panel and no n in the titles, S3 without n in the title, S4 with both cohorts on one page (smaller maps, generated titles run in) instead of a second `_p2` page; the Fig. 4 text reference pairs (`cache/fig4_text_reference*.pt`) took 15 min on CPU.  `cache/` holds the panel data of Figs. 2, 3, 4, S2 and S4; Figs. 5, 6
+and no Low labels, and rows that also need a clean generated text.  For check8, Fig. 3 was redrawn from its cache
+(CPU) with a coronal view added to every map (same rows and cuts), and Fig. 4 without the paired-difference boxes
+(3.18 in tall instead of 4.06 in; the legend moved into the last row's band).  Also for check7, Figs. 4, S3 and S4 were redrawn from their caches (CPU): Fig. 4 with a paired-difference box under each box panel and no n in the titles, S3 without n in the title, S4 with both cohorts on one page (smaller maps, generated titles run in) instead of a second `_p2` page; the Fig. 4 text reference pairs (`cache/fig4_text_reference*.pt`) took 15 min on CPU.  `cache/` holds the panel data of Figs. 2, 3, 4, S2 and S4; Figs. 5, 6
 and S3 recompute theirs once (~3 min on a GPU).  Fig. 5b reads `../review/core/a3_neurovault_bounds/outputs/`
 (`recall_curves.csv`, `bounds_metrics.csv`; `--bounds-dir`), the a3 run on the published map tensor (variant
 `released`) with the final autoencoder, InfoNCE heads and exclusions; another model needs its own a3 run.
@@ -305,7 +308,7 @@ at most `FIG_MAX_H` = 4.59 in tall per page, every text >= 7 pt at print size; t
 printed at 6.5 in.  Generated and input texts are printed in full, wrapped by measured width, except Fig. 3's papers
 (title only since check7; the abstracts are in its JSON) and Fig. 2's six short examples (the three generated titles); Fig.
 2's complete input and generated texts are a table (`fig2_texts_table.{tex,md}`).  Brain maps: one colormap (`Reds`), each
-map scaled to its own maximum, views per figure (Fig. 2: sagittal, coronal and axial; Figs. 3 and S2: sagittal and axial; Fig. 6 and S4: axial only, Fig. 6 at the submitted figure's slice (z of nilearn's cut for the thresholded
+map scaled to its own maximum, views per figure (Figs. 2 and 3: sagittal, coronal and axial; Fig. S2: sagittal and axial; Fig. 6 and S4: axial only, Fig. 6 at the submitted figure's slice (z of nilearn's cut for the thresholded
 reconstruction), S4 at the slice with the most activation).  Figs. 2 and 3 draw every map (generated, atlas and true
 alike) at its top 5 % of in-mask voxels, ties at the cut drawn, no cluster threshold (`_shared.display_vector`; the rule
 and each map's threshold and drawn voxels are in the `_text.json`, `map_display`), about the extent of the submitted Fig.
@@ -315,11 +318,12 @@ the submitted figure 1,727 (released NeuroAdapter, raw > 0.5).  Fig. 3 draws its
 by its maximum) and colours every map from its cut to its maximum (`_shared.display_vmin`).  Recall@k panels are square with matplotlib's default margins, x label "k/n (fraction of all
 candidates)" (Fig. 4: "k/n", defined in its caption, so five columns fit); null distributions grey, matched
 blue.  Fig. 4 marks each pair with stars (* p < 0.05, ** p < 0.01, *** p < 0.001, no star = not significant;
-the p-values are in `fig4_generative_metrics_text.json`), writes Match / Null under every pair and the legend below
-the figure, and fits each box panel's y range to the whiskers (outliers are not drawn); its columns are spaced
-from the measured y-axis labels (`place_columns`).  Under each box panel a white box shows the per-item paired
-difference Δ = Match − Null (same map or caption) with zero dashed (check7: the BERTScore gap is visible as a
-median just above zero, not hidden in two overlapping boxes); the retrieval titles no longer print n (caption).
+the p-values are in `fig4_generative_metrics_text.json`), writes Match / Null under every pair and the legend in
+the last row's band (under the Match / Null labels, right of the k/n label), and fits each box panel's y range to the
+whiskers (outliers are not drawn); its columns are spaced from the measured y-axis labels (`place_columns`).  The
+paired-difference boxes of check7 were removed in check8 (they left a band of white space); the per-item paired
+statistics stay in the JSON (`paired_differences`, `text_score_reference`) and the small BERTScore gap is defended
+in the caption and the response; the retrieval titles no longer print n (caption).
 
 ## External inputs for Fig. S3
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""Fig. 4: text-to-brain (row a) and brain-to-text (row b) metrics on the PubMed test set, matched vs deranged null,
-with the paired difference under each box panel. The JSON also gives paired statistics and reference levels of the
-two text scores (random, same-topic and same-paper text pairs; BERTScore rescaled with bert_score's baseline).
+"""Fig. 4: text-to-brain (row a) and brain-to-text (row b) metrics on the PubMed test set, matched vs deranged null.
+The JSON also gives the per-item paired differences (statistics only, not drawn) and reference levels of the two text
+scores (random, same-topic and same-paper text pairs; BERTScore rescaled with bert_score's baseline).
 
     .venv/bin/python scripts/figures/main/fig4_generative_metrics.py [--rows a|b|ab] [--no-spin]
 """
@@ -520,29 +520,6 @@ def box_pair(ax, match, null, *, ylabel, title, star, star_size):
     ax.set_xlim(-0.42, 1.42)  # room for the Match / Null tick labels in narrow panels
 
 
-def diff_box(ax, match, null):
-    """Paired difference (match - null of the same map or caption) under a box panel: one box (whiskers at 1.5 IQR,
-    no outliers, as wide as the boxes above) and the zero line; y ticks at 0 and the smallest round step at least a
-    fraction of the axis away (labels apart)."""
-    d = np.asarray(match, dtype=float) - np.asarray(null, dtype=float)
-    d = d[np.isfinite(d)]
-    ax.axhline(0, color="0.3", ls=(0, (2, 1.5)), lw=0.9, zorder=3)
-    ax.boxplot([d], positions=[0], widths=0.25, tick_labels=["Δ"], showfliers=False, patch_artist=True,
-               medianprops=dict(color="black", lw=1.0), whiskerprops=dict(lw=0.8), capprops=dict(lw=0.8),
-               boxprops=dict(lw=0.6, facecolor="white"))
-    lo, hi = _whiskers(d)
-    lo, hi = min(lo, 0.0), max(hi, 0.0)
-    span = max(hi - lo, 1e-6)
-    top = hi + 0.06 * span
-    ax.set_ylim(lo - 0.06 * span, top)
-    ax.set_xlim(-0.42, 0.42)
-    steps = [v for v in (0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0) if v <= top]
-    step = min([v for v in steps if v >= span / 3.5] or [max(steps or [hi])])
-    ax.set_yticks([0.0, step], ["0", f"{step:g}"])
-    ax.tick_params(axis="x", length=0, pad=2)
-    ax.tick_params(axis="y", pad=1.5, length=2.5)
-
-
 def place_columns(fig, grid, W, ax_h, *, left=0.17, gap=0.04, right=0.02):
     """Set the x positions of the five columns from the measured y-axis decorations (tick labels + label) of each
     column, so no y label reaches the panel to its left; the four box columns share the remaining width, less what
@@ -585,12 +562,11 @@ def render(args, a, b):
     plt.rcParams["savefig.bbox"] = "standard"  # the saved figure is exactly FIG_FULL_W wide
     fs = args.font_size
     W = FIG_FULL_W
-    # inches: per row a title band, the axes (the recall panel square), the tick labels / k/n label and under each
-    # box panel its paired difference (diff_gap below the axes, diff_h tall, Δ under it); the legend at the bottom
-    ax_h, title_h, below_h, row_gap, legend_h = 0.8, 0.36, 0.74, 0.06, 0.2
-    diff_gap, diff_h = 0.17, 0.42
+    # inches: per row a title band, the axes (the recall panel square) and the tick labels / k/n label below them; the
+    # legend sits in the last row's band, under the Match / Null labels and right of its k/n label (no band of its own)
+    ax_h, title_h, below_h, row_gap, legend_gap = 0.8, 0.36, 0.4, 0.06, 0.05
     rows = [(kind, d) for kind, d in (("a", a), ("b", b)) if d is not None]
-    H = len(rows) * (title_h + ax_h + below_h) + (len(rows) - 1) * row_gap + legend_h
+    H = len(rows) * (title_h + ax_h + below_h) + (len(rows) - 1) * row_gap
     fig = plt.figure(figsize=(W, H))
     stats, null_tests, paired = {}, {}, {}
 
@@ -651,7 +627,7 @@ def render(args, a, b):
             d = data["dice"][data["dice_pct"]] if key == "dice" else data[key]
             w = welch_log10p(d["match"], d["null"])
             stats[f"{kind}:{key}"] = w
-            paired[f"{kind}:{key}"] = paired_stats(d["match"], d["null"]) | {"pair": (d["match"], d["null"])}
+            paired[f"{kind}:{key}"] = paired_stats(d["match"], d["null"])  # JSON only
             box_pair(ax, d["match"], d["null"], ylabel=ylab, title=title, star=stars(w["log10_p"]), star_size=fs + 2)
         if kind == "a":
             sp = data["spin"]
@@ -670,17 +646,13 @@ def render(args, a, b):
 
     grid = [row(ridx, kind, data) for ridx, (kind, data) in enumerate(rows)]
     place_columns(fig, grid, W, ax_h)
-    for (kind, _), axes in zip(rows, grid):
-        for ax, key in zip(axes[1:4], [k for k in paired if k.startswith(kind + ":")]):
-            pos = ax.get_position()
-            diff_box(fig.add_axes([pos.x0, pos.y0 - (diff_gap + diff_h) / H, pos.width, diff_h / H]),
-                     *paired[key].pop("pair"))
+    r = fig.canvas.get_renderer()
+    labels_bottom = min(ax.xaxis.get_tightbbox(r).y0 for ax in grid[-1][1:]) / fig.dpi  # inches, last row's Match / Null
     fig.legend(handles=[Patch(facecolor=MATCH_COLOR, alpha=0.8, label="Match"),
                         Patch(facecolor=NULL_COLOR, alpha=0.8, label="Null"),
-                        Patch(facecolor="white", edgecolor="black", lw=0.6, label="Δ = Match − Null"),
                         Line2D([], [], color=STATUS_BAD, ls="--", lw=0.9, label="p = 0.05")],
-               loc="lower center", bbox_to_anchor=(0.5, 0.0), ncol=4, fontsize=fs, handlelength=1.4,
-               columnspacing=1.6, borderaxespad=0.1)
+               loc="upper center", bbox_to_anchor=(0.5, (labels_bottom - legend_gap) / H), ncol=3, fontsize=fs,
+               handlelength=1.4, columnspacing=1.6, borderaxespad=0.0)
     return fig, stats, null_tests, paired
 
 
