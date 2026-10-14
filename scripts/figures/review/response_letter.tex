@@ -172,7 +172,7 @@ This is an ambitious and timely manuscript introducing \textbf{NeuroVLM}, a unif
 \textbf{Retrieval measures.} Table~\ref{tab:retrieval} reports recall@1, recall@5, recall@10, mean reciprocal rank, and median rank in both directions. Fig.~\ref{fig:baselines} and Table~\ref{tab:retrieval} are new in the Supplementary Information.
 \rfig{fig:baselines}{reviewer_01/1.1_text_to_brain_baselines.png}{\capbaselines}
 % the paper's Fig. 4 (../main/fig4_generative_metrics.py; paired differences: fig4_generative_metrics_text.json)
-\rfig{fig:fig4}{../main/fig4_generative_metrics.png}{\textbf{New Fig.~4.} Text-to-brain (a) and brain-to-text (b) generation on the PubMed test set ($n = 2{,}971$). Boxes compare matched (Match, blue) and shuffled pairs (Null, gray), and white boxes show each item's difference, Match $-$ Null. Stars mark $p < 0.05$, $0.01$, and $0.001$.}
+\rfig{fig:fig4}{../main/fig4_generative_metrics.png}{\textbf{New Fig.~4.} Text-to-brain (a) and brain-to-text (b) generation on the PubMed test set ($n = 2{,}971$). Boxes compare matched (Match, blue) and shuffled pairs (Null, gray). Stars mark $p < 0.05$, $0.01$, and $0.001$.}
 % source: core/a1_text_to_brain_baselines/outputs/results_table_full.csv (PubMed test set, n = 2,971); Text2Brain row: same file (released weights, two fixes for current libraries; scratchpad z59)
 \rtab{\textbf{Text-to-brain maps on the PubMed test set.} Mean Dice and Pearson $r$ between each method's map and the test paper's reconstructed map ($n = 2{,}971$), as in Fig.~\ref{fig:baselines}. The nearest training paper is the one whose text is closest to the query.\label{tab:t2b}}{\small\begin{tabular}{lcc}\toprule
 \textbf{Method} & \textbf{Dice} & \textbf{Pearson $r$} \\\midrule
