@@ -118,7 +118,7 @@ NETS = {
 def parse_args():
     p = fig_parser("Fig. S4: HCP / UKB ICA component labelling.")
     p.add_argument("--num-beams", type=int, default=10)
-    p.add_argument("--views", choices=sorted(MAP_W), default="z",
+    p.add_argument("--views", choices=sorted(MAP_W), default="xyz",
                    help="Slices of the input maps: z = one axial slice, xyz = sagittal, coronal and axial (_3slices).")
     return finalize(p.parse_args())
 

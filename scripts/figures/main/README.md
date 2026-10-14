@@ -34,7 +34,7 @@ panels, plus `model_sources`: the checkpoint file of each component) next to its
 | Fig. 6 autoencoder reconstructions | `fig6_autoencoder_qual.py` | `fig6_autoencoder_qual.*` | autoencoder, split |
 | Fig. S2 Gaussian kernel vs DiFuMo | `figS2_difumo_v_ale.py` | `figS2_difumo_v_ale.*` | none (data only) |
 | Fig. S3 model comparison | `figS3_recall_comparison.py` | `figS3_recall_comparison.*` | autoencoder, InfoNCE heads; NiCLIP / NeuroConText from their own checkpoints |
-| Fig. S4 ICA components (HCP, UK Biobank) | `figS4_clip_ica.py` | `figS4_clip_ica.*` (one page: UK Biobank above, HCP below; input maps one axial slice, 6.13 in tall); `--views xyz` draws `figS4_clip_ica_3slices.*` (sagittal, coronal and axial input slices, 6.54 in tall, same bars and texts; not run by `make_all.py`) | autoencoder, InfoNCE heads, stage 2 projector |
+| Fig. S4 ICA components (HCP, UK Biobank) | `figS4_clip_ica.*` (one page: UK Biobank above, HCP below; input maps with sagittal, coronal and axial slices, 6.54 in tall; `--views z` gives the one-slice version) | autoencoder, InfoNCE heads, stage 2 projector |
 
 **Fig. 3 layout and labels.** One page, 5.15 x 6.82 in at 7 pt (the original, 6.7 x 3.9 in, used ~3.5 pt text).  The
 six complete generated texts need about 5.7 in at this width, so Fig. 3 is the one figure above `FIG_MAX_H` (4.59 in);
