@@ -1,34 +1,42 @@
 #!/usr/bin/env python
 """Fig. S3: PubMed test recall@k of NeuroVLM vs NiCLIP vs NeuroConText (docs/figures/23_versus_others.ipynb), on the test
-papers in neither baseline's training set.  External inputs: see README.md.
+papers in neither baseline's training set. The baselines come from their authors' releases (scripts/data/fetch_baselines.py)
+and are evaluated on DiFuMo-512 features of the test maps and 7B embeddings of the test texts (Mistral-7B-v0.1 and
+BrainGPT-7B-v0.2 at pinned revisions, one pass each, cached). A baseline that cannot be fetched or evaluated is drawn
+from baseline_curves.csv, which this script rewrites whenever both were evaluated.
 
-    .venv/bin/python scripts/figures/main/figS3_recall_comparison.py [--external-root ~/neurovlm]
+    .venv/bin/python scripts/figures/main/figS3_recall_comparison.py
 """
 from __future__ import annotations
 
-import os
 import pickle
+import sys
 from pathlib import Path
 
 import numpy as np
 from _shared import (
-    FIG_HALF_W, SERIES, banner, cache_file, fig_parser, finalize, finish, free_gpu, get_logger, load_models, load_pt,
-    note_source, pubmed_keep, pubmed_test_mask, recall_axes, run_file, save_pt, select_device, timed,
+    FIG_HALF_W, SERIES, banner, cache_file, fig_parser, finalize, finish, free_gpu, get_logger, hf_pinned, load_models,
+    load_pt, note_source, pubmed_keep, pubmed_test_mask, recall_axes, run_file, save_pt, select_device, timed,
     text_width_in, to_device_batches, trapz_auc,
 )
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "data"))  # scripts/data/
+from fetch_baselines import ensure as fetch_baselines  # noqa: E402
+
 STEM = "figS3_recall_comparison"
 log = get_logger(STEM)
+MISTRAL = "mistralai/Mistral-7B-v0.1"  # NeuroConText's text encoder, and the base of BrainGPT
+BRAINGPT = "BrainGPT/BrainGPT-7B-v0.2"  # NiCLIP's text encoder: a LoRA adapter on Mistral-7B-v0.1
+NICLIP_CKPT = "niclip/model-clip_section-body_embedding-BrainGPT-7B-v0.2_best.pth"
+NICLIP_SPLIT = "niclip/model-gclda_cogatlasred-task_embedding-BrainGPT-7B-v0.2_section-body.pkl"
+NC_REPO = "neurovlm/neurocontext-baseline"  # the checkpoint: NeuroConText's training script on its authors' data (they publish none)
+NC_CKPT, NC_TRAIN, NC_PIPE = "neurocontext/best_val.pt", "neurocontext/train_pmids.pkl", "neurocontext/text_preprocessing_pipeline.pkl"
 MODELS = ("NeuroVLM", "NiCLIP", "NeuroConText")
 
 
 def parse_args():
     p = fig_parser("Fig. S3: contrastive recall, NeuroVLM vs NiCLIP vs NeuroConText.")
     p.add_argument("--step", type=int, default=10)
-    p.add_argument("--external-root", type=Path, default=None,
-                   help="Checkout with baseline/, pubmed/ and NeuroConText/ (default: $NEUROVLM_REPOSITORY_ROOT or ~/neurovlm).")
-    p.add_argument("--external-cache", type=Path, default=None,
-                   help="Cached baseline embeddings (default: <external-root>/docs/03_evaluation).")
     p.add_argument("--baseline-csv", type=Path, default=Path(__file__).with_name("baseline_curves.csv"),
                    help="Precomputed curves (model,direction,normalized_k,recall) for baselines that cannot be evaluated.")
     p.add_argument("--no-fair-subset", action="store_true", help="Evaluate on the whole test split.")
@@ -115,24 +123,62 @@ def _build_models():
     return load_niclip, load_neurocontext
 
 
-def _resolve_external(args):
-    root = args.external_root or os.environ.get("NEUROVLM_REPOSITORY_ROOT")
-    root = Path(root) if root else Path.home() / "neurovlm"
-    cache = args.external_cache or (root / "docs" / "03_evaluation")
-    return root, Path(cache)
+def _niclip_train_pmids(path: Path) -> set[int]:
+    """NiCLIP's training PMIDs: the ids ('<pmid>-<experiment>') of the GC-LDA model fit on the checkpoint's training split."""
+    import gzip
+
+    with gzip.open(path, "rb") as fh:
+        model = pickle.load(fh)  # nimare GCLDAModel
+    return {int(str(i).split("-")[0]) for i in model.ids}
 
 
-def _load_cached(path: Path, n_expected: int):
+def _merge_lora(model, repo: str):
+    """Fold the LoRA adapter of ``repo`` into its base model: W += alpha / r · B A on every target module."""
+    import json
+
     import torch
+    from huggingface_hub import hf_hub_download
 
-    if not path.exists():
-        log.warning("external cache missing: %s", path)
-        return None
-    t = torch.load(path, weights_only=True, map_location="cpu").float()
-    if len(t) != n_expected:
-        log.warning("%s has %d rows, expected %d (test split); ignoring", path, len(t), n_expected)
-        return None
-    return t
+    rev = hf_pinned(repo)
+    cfg = json.loads(Path(hf_hub_download(repo, "adapter_config.json", revision=rev)).read_text())
+    lora = torch.load(hf_hub_download(repo, "adapter_model.bin", revision=rev), weights_only=True, map_location="cpu")
+    params = dict(model.named_parameters())
+    with torch.no_grad():
+        for key, a in lora.items():
+            if ".lora_A." not in key:
+                continue
+            b = lora[key.replace(".lora_A.", ".lora_B.")]
+            w = params[key.replace("base_model.model.", "", 1).replace(".lora_A.weight", ".weight")]
+            w += (cfg["lora_alpha"] / cfg["r"] * b.float() @ a.float()).to(w.dtype)
+
+
+def _llm_embeddings(texts, repo: str, cache_path: Path, device, *, adapter: str | None = None, max_length: int,
+                    batch_size: int = 4):
+    """Mean last hidden state of each text under the pinned 7B model (bf16), as the notebook's cells 12-13."""
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    rev = hf_pinned(repo)
+    tok = AutoTokenizer.from_pretrained(repo, revision=rev)
+    tok.pad_token = tok.eos_token
+    model = AutoModelForCausalLM.from_pretrained(repo, revision=rev, dtype=torch.bfloat16).eval()
+    if adapter:
+        _merge_lora(model, adapter)
+    model.to(device)
+    out = []
+    for s in range(0, len(texts), batch_size):
+        enc = tok(texts[s:s + batch_size], return_tensors="pt", padding=True, truncation=True, max_length=max_length).to(device)
+        with torch.no_grad():
+            h = model(**enc, output_hidden_states=True).hidden_states[-1].float()
+        m = enc["attention_mask"].unsqueeze(-1).float()
+        out.append(((h * m).sum(1) / m.sum(1).clamp(min=1)).cpu())
+        if (s // batch_size) % 100 == 0:
+            log.info("%s embeddings %d/%d", adapter or repo, min(s + batch_size, len(texts)), len(texts))
+    del model
+    free_gpu()
+    emb = torch.cat(out)
+    save_pt(cache_path, emb)
+    return emb
 
 
 def _difumo_512(images, cache_path: Path):
@@ -195,15 +241,24 @@ def compute(args, device):
             z_i = F.normalize(heads["proj_head_image_infonce"](li.to(device)), dim=1).cpu()
         n_test = len(test_pmids)
 
+    # the baselines, fetched from their authors' releases; whatever cannot be fetched is drawn from --baseline-csv
+    try:
+        files = fetch_baselines()
+    except Exception as exc:  # network, a changed file, ...
+        log.warning("baselines not fetched: %s; NiCLIP and NeuroConText come from %s", exc, args.baseline_csv)
+        files = {}
+    try:
+        files[NC_CKPT] = Path(hf_pinned(NC_REPO, "best_val.pt", "model"))
+    except Exception as exc:
+        log.warning("NeuroConText checkpoint not fetched: %s; its curve comes from %s", exc, args.baseline_csv)
+    notes["baselines"] = sorted(files)  # manifest names of the files in place
+
     # fair subset: test papers in neither baseline's training set
-    root, ext_cache = _resolve_external(args)
-    notes["external_root"] = str(root)
     fair = np.ones(n_test, dtype=bool)
-    niclip_train = root / "baseline" / "niclip_train_pmids.npy"
-    nc_train = root / "NeuroConText" / "data" / "data_NeuroConText" / "train_pmids.pkl"
-    if not args.no_fair_subset and niclip_train.exists() and nc_train.exists():
-        s1 = set(np.load(niclip_train).tolist())
-        with nc_train.open("rb") as fh:
+    fair_file = Path(args.baseline_csv).with_name("baseline_fair_pmids.txt")  # the subset the precomputed curves are on
+    if not args.no_fair_subset and NICLIP_SPLIT in files and NC_TRAIN in files:
+        s1 = _niclip_train_pmids(files[NICLIP_SPLIT])
+        with files[NC_TRAIN].open("rb") as fh:
             s2 = set(map(int, pickle.load(fh)))
         in1 = np.array([int(p) in s1 for p in test_pmids])
         in2 = np.array([int(p) in s2 for p in test_pmids])
@@ -211,10 +266,15 @@ def compute(args, device):
         notes["fair_subset"] = {"n_test": int(n_test), "in_niclip_train": int(in1.sum()), "in_neurocontext_train": int(in2.sum()),
                                 "n_fair": int(fair.sum())}
         log.info("fair subset: %d / %d test papers", fair.sum(), n_test)
+    elif not args.no_fair_subset and fair_file.exists():
+        keep = set(map(int, fair_file.read_text().split()))
+        fair = np.array([int(p) in keep for p in test_pmids])
+        notes["fair_subset"] = f"read from {fair_file.name} ({int(fair.sum())} papers, the subset of the precomputed curves)"
+        log.warning("training pmid lists not fetched; fair subset read from %s", fair_file.name)
     else:
         notes["fair_subset"] = "not applied (training pmid lists unavailable or --no-fair-subset)"
         if not args.no_fair_subset:
-            log.warning("training pmid lists not found under %s; using the whole test split", root)
+            log.warning("training pmid lists not fetched; using the whole test split")
     excl_ok = pubmed_keep(args, test_pmids, key="PubMed test", log=log)
     notes["eval_exclusions_dropped_from_evaluated_subset"] = int((fair & ~excl_ok).sum())
     idx = np.flatnonzero(fair & excl_ok)
@@ -231,53 +291,62 @@ def compute(args, device):
 
     add_curve("NeuroVLM", z_t[idx], z_i[idx])
 
-    # baselines from their cached 7B text embeddings (not recomputed here) and DiFuMo-512 features
+    # baselines: their checkpoints on DiFuMo-512 features of the test maps and 7B embeddings of the test texts
     load_niclip, load_neurocontext = _build_models()
-    img512 = _load_cached(ext_cache / "img_emb_512.pt", n_test)
-    braingpt = _load_cached(ext_cache / "braingpt_embeddings.pt", n_test)
-    mistral = _load_cached(ext_cache / "mistral_embeddings.pt", n_test)
-    niclip_ckpt = Path(os.environ.get("NEUROVLM_NICLIP_CHECKPOINT",
-                                      root / "pubmed" / "model-clip_section-body_embedding-BrainGPT-7B-v0.2_best.pth"))
-    nc_ckpt = Path(os.environ.get("NEUROVLM_NEUROCONTEXT_CHECKPOINT", root / "NeuroConText" / "best_val.pt"))
-    nc_pipe = root / "NeuroConText" / "data" / "data_NeuroConText" / "text_preprocessing_pipeline.pkl"
-    need_img = (braingpt is not None and niclip_ckpt.exists()) or (mistral is not None and nc_ckpt.exists())
-    if img512 is None and need_img:
-        with timed("DiFuMo-512 features (cache missing)", log, args.cache_dir, stage=STEM):
-            if images is None:
-                imgs_all, pi = load_dataset("pubmed_images")
-                mi = pd.Series(np.asarray(pi)).isin(test_pmids).to_numpy()
-                images = imgs_all[mi].float()
-                del imgs_all
-            img512 = _difumo_512(images, cache_file(args, "figS3_img_emb_512", tagged=False))
-    with timed("baseline evaluation", log, args.cache_dir, stage=STEM):
-        if img512 is not None and braingpt is not None and niclip_ckpt.exists():
-            m = load_niclip(niclip_ckpt)
-            with torch.no_grad():
-                add_curve("NiCLIP", m.encode_text(braingpt[idx]), m.encode_image(img512[idx]))
+    texts = (df_test["name"] + " [SEP] " + df_test["description"]).tolist()
+    img512 = None
+    if NICLIP_CKPT in files or NC_CKPT in files:
+        p = cache_file(args, "figS3_img_emb_512", tagged=False)
+        if p.exists():
+            img512 = load_pt(p)
         else:
-            notes["NiCLIP"] = f"skipped: img512={img512 is not None} braingpt={braingpt is not None} ckpt={niclip_ckpt.exists()}"
-            log.warning(notes["NiCLIP"])
-        if img512 is not None and mistral is not None and nc_ckpt.exists() and nc_pipe.exists():
-            try:
-                with nc_pipe.open("rb") as fh:
-                    pipe = pickle.load(fh)
-                txt = torch.tensor(pipe.transform(F.normalize(mistral, dim=1).numpy()).astype("float32"))
-                m = load_neurocontext(nc_ckpt)
-                with torch.no_grad():
-                    add_curve("NeuroConText", m.encode_text(txt[idx]), m.encode_image(img512[idx]))
-            except Exception as exc:
-                notes["NeuroConText"] = f"skipped: {type(exc).__name__}: {exc}"
-                log.warning(notes["NeuroConText"])
-        else:
-            notes["NeuroConText"] = f"skipped: img512={img512 is not None} mistral={mistral is not None} ckpt={nc_ckpt.exists()} pipeline={nc_pipe.exists()}"
-            log.warning(notes["NeuroConText"])
+            with timed("DiFuMo-512 features", log, args.cache_dir, stage=STEM):
+                if images is None:
+                    imgs_all, pi = load_dataset("pubmed_images")
+                    images = imgs_all[pd.Series(np.asarray(pi)).isin(test_pmids).to_numpy()].float()
+                    del imgs_all
+                img512 = _difumo_512(images, p)
+
+    def baseline(name, run):
+        try:
+            with timed(f"{name} evaluation", log, args.cache_dir, stage=STEM):
+                run()
+        except Exception as exc:
+            notes[name] = f"precomputed: {type(exc).__name__}: {exc}"
+            log.warning("%s not evaluated (%s); curve from %s", name, exc, args.baseline_csv)
+
+    def run_niclip():
+        p = cache_file(args, "figS3_text_braingpt", tagged=False)
+        emb = load_pt(p) if p.exists() else _llm_embeddings(texts, MISTRAL, p, device, adapter=BRAINGPT, max_length=4096)
+        m = load_niclip(files[NICLIP_CKPT])
+        with torch.no_grad():
+            add_curve("NiCLIP", m.encode_text(emb[idx]), m.encode_image(img512[idx]))
+
+    def run_neurocontext():
+        p = cache_file(args, "figS3_text_mistral", tagged=False)
+        emb = load_pt(p) if p.exists() else _llm_embeddings(texts, MISTRAL, p, device, max_length=8192)
+        with files[NC_PIPE].open("rb") as fh:
+            pipe = pickle.load(fh)  # L2 normalisation, then the StandardScaler fit on the training texts
+        txt = torch.tensor(pipe.transform(F.normalize(emb, dim=1).numpy()).astype("float32"))
+        m = load_neurocontext(files[NC_CKPT])
+        with torch.no_grad():
+            add_curve("NeuroConText", m.encode_text(txt[idx]), m.encode_image(img512[idx]))
+
+    if NICLIP_CKPT in files:
+        baseline("NiCLIP", run_niclip)
+    else:
+        notes["NiCLIP"] = "precomputed: checkpoint not fetched"
+    if NC_CKPT in files and NC_PIPE in files:
+        baseline("NeuroConText", run_neurocontext)
+    else:
+        notes["NeuroConText"] = "precomputed: checkpoint or text pipeline not fetched"
     # precomputed curves for anything still missing
     if args.baseline_csv and Path(args.baseline_csv).exists():
         df = pd.read_csv(args.baseline_csv)
         for name, g in df.groupby("model"):
             if name in curves:
                 continue
-            entry = {"source": f"csv:{args.baseline_csv} (precomputed curve; leakage exclusions not applied)"}
+            entry = {"source": f"csv:{Path(args.baseline_csv).name} (precomputed curve on the fair subset)"}
             for direction in ("t2i", "i2t"):
                 gd = g[g["direction"] == direction].sort_values("normalized_k")
                 if len(gd):
@@ -286,6 +355,11 @@ def compute(args, device):
             if "t2i" in entry or "i2t" in entry:
                 curves[name] = entry
                 log.info("%s curves loaded from %s", name, args.baseline_csv)
+    if all(curves.get(m, {}).get("source") == "evaluated" for m in MODELS[1:]) and isinstance(notes["fair_subset"], dict):
+        rows = [(m, d, float(k), float(r)) for m in MODELS[1:] for d in ("t2i", "i2t") for k, r in zip(x, curves[m][d])]
+        pd.DataFrame(rows, columns=["model", "direction", "normalized_k", "recall"]).to_csv(args.baseline_csv, index=False)
+        fair_file.write_text("".join(f"{int(p)}\n" for p in test_pmids[fair]))
+        log.info("precomputed curves and their subset written to %s, %s", args.baseline_csv, fair_file.name)
     free_gpu()
     payload = {"x": x, "n": n, "n_test": int(n_test), "step": args.step, "curves": curves, "notes": notes}
     save_pt(cache, payload)

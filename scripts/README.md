@@ -45,7 +45,8 @@ scripts/
                      (the paper model's validation metrics), requirements.lock, Dockerfile
   pipeline/          reproduce.sh (one command; its steps are reproduce.py), train_pipeline.py (the stages in order), validate_models.py,
                      verify_reproduction.py, smoke_pipeline.sh (CI), push_hf_release.py, common.py (shared helpers)
-  data/              fetch_hf.py (the pinned inputs) and data stages 01-09 (provenance), see data/README.md
+  data/              fetch_hf.py (the pinned inputs), fetch_baselines.py (Fig. S3's NiCLIP and NeuroConText files) and
+                     data stages 01-09 (provenance), see data/README.md
   models/            training stages 00-20 and their shared code, see models/README.md
   eval_exclusions/   leakage-audit items dropped from every evaluation, see eval_exclusions/README.md
   figures/main/      one script per paper figure (Figs. 2-6, S2-S4), see figures/main/README.md
@@ -262,8 +263,11 @@ weights the installed `neurovlm` loaders cannot read. `--update-manifest` then r
 - The proof runs used a warm Hugging Face cache, so the first download (about 23 GB) is not in their times.
 - nilearn's AAL server fails TLS verification, so the proof runs took the AAL atlas from `--external-dir`. Since
   2026-10-26 the atlas is pinned in the manifest (`neurovlm/atlases`) and `fetch_hf.py` unpacks it into the data dir.
-- Fig. S3 adds the NiCLIP and NeuroConText baselines from an external checkout (`--external-root`). Runs without it
-  draw NeuroVLM only.
+- Fig. S3 fetches the NiCLIP and NeuroConText baselines from their authors' OSF and Zenodo releases
+  (`data/fetch_baselines.py`, pinned by sha256 in the manifest; NeuroConText's checkpoint, which its authors do not
+  publish, is our run of their script on their data, `neurovlm/neurocontext-baseline`) and embeds the test texts with
+  the pinned 7B encoders.
+  When that fails it warns and draws the baselines from `figures/main/baseline_curves.csv`.
 - The published NeuroQwen3-0.6B was trained before stage 00 removed the evaluation papers from its corpus, which holds
   2,906 of the 2,971 test papers. Stages 13 and 14 still use it. `figures/review/core/a4_memorization_check` tests
   whether captions copy the abstracts.

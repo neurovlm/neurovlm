@@ -5,6 +5,7 @@ PY=.venv/bin/python                       # from the repo root
 $PY scripts/data/fetch_hf.py              # every input, verbatim from Hugging Face at pinned commits -> ~/.cache/neurovlm
 $PY scripts/data/fetch_hf.py --check      # verify the data dir and HF cache against the manifest, download nothing
 $PY scripts/data/run_all.py               # same as fetch_hf.py (--from-hf is the default)
+$PY scripts/data/fetch_baselines.py       # Fig. S3's NiCLIP and NeuroConText files from their authors' OSF and Zenodo releases -> ~/.cache/neurovlm/baselines
 $PY scripts/data/run_all.py --regenerate --smoke   # every stage on 64 samples (~1 min) -> scripts/outputs/data_0N_*/smoke_artifacts/
 $PY scripts/data/run_all.py --regenerate --skip-optional   # provenance: stages 01-07 -> scripts/outputs/data_regenerated/
 $PY scripts/data/07_transform_text.py --regenerate --batch-size 32 --artifact-dir scripts/outputs/data_regenerated

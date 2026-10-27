@@ -33,7 +33,7 @@ panels, plus `model_sources`: the checkpoint file of each component) next to its
 | Fig. 5 contrastive / autoencoder / networks | `fig5_perf_quant.py` | `fig5_perf_quant.*` | CV folds, autoencoder, InfoNCE heads; b: read from the a3 bounds analysis (same final components, checked) |
 | Fig. 6 autoencoder reconstructions | `fig6_autoencoder_qual.py` | `fig6_autoencoder_qual.*` | autoencoder, split |
 | Fig. S2 Gaussian kernel vs DiFuMo | `figS2_difumo_v_ale.py` | `figS2_difumo_v_ale.*` | none (data only) |
-| Fig. S3 model comparison | `figS3_recall_comparison.py` | `figS3_recall_comparison.*` | autoencoder, InfoNCE heads; NiCLIP / NeuroConText from their own checkpoints |
+| Fig. S3 model comparison | `figS3_recall_comparison.py` | `figS3_recall_comparison.*`, `baseline_curves.csv`, `baseline_fair_pmids.txt` | autoencoder, InfoNCE heads; NiCLIP / NeuroConText from their authors' releases (`data/fetch_baselines.py`) |
 | Fig. S4 ICA components (HCP, UK Biobank) | `figS4_clip_ica.*` (one page: UK Biobank above, HCP below; input maps with sagittal, coronal and axial slices, 6.54 in tall; `--views z` gives the one-slice version (`figS4_clip_ica_1slice.*`)) | autoencoder, InfoNCE heads, stage 2 projector |
 
 **Fig. 3 layout and labels.** One page, 5.15 x 6.82 in at 7 pt (the original, 6.7 x 3.9 in, used ~3.5 pt text).  The
@@ -116,7 +116,7 @@ Every figure that evaluates or samples PubMed-test or NeuroVault items drops the
 | Fig. 4 | the 16 leakage-audit test-set papers from both rows (n = 2,971) |
 | Fig. 5 | a: the 42 publications from the CV folds' held-out parts (all in fold 0); b: the 7 NeuroVault papers / 29 maps; c: the 16 test papers and the 29 maps |
 | Fig. 6 | excluded draws are redrawn from the same RNG stream (none of the 24 examples is affected) |
-| Fig. S3 | the 16 test-set papers (n = 368 -> 366); `--baseline-csv` curves cannot be re-filtered and are flagged |
+| Fig. S3 | the 16 test-set papers (n = 372 -> 369); the precomputed curves of `baseline_curves.csv` are on the same subset (`baseline_fair_pmids.txt`) |
 
 Figs. 2, S2 and S4 use no held-out items.
 
@@ -148,7 +148,7 @@ of n = 2,987, before the 16 leakage-audit papers were dropped, which move its me
 | Fig. 5d network accuracy (n = 119) | 0.82 (97) | 0.82 (98) | |
 | Fig. 6 reconstructions | same 24 examples | equivalent | |
 | Fig. S2 | - | identical | no model |
-| Fig. S3 NeuroVLM AUC t->i / i->t (n = 366) | 0.835 / 0.835 | 0.834 / 0.835 | NiCLIP 0.823 / 0.807, NeuroConText 0.801 / 0.813 |
+| Fig. S3 NeuroVLM AUC t->i / i->t (n = 369) | not re-measured (see below) | 0.824 / 0.825 | NiCLIP 0.809 / 0.792, NeuroConText 0.794 / 0.805. Baselines fetched from their authors' releases and re-embedded on 2026-10-26, fair subset from the evaluated checkpoint's own training split (before: n = 366, 0.834 / 0.835 vs 0.823 / 0.807 and 0.801 / 0.813). The released column needs a data dir at the pinned files; the author's holds local copies of `latent_neuro.pt` and `neuro_vectors.pt` that differ from them (`fetch_hf.py --check`), where `--released` gives 0.649 / 0.580 |
 | Fig. S4 component titles identical to released | 10/10 | **9/10** | 10/10 name the right system; the one difference is HCP frontoparietal "Frontoparietal Control Network" (released "Frontoparietal Network") |
 
 **Fig. 2 network titles** (`[NETWORK]` caption; `[REGION]` / `[FUNCTION]` in the JSON):
@@ -325,22 +325,25 @@ paired-difference boxes of check7 were removed in check8 (they left a band of wh
 statistics stay in the JSON (`paired_differences`, `text_score_reference`) and the small BERTScore gap is defended
 in the caption and the response; the retrieval titles no longer print n (caption).
 
-## External inputs for Fig. S3
+## Baselines of Fig. S3
 
-NiCLIP / NeuroConText need files outside this repository, resolved from `--external-root` (default
-`$NEUROVLM_REPOSITORY_ROOT`, else `~/neurovlm`):
+NiCLIP and NeuroConText come from their authors' releases. `scripts/data/fetch_baselines.py` (called by the figure
+script) fetches them into `<data dir>/baselines/` and checks each file against `scripts/config/hf_manifest.json`
+(`not_on_hub`, group `baselines`): the NiCLIP checkpoint and the GC-LDA model fit on its training split from OSF project
+dsj56, and NeuroConText's text pipeline and training PMIDs from Zenodo record 14169410 (two members of the 8 GB archive,
+read through HTTP range requests). NeuroConText publishes no checkpoint (none in its GitHub repository or Zenodo
+record), so the one we trained with the authors' script on their data is published as `neurovlm/neurocontext-baseline`
+and pinned in the manifest's `files` like every other Hub input (`common.hf_pinned`).
 
-```
-<root>/baseline/niclip_train_pmids.npy
-<root>/pubmed/model-clip_section-body_embedding-BrainGPT-7B-v0.2_best.pth   ($NEUROVLM_NICLIP_CHECKPOINT)
-<root>/NeuroConText/best_val.pt                                              ($NEUROVLM_NEUROCONTEXT_CHECKPOINT)
-<root>/NeuroConText/data/data_NeuroConText/{train_pmids.pkl,text_preprocessing_pipeline.pkl}
-<root>/docs/03_evaluation/{img_emb_512.pt,braingpt_embeddings.pt,mistral_embeddings.pt}   (--external-cache)
-```
+The text encoders run once per test split and are cached in `cache/`: Mistral-7B-v0.1 for NeuroConText and the
+BrainGPT-7B-v0.2 LoRA adapter merged into Mistral-7B-v0.1 for NiCLIP, both at the revisions pinned in the manifest
+(`pins`), bf16, batches of 4, mean of the last hidden state (about 6 min on one RTX 5090). DiFuMo-512 features of the
+test maps are computed the same way. The fair subset drops the test papers in either training split (the GC-LDA ids
+give NiCLIP's; an earlier list taken from the v0.1 abstract model differed in 1,038 PMIDs).
 
-The 7B text-embedding passes (BrainGPT-7B for NiCLIP, Mistral-7B for NeuroConText) are not re-run; DiFuMo-512 features
-are recomputed if missing.  A baseline that cannot be evaluated is read from `--baseline-csv`
-(`model,direction,normalized_k,recall`) or omitted.
+A baseline that cannot be fetched or evaluated is drawn from `baseline_curves.csv`
+(`model,direction,normalized_k,recall`), after a warning. The script rewrites that file whenever both baselines were
+evaluated, so it is the last evaluated curve, not a hand-made one.
 
 ## Provenance
 
