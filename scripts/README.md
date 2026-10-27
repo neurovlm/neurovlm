@@ -234,9 +234,9 @@ Local run of both jobs after the move to `pipeline/` and `config/` (fresh clone,
 | job | step | time | result |
 |---|---|---|---|
 | tests | environment from the lock | 15 s | torch 2.14.1+cpu |
-| tests | offline suite | 16 s | 349 passed, 1 skipped (CUDA), 97 deselected, `neurovlm` coverage 46.8 % |
+| tests | offline suite | 13 s | 423 passed, 1 skipped (CUDA), 97 deselected, `neurovlm` coverage 95.3 % (2026-10-26, training and inference scope of `.coveragerc`) |
 | smoke | environment, AAL atlas, inputs (`fetch_hf.py`, 54 train files, empty cache) | 141 s | 54 ok, 0 mismatch |
-| smoke | `smoke_pipeline.sh` (00, 08, 09, 20, 11, 12, 13, 14) | 247 s | every stage exit 0, reproduction-code coverage 36.6 % |
+| smoke | `smoke_pipeline.sh` (00, 08, 09, 20, 11, 12, 13, 14) | 247 s | every stage exit 0, reproduction-code coverage 36.6 % (scope of `.coveragerc` before 2026-10-26, which also counted the figure scripts and validation; the next CI smoke run re-measures it) |
 
 ## Publishing the release
 

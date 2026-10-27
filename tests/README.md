@@ -55,11 +55,20 @@ Run every test, including tests that may download data or pretrained models:
 pytest
 ```
 
-Generate coverage:
+Generate coverage (the CI command; `.coveragerc` limits the report to the training and inference code, see its
+header for the measured and omitted modules):
 
 ```bash
-pytest --cov=neurovlm --cov-report=term-missing
+pytest -m "not network and not requires_data and not requires_pretrained and not requires_specter and not slow" \
+    --cov=neurovlm --cov-config=.coveragerc --cov-report=term-missing
 ```
+
+The offline suite reaches the inference client, the loaders and SPECTER through small stand-ins: `tests/unit/api/
+test_client_offline.py` injects fake models and corpora through the `load_model`, `load_dataset`, `load_latent` and
+`load_masker` names of `neurovlm.core.client`; `tests/unit/resources/test_resource_loaders_offline.py` replaces
+`_download_from_hf` with a writer of small fixture files; `tests/unit/models/test_specter_offline.py` replaces the
+`transformers` and `adapters` factories. Tests that need the released weights or data keep their `requires_*` and
+`network` markers.
 
 ## Reproduction smoke test
 
