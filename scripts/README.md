@@ -43,7 +43,7 @@ scripts/
   README.md          this file
   config/            hf_manifest.json (every Hugging Face input with its revision and sha256), reference_metrics.json
                      (the paper model's validation metrics), requirements.lock, Dockerfile
-  pipeline/          reproduce.sh (one command), train_pipeline.py (the stages in order), validate_models.py,
+  pipeline/          reproduce.sh (one command; its steps are reproduce.py), train_pipeline.py (the stages in order), validate_models.py,
                      verify_reproduction.py, smoke_pipeline.sh (CI), push_hf_release.py, common.py (shared helpers)
   data/              fetch_hf.py (the pinned inputs) and data stages 01-09 (provenance), see data/README.md
   models/            training stages 00-20 and their shared code, see models/README.md

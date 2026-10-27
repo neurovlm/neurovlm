@@ -53,7 +53,8 @@ omit =
     scripts/data/0*.py
     scripts/data/run_all.py
     scripts/data/data_utils.py
-    # validation, the reproduction check and the Hub release (neither training nor inference)
+    # validation, the reproduction check, the reproduction driver and the Hub release (neither training nor inference)
+    scripts/pipeline/reproduce.py
     scripts/pipeline/validate_models.py
     scripts/pipeline/verify_reproduction.py
     scripts/pipeline/push_hf_release.py
