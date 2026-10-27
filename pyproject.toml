@@ -113,4 +113,5 @@ markers = [
   "requires_pretrained: requires released model weights",
   "requires_specter: requires a Hugging Face SPECTER model",
   "notebook_smoke: exports and executes a notebook end-to-end at smoke scale",
+  "pipeline_smoke: runs scripts/pipeline/smoke_pipeline.sh (every training stage for one batch; needs the pinned inputs)",
 ]

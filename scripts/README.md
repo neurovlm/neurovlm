@@ -224,8 +224,9 @@ Two workflows run on pull requests to `main`. Both use the locked environment wi
 - `.github/workflows/tests.yml` runs the offline test suite (`tests/`). Tests that download data or weights carry the
   markers `network` or `requires_*` and are deselected.
 - `.github/workflows/smoke.yml` fetches the training inputs of `config/hf_manifest.json` (54 files, 8.1 GB, pinned
-  and sha256-checked) and the AAL atlas (sha256-checked), then runs every training stage for one batch on the CPU
-  (`SMOKE_COVERAGE=1 bash scripts/pipeline/smoke_pipeline.sh --skip-data --no-validate --device cpu`). It checks that
+  and sha256-checked) and the AAL atlas (sha256-checked), then runs the pipeline smoke test
+  `tests/scripts/test_smoke_pipeline.py` (`SMOKE_COVERAGE=1 bash scripts/pipeline/smoke_pipeline.sh --skip-data
+  --no-validate --device cpu`, every training stage for one batch on the CPU, every stage must exit 0). It checks that
   the pipeline runs end to end, not its numbers, and reports the coverage of the reproduction code (`.coveragerc`).
 
 Local run of both jobs after the move to `pipeline/` and `config/` (fresh clone, fresh `.venv` from the lock, empty

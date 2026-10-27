@@ -12,7 +12,7 @@ tests/
 ├── models/       # model definitions, loading, serialization, losses
 ├── pipelines/    # run bookkeeping (artifacts, checkpoints, provenance)
 ├── resources/    # pinned-resource loaders
-├── scripts/      # helpers of scripts/
+├── scripts/      # scripts/: helpers and the pipeline smoke test
 ├── training/     # trainers: helpers and one-epoch runs on tiny synthetic data
 └── notebooks/    # exports and smoke-executes docs/**.ipynb
 ```
@@ -64,14 +64,22 @@ test_client_offline.py` injects fake models and corpora through the `load_model`
 
 ## Reproduction smoke test
 
-The paper's training pipeline has its own smoke test outside `tests/`: every stage for
-one batch on CPU, from the pinned Hugging Face inputs. CI runs it in
-`.github/workflows/smoke.yml`; see `scripts/README.md`, "Tests and CI".
+`tests/scripts/test_smoke_pipeline.py` runs the paper's training pipeline at smoke
+scale (`scripts/pipeline/smoke_pipeline.sh`: every stage for one batch on CPU, from
+the pinned Hugging Face inputs) and checks that every stage exited 0. It needs the
+inputs and about five minutes, so it is deselected from the offline suite
+(`pipeline_smoke`, `slow`, `requires_data`); CI runs it in
+`.github/workflows/smoke.yml` on every pull request that touches `scripts/` or
+`src/`. See `scripts/README.md`, "Tests and CI".
 
 ```bash
-.venv/bin/python scripts/data/fetch_hf.py --only pipeline   # pinned inputs, sha256-checked
-bash scripts/pipeline/smoke_pipeline.sh --device cpu          # ~5 min
+.venv/bin/python scripts/data/fetch_hf.py --only pipeline           # pinned inputs, sha256-checked
+pytest tests/scripts/test_smoke_pipeline.py -m pipeline_smoke -v    # ~5 min
 ```
+
+`tests/notebooks/test_notebooks.py` is the older smoke test of the `docs/` notebooks
+(the pre-revision analyses, most of them marked unrunnable); it does not cover
+`scripts/`.
 
 ## Verify training and notebooks after a refactor
 
@@ -124,6 +132,7 @@ data situation changes.
 - `requires_pretrained`: requires released model weights
 - `requires_specter`: requires a Hugging Face SPECTER model
 - `notebook_smoke`: exports and executes a notebook end-to-end at smoke scale
+- `pipeline_smoke`: runs the training pipeline at smoke scale (`tests/scripts/test_smoke_pipeline.py`)
 
 New tests should be deterministic, use `tmp_path` for artifacts, mock network
 access unless explicitly marked, and test behavior rather than notebook prose

@@ -1,6 +1,7 @@
 name: Pipeline smoke test
 
-# Runs scripts/pipeline/smoke_pipeline.sh on CPU: stage 00 (NeuroQwen DAPT, one step) and every stage of
+# Runs the pipeline smoke test (tests/scripts/test_smoke_pipeline.py, i.e. scripts/pipeline/smoke_pipeline.sh) on CPU:
+# stage 00 (NeuroQwen DAPT, one step) and every stage of
 # scripts/pipeline/train_pipeline.py (08, 09, 20 fold 0, 11, 12, 13, 14) for one epoch of one batch on 64 samples, and
 # reports coverage of the reproduction code (.coveragerc). Full training takes hours on a GPU, so CI checks that the
 # pipeline runs end to end, not its numbers. Environment: CPython 3.12.12, scripts/config/requirements.lock with the
@@ -16,6 +17,7 @@ on:
     paths:
       - "scripts/**"
       - "src/**"
+      - "tests/scripts/test_smoke_pipeline.py"
       - "pyproject.toml"
       - ".coveragerc"
       - ".github/workflows/smoke.yml"
@@ -23,6 +25,7 @@ on:
     paths:
       - "scripts/**"
       - "src/**"
+      - "tests/scripts/test_smoke_pipeline.py"
       - "pyproject.toml"
       - ".coveragerc"
       - ".github/workflows/smoke.yml"
@@ -117,12 +120,12 @@ jobs:
             ~/nilearn_data/aal_SPM12
           key: smoke-inputs-${{ runner.os }}-${{ hashFiles('scripts/config/hf_manifest.json') }}
 
-      - name: Smoke training on CPU (stage 00, then every train_pipeline.py stage, one epoch of one batch)
+      - name: Pipeline smoke test (stage 00, then every train_pipeline.py stage, one epoch of one batch)
         env:
           HF_HUB_OFFLINE: "1"
           HF_DATASETS_OFFLINE: "1"
           SMOKE_COVERAGE: "1"
-        run: bash scripts/pipeline/smoke_pipeline.sh --skip-data --no-validate --device cpu
+        run: .venv/bin/python -m pytest tests/scripts/test_smoke_pipeline.py -m pipeline_smoke -v --tb=short -p no:cacheprovider
 
       - name: Coverage of the reproduction code
         if: always()
