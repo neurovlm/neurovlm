@@ -51,7 +51,6 @@ def main() -> None:
         W, H, FS = FIG_FULL_W, 4.72, 7.0
         LH = FS * 1.25 / 72
     c = json.loads((out / "dataflow_counts.json").read_text())
-    ex = c["eval_exclusions"]
 
     fig = plt.figure(figsize=(W, H), dpi=300)  # same dpi as savefig, for the fit check
     ax = fig.add_axes((0, 0, 1, 1))
@@ -115,22 +114,22 @@ def main() -> None:
 
     pub = box(xs, L[0], ws, "data", "PubMed", [f"{k(c['pubmed_publications'])} papers", "split by paper:", f"train {k(c['split_train'])}",
                                                f"val {k(c['split_val'])}", f"test {k(c['split_test'])}"])
-    synth = box(xs, anat["t"] + 0.08, ws, "prep", "Synthetic pairs", ["atlas regions and", "training papers:",
-                                                                      f"{k(c['synth_rows'])} text–map pairs"])
+    # one box for both LLM-written sets: its first line feeds the anatomical head, its last line the stage-2 projector
+    y_pairs = anat["b"] + 0.15  # first line level with the anatomical head, so that arrow is horizontal
+    y_cur = y_pairs - 2 * LH  # last line below the head, so the arrow to the stage-2 projector passes under it
+    synth = box(xs, y_pairs + 0.08 + 1.5 * LH, ws, "prep", "Synthetic texts",
+                [f"{k(c['synth_rows'])} text–map pairs", "written by an LLM", f"{k(c['stage2_rows_kept'])} concept texts"])
     atl = [f"{c['network_atlases']} atlases and", f"{c['network_ica_sets']} ICA sets"]
     if not paper:
         atl = [" ".join(atl)]
-    cur = box(xs, synth["b"] - 0.1, ws, "prep", "Curated texts",
-              [f"{k(c['qformer_canonical_rows'])} concept texts,", f"{k(c['stage2_rows_kept'])} kept"])
-    ext = box(xs, min(lm["b"], cur["b"]) - 0.1, ws, "data", "NeuroVault +\nnetwork atlases", ["group maps;"] + atl)
+    ext = box(xs, min(lm["b"], synth["b"]) - 0.1, ws, "data", "NeuroVault +\nnetwork atlases", ["group maps;"] + atl)
     ev = box(xe, L[0], we, "eval", "Held-out sets", ["never used", "for training"] if paper else ["never used for training"], h=L[0] - ext["b"])
 
     def section(top, name, lines):
         texts.append((ax.text(ev["cx"], top, name, ha="center", va="top", fontsize=FS, color=INK, fontweight="bold"), ev))
         texts.append((ax.text(ev["cx"], top - LH, "\n".join(lines), ha="center", va="top", fontsize=FS, color=INK2, linespacing=1.25), ev))
 
-    section(st1["t"] - 0.05 - (LH if paper else 0), "PubMed test",
-            [f"{k(c['split_test_eval'])} papers", f"({ex['pubmed_test_dropped']} near-duplicates", "removed)"])
+    section(st1["t"] - 0.05 - (LH if paper else 0), "PubMed test", [f"{k(c['split_test_eval'])} papers"])
     net = [f"{k(c['network_maps_labelled'])} atlas + {k(c['network_ica_components'])} ICA"]
     nv = [f"{k(c['neurovault_publications_eval'])} papers, {k(c['neurovault_maps_eval'])} maps"]
     if paper:
@@ -143,12 +142,12 @@ def main() -> None:
     # arrows: data -> models
     arrow([(pub["r"], ae["cy"]), (ae["l"], ae["cy"])])
     arrow([(pub["r"], heads["t"] - 0.12), (heads["l"], heads["t"] - 0.12)])
-    arrow([(synth["r"], anat["cy"]), (anat["l"], anat["cy"])])
+    arrow([(synth["r"], y_pairs), (anat["l"], y_pairs)])
     xa = pub["l"] + 0.2
     arrow([(xa, pub["b"]), (xa, synth["t"])])
     xg = (anat["r"] + st2["l"]) / 2  # gap between the two model lanes
     yg = (lm["t"] + st2["b"]) / 2  # gap between the language model and stage 2
-    arrow([(cur["r"], cur["cy"]), (xg, cur["cy"]), (xg, yg), (st2["l"] + 0.3, yg), (st2["l"] + 0.3, st2["b"])])
+    arrow([(synth["r"], y_cur), (xg, y_cur), (xg, yg), (st2["l"] + 0.3, yg), (st2["l"] + 0.3, st2["b"])])
     # model -> model
     arrow([(ae["cx"], ae["b"]), (heads["cx"], heads["t"])])
     arrow([(heads["cx"], heads["b"]), (anat["cx"], anat["t"])], label="init", lpos=(heads["cx"] + 0.06, (heads["b"] + anat["t"]) / 2), lha="left")

@@ -66,7 +66,13 @@ Each "Changes to the manuscript" line names the paper section and its lines in t
 the letter unchanged, appends the marked manuscript with pdfpages (each page gets the target `ms.<page>`, opened to
 fit the window) and defines `\mslink`, so each reference links to the page that holds it (46 numbered lines per manuscript
 page in the marked PDF as in the clean one, so line l is on page (l + 22) / 46 as `\numexpr` rounds it).  After a paper
-edit, rebuild the marked copy, re-measure the line numbers on it (words of the old and new marked PDFs aligned), update manuscript_changes.md and the changes lines, and rebuild both PDFs.  Facts only the authors can supply
+edit, `.venv/bin/python scripts/figures/review/manuscript_links.py` rebuilds the paper and the marked copy (latexdiff from
+the submitted commit, paper/.git 5d3637a), reads the numbered lines and caption pages of the new marked PDF (pypdf, installed
+with `uv pip install --python .venv/bin/python pypdf`; not part of the pipeline lock), aligns them with the PDF the current numbers refer to
+(`manuscript_lines.json`, written by `--snapshot`), rewrites every `\msl`, `\msp` and `\mspp` in the letter (`--letter` for other
+copies, `--changes` for manuscript_changes.md), regenerates the caption-page table of `response_letter_with_manuscript.tex` and
+writes `manuscript_links_report.md`, one row per reference with its old and new numbers, a status and the first words of the
+passage; only the rows marked review need a look.  `--no-build` remaps against the marked PDF on disk, `--dry-run` only reports.  Facts only the authors can supply
 stay as `[AUTHOR: ...]` placeholders, bold in the text with a red-on-yellow note (`\authornote`) in the letter and
 red on yellow in the paper (`\authorfact`).
 
@@ -78,7 +84,7 @@ red on yellow in the paper (`\authorfact`).
 an earlier export and prints what it copied, without touching the repo files.  Upload the `response/` folder to the
 Overleaf project and compile `response_letter_with_manuscript.tex` (letter and marked manuscript) or `response_letter.tex`
 (letter only) as the main document.  Overleaf cannot rebuild `manuscript_marked.pdf`, so after any paper change rebuild
-the marked paper and the letters as above and export again.
+the marked paper and remap the letters with `manuscript_links.py`, then export again.
 
 ## What goes where
 
