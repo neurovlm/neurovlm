@@ -2,7 +2,7 @@
 """Stage 13: stage 1 projector (grounded, PubMed), brain latent + semantic -> NeuroQwen3 soft tokens.
 
 Port of docs/03_models/13_qformer_pubmed.ipynb. Default projector is the residual MLP (best-validation epoch packaged,
-early stopping); --projector qformer is the notebook's Q-Former. File names keep the qformer_ prefix either way.
+early stopping); --projector qformer is the deprecated Q-Former of the first submission. File names keep the qformer_ prefix either way.
 
     .venv/bin/python scripts/models/13_qformer_pubmed.py --run-name <run>
 """

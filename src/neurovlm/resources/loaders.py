@@ -1005,7 +1005,7 @@ def _load_neuro_qformer(
 ) -> NeuroQFormer:
     """Load the packaged NeuroQFormer from HuggingFace.
 
-    The package contains the QFormer, frozen image projection head, and frozen
+    The package holds the MLP projector, the frozen image projection head and the frozen
     canonical projection banks as ``model.safetensors`` plus ``config.json``.
     """
     repo_id = _neuro_qformer_repo_id(qformer_variant)

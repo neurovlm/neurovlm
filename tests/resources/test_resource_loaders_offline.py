@@ -35,8 +35,8 @@ def _tiny_autoencoder(**kwargs) -> NeuroAutoEncoder:
 def _tiny_qformer() -> NeuroQFormer:
     torch.manual_seed(0)
     banks = {"all": torch.randn(3, 8), "network": torch.randn(2, 8)}
-    return NeuroQFormer(image_dim=8, semantic_dim=8, lm_dim=16, num_queries=2, hidden_dim=8, num_heads=2,
-                        num_layers=1, canonical_banks=banks).eval()
+    return NeuroQFormer(image_dim=8, semantic_dim=8, lm_dim=16, num_queries=2, width=16, depth=1, align_hidden=8,
+                        canonical_banks=banks).eval()
 
 
 def _frame(filename: str) -> pd.DataFrame:

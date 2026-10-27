@@ -548,7 +548,8 @@ def write_stage_summary(run_dir: Path, stage: str, payload: dict) -> None:
 # Brain-to-text projectors (stages 13/14): (autoencoder latent [B, 384], semantic vector [B, 384]) -> 32 NeuroQwen3
 # input tokens [B, 32, 1024], plus semantic_from_visual for the alignment loss. Two interchangeable modules:
 #   mlp      ResidualMLPProjector below (default; mlp_m of review analysis A5.1: width 704, depth 2, 28.34 M parameters)
-#   qformer  neurovlm.models.qformer.QFormer (6 layers, 28.46 M parameters): the released model and the notebook recipe
+#   qformer  neurovlm.models.qformer.QFormer (6 layers, 28.46 M parameters): the first submission's projector, deprecated
+#            (constructing one warns); kept for the A5 projector comparison and old checkpoints
 # Both are wrapped in the library's NeuroQFormer, so NeuroVLM.generate_text accepts either. Packages store the kind in
 # config.json["projector"]; packages without the key are Q-Formers.
 PROJECTOR_KINDS = ("qformer", "mlp")
@@ -644,11 +645,11 @@ def add_projector_args(parser: argparse.ArgumentParser, *, allow_auto: bool = Fa
     """--projector (and --mlp-width/--mlp-depth) for the brain-to-text stages."""
     if allow_auto:
         parser.add_argument("--projector", choices=("auto",) + PROJECTOR_KINDS, default="mlp",
-                            help="Projector to fine-tune: mlp (needs a stage-13 MLP package), qformer (released architecture), "
+                            help="Projector to fine-tune: mlp (needs a stage-13 MLP package), qformer (deprecated Q-Former), "
                                  "or auto (whatever stage 13 packaged).")
     else:
         parser.add_argument("--projector", choices=PROJECTOR_KINDS, default="mlp",
-                            help="Soft-prompt projector: mlp (residual MLP) or qformer (released Q-Former architecture).")
+                            help="Soft-prompt projector: mlp (residual MLP) or qformer (the deprecated Q-Former of the first submission).")
     if mlp_shape:
         parser.add_argument("--mlp-width", type=int, default=MLP_DEFAULTS["width"], help="MLP trunk width (704 = mlp_m, 192 = mlp_s).")
         parser.add_argument("--mlp-depth", type=int, default=MLP_DEFAULTS["depth"], help="MLP residual blocks.")
@@ -658,7 +659,7 @@ def build_projector(kind: str, *, image_dim: int = 384, semantic_dim: int = 384,
                     width: int = MLP_DEFAULTS["width"], depth: int = MLP_DEFAULTS["depth"], expansion: int = MLP_DEFAULTS["expansion"],
                     dropout: float = MLP_DEFAULTS["dropout"], head: str = MLP_DEFAULTS["head"], align_hidden: int = MLP_DEFAULTS["align_hidden"],
                     token_scale: float | None = None, token_center=None, **_ignored):
-    """New fp32 CPU projector: the released QFormer(384, 384, 1024, 32 queries, 512 hidden, 8 heads, 6 layers) or the MLP."""
+    """New fp32 CPU projector: the MLP, or the deprecated QFormer(384, 384, 1024, 32 queries, 512 hidden, 8 heads, 6 layers)."""
     if kind == "qformer":
         from neurovlm.models.qformer import QFormer
 

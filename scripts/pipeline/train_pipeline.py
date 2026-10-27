@@ -149,7 +149,7 @@ def main(argv=None):
     p.add_argument("--stage-args", default="", help="Extra arguments for every stage (quoted string).")
     p.add_argument("--validate-args", default="", help="Extra arguments for validate_models.py (quoted string).")
     p.add_argument("--projector", choices=["mlp", "qformer", "auto"], default="mlp",
-                   help="Brain-to-text projector for 13 and 14: mlp (paper model), qformer (the notebook's Q-Former), "
+                   help="Brain-to-text projector for 13 and 14: mlp (paper model), qformer (deprecated: the first submission's Q-Former), "
                         "auto (13: mlp, 14: whatever 13 packaged). Artifact names keep the qformer prefix either way.")
     p.add_argument("--mlp-width", type=int, help="Passed to stage 13 (its default: 704).")
     p.add_argument("--mlp-depth", type=int, help="Passed to stage 13 (its default: 2).")
