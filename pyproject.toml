@@ -107,8 +107,6 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-  "unit: isolated offline behavior",
-  "integration: multi-component behavior",
   "slow: long-running tests",
   "network: requires external network access",
   "requires_data: requires downloaded datasets",

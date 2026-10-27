@@ -9,7 +9,7 @@ import torch
 from neurovlm.models.base import ProjHead
 from neurovlm.models.qformer import CanonicalProjection, NeuroQFormer, QFormer, ResidualMLPProjector
 
-RUN_DIR = Path(__file__).resolve().parents[3] / "scripts/outputs/runs/final"
+RUN_DIR = Path(__file__).resolve().parents[2] / "scripts/outputs/runs/final"
 
 
 def _mlp_model(**kwargs) -> NeuroQFormer:

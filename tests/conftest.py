@@ -53,13 +53,3 @@ def pretrained_proj_heads():
         "text_mse": text_mse,
     }
 
-
-def pytest_collection_modifyitems(items):
-    """Label tests from their unit/integration directory."""
-
-    for item in items:
-        parts = item.path.parts
-        if "unit" in parts:
-            item.add_marker(pytest.mark.unit)
-        elif "integration" in parts:
-            item.add_marker(pytest.mark.integration)

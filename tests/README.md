@@ -1,27 +1,25 @@
 # NeuroVLM tests
 
-The suite is organized by scope and subsystem:
+One directory per subsystem:
 
 ```text
 tests/
 ├── conftest.py
-├── unit/
-│   ├── api/
-│   ├── data/
-│   ├── metrics/
-│   ├── models/
-│   ├── pipelines/
-│   └── resources/
-├── integration/
-│   ├── api/
-│   ├── evaluation/
-│   └── training/
-└── notebooks/          # exports and smoke-executes docs/**.ipynb
+├── api/          # NeuroVLM client and the structured runtime
+├── data/         # data loaders and the atlas-free datasets
+├── evaluation/   # evaluation helpers and the model comparison
+├── metrics/
+├── models/       # model definitions, loading, serialization, losses
+├── pipelines/    # run bookkeeping (artifacts, checkpoints, provenance)
+├── resources/    # pinned-resource loaders
+├── scripts/      # helpers of scripts/
+├── training/     # trainers: helpers and one-epoch runs on tiny synthetic data
+└── notebooks/    # exports and smoke-executes docs/**.ipynb
 ```
 
-Unit tests cover isolated functions, model definitions, loaders with mocked
-resources, metrics, and run infrastructure. Integration tests exercise complete
-inference, evaluation, and small offline training workflows.
+Tests that need the released weights or data carry the `network` or `requires_*`
+markers; everything else runs offline in seconds with small stand-ins for the
+models and corpora.
 
 ## Install test dependencies
 
@@ -37,16 +35,10 @@ Run the deterministic offline suite:
 pytest -m "not network and not requires_data and not requires_pretrained and not requires_specter and not slow"
 ```
 
-Run only unit tests:
+Run one subsystem:
 
 ```bash
-pytest tests/unit
-```
-
-Run only integration tests:
-
-```bash
-pytest tests/integration
+pytest tests/models
 ```
 
 Run every test, including tests that may download data or pretrained models:
@@ -86,11 +78,11 @@ bash scripts/pipeline/smoke_pipeline.sh --device cpu          # ~5 min
 Two commands double-check the parts pytest's fast suite doesn't reach on its own:
 
 ```bash
-python -m pytest tests/integration/training -v   # every training pipeline, real 1-epoch runs on tiny synthetic CPU data (~15s)
+python -m pytest tests/training -v              # every training pipeline, real 1-epoch runs on tiny synthetic CPU data (~15s)
 python -m pytest tests/notebooks -v              # every notebook, executed end-to-end against real cached data
 ```
 
-The training integration tests are already part of the default `pytest` run;
+The training tests are already part of the default `pytest` run;
 the first command is a single fast check to point at after a refactor.
 
 The notebook smoke tests are different: they are **not** part of the default `pytest`
@@ -126,8 +118,6 @@ data situation changes.
 
 ## Markers
 
-- `unit`: isolated, offline behavior
-- `integration`: multi-component behavior
 - `slow`: tests unsuitable for the quick suite
 - `network`: requires an external service
 - `requires_data`: requires downloaded datasets
