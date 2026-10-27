@@ -45,8 +45,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--external-dir", metavar="DIR", default=os.environ.get("NEUROVLM_EXTERNAL_DIR") or None,
                    help="optional local copies, linked into the data dir when missing there before the fetch (they must match "
                         "the manifest's sha256): synth.parquet, text_synth_less.parquet, the neurovault_* tables and "
-                        "neurovault_images/; and nilearn_data/aal_SPM12/ (stage 11; nilearn's AAL download server currently fails "
-                        "TLS verification). Default: $NEUROVLM_EXTERNAL_DIR.")
+                        "neurovault_images/. Default: $NEUROVLM_EXTERNAL_DIR.")
     p.add_argument("--home", metavar="DIR",
                    help="run with HOME=DIR, so the package data dir (~/.cache/neurovlm) is DIR/.cache/neurovlm; the Hugging Face "
                         "cache stays where it was (HF_HOME is pinned before HOME changes).")
@@ -178,9 +177,6 @@ class Reproduction:
             if not (target.exists() or target.is_symlink()) and (external / name).exists():
                 target.symlink_to(external / name)
                 self.log(f"linked {name}")
-        if (external / "nilearn_data" / "aal_SPM12").is_dir() and not (self.nilearn_dir / "aal_SPM12" / "aal").is_dir():
-            shutil.copytree(external / "nilearn_data" / "aal_SPM12", self.nilearn_dir / "aal_SPM12", dirs_exist_ok=True)
-            self.log("copied nilearn aal_SPM12")
 
     # 3. data: every input verbatim from Hugging Face at the commits pinned in scripts/config/hf_manifest.json, sha256 checked
     # (neuro_vectors.pt = embedded_text/pubmed_images.pt, latent_specter2_adhoc.pt, synth.parquet, the NeuroVault scrape, ...).
@@ -198,9 +194,6 @@ class Reproduction:
         # from here on the Hugging Face libraries read only the HF cache, whose refs fetch_hf.py pinned to the manifest commits
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["HF_DATASETS_OFFLINE"] = "1"
-        if not (self.nilearn_dir / "aal_SPM12" / "aal").is_dir():
-            self.log(f"WARNING: {self.nilearn_dir / 'aal_SPM12'} missing; stage 11 will try nilearn's download (www.gin.cnrs.fr, "
-                     "TLS errors seen 2026-10)")
 
     def prefetch_atlases(self) -> None:
         """Fig. 4's parallel spin-test workers race on the first neuromaps download into an empty HOME: fetch once here."""

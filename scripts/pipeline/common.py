@@ -54,6 +54,16 @@ def data_dir() -> Path:
     return path
 
 
+def fetch_aal():
+    """AAL atlas (SPM12) from the copy fetch_hf.py unpacks into the data dir (nilearn's download server fails TLS checks)."""
+    from nilearn import datasets
+
+    root = data_dir() / "nilearn_data"
+    if not (root / "aal_SPM12" / "aal" / "atlas" / "AAL.nii").exists():
+        raise FileNotFoundError(f"{root / 'aal_SPM12'} missing: run scripts/data/fetch_hf.py (neurovlm/atlases)")
+    return datasets.fetch_atlas_aal(version="SPM12", data_dir=str(root), verbose=0)
+
+
 def artifacts_exist(*paths: Path | str, force: bool = False) -> bool:
     """True when every path exists, unless ``force``."""
     return not force and all(Path(p).exists() for p in paths)

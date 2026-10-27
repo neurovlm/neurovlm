@@ -6,9 +6,9 @@ name: Pipeline smoke test
 # reports coverage of the reproduction code (.coveragerc). Full training takes hours on a GPU, so CI checks that the
 # pipeline runs end to end, not its numbers. Environment: CPython 3.12.12, scripts/config/requirements.lock with the
 # CPU build of torch. Inputs (no secrets, public downloads only): the train/ files of scripts/config/hf_manifest.json
-# (about 8 GB), fetched from the public Hugging Face repos at their pinned revisions and checked against their sha256,
-# and the AAL atlas (checked by sha256). Both are cached under a key on scripts/config/hf_manifest.json. The coverage
-# report is uploaded as the artifact coverage-smoke.
+# (about 8 GB, the AAL atlas among them), fetched from the public Hugging Face repos at their pinned revisions and
+# checked against their sha256, and cached under a key on scripts/config/hf_manifest.json. The coverage report is
+# uploaded as the artifact coverage-smoke.
 
 on:
   push:
@@ -74,31 +74,14 @@ jobs:
           uv pip install --python .venv/bin/python --torch-backend cpu -r "$RUNNER_TEMP/requirements-cpu.txt" -e ".[full,test]"
           .venv/bin/python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda)"
 
-      - name: Restore the Hugging Face inputs and the AAL atlas from the cache
+      - name: Restore the Hugging Face inputs from the cache
         id: inputs-cache
         uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cache/huggingface/hub
-            ~/nilearn_data/aal_SPM12
+            ~/.cache/neurovlm/nilearn_data
           key: smoke-inputs-${{ runner.os }}-${{ hashFiles('scripts/config/hf_manifest.json') }}
-
-      - name: AAL atlas for stage 11 (checked by sha256)
-        # Fallback: www.gin.cnrs.fr (the URL of nilearn.datasets.fetch_atlas_aal) does not send its intermediate
-        # certificate, so verified downloads (nilearn's own, or curl's) fail. The step tries a verified download, then an
-        # unverified one, and accepts the files only if their sha256 matches; nilearn then finds them in ~/nilearn_data.
-        run: |
-          d="$HOME/nilearn_data/aal_SPM12"
-          url="https://www.gin.cnrs.fr/AAL_files/aal_for_SPM12.tar.gz"
-          if [ ! -f "$d/aal/atlas/AAL.nii" ] || [ ! -f "$d/aal/atlas/AAL.xml" ]; then
-            mkdir -p "$d"
-            curl -fsSL --retry 3 -o "$RUNNER_TEMP/aal.tar.gz" "$url" \
-              || curl -fsSL --retry 3 --insecure -o "$RUNNER_TEMP/aal.tar.gz" "$url"
-            tar -xzf "$RUNNER_TEMP/aal.tar.gz" -C "$d"
-          fi
-          printf '%s  %s\n' \
-            91e8ec62a293c2a28c8e7343f37abb978ab941c5e26fbc496945c66d073a2cd8 "$d/aal/atlas/AAL.nii" \
-            1a0f2bb952b700fa94f5156b544cf238f2e8d0e0e5ebedaefac835938b7609f3 "$d/aal/atlas/AAL.xml" | sha256sum -c -
 
       - name: Training inputs from Hugging Face (pinned revisions, sha256 checked)
         run: |
@@ -117,7 +100,7 @@ jobs:
         with:
           path: |
             ~/.cache/huggingface/hub
-            ~/nilearn_data/aal_SPM12
+            ~/.cache/neurovlm/nilearn_data
           key: smoke-inputs-${{ runner.os }}-${{ hashFiles('scripts/config/hf_manifest.json') }}
 
       - name: Pipeline smoke test (stage 00, then every train_pipeline.py stage, one epoch of one batch)

@@ -2,7 +2,7 @@
 # Smoke test of the training pipeline: every stage with tiny settings into scripts/outputs/runs/smoke/, validated on 64 samples.
 # Stage 00 (NeuroQwen DAPT, opt-in, not in train_pipeline.py) runs first: one step on 256 documents, on the CPU (~1 min);
 # without the pubmed_neuroimaging.parquet corpus (not on the Hub) it trains on the pinned publications.parquet instead.
-# Inputs: the train/ files of scripts/config/hf_manifest.json (scripts/data/fetch_hf.py) and the AAL atlas in ~/nilearn_data.
+# Inputs: the train/ files of scripts/config/hf_manifest.json (scripts/data/fetch_hf.py; the AAL atlas is among them).
 # Usage: bash scripts/pipeline/smoke_pipeline.sh [extra train_pipeline.py args, e.g. --device cpu --no-validate --skip-data]
 # SMOKE_COVERAGE=1 runs both commands under coverage (.coveragerc, subprocesses included, parallel data files: run
 # `coverage combine` afterwards), as .github/workflows/smoke.yml does.

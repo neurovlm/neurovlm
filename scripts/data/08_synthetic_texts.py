@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))  # scripts/pipeline/
-from common import base_parser, finalize_args, get_logger, hf_pinned, timed  # noqa: E402
+from common import base_parser, fetch_aal, finalize_args, get_logger, hf_pinned, timed  # noqa: E402
 
 STAGE = "data_08_synthetic_texts"
 HERE = Path(__file__).resolve().parent
@@ -102,7 +102,7 @@ def aal_name(label: str) -> str:
 def region_seeds() -> list[str]:
     from nilearn import datasets
 
-    names = [aal_name(lab) for lab in datasets.fetch_atlas_aal(version="SPM12", verbose=0).labels if lab != "Background"]
+    names = [aal_name(lab) for lab in fetch_aal().labels if lab != "Background"]
     names += list(datasets.fetch_atlas_harvard_oxford("cort-maxprob-thr25-2mm", verbose=0).labels[1:])
     sub = [re.sub(r"^(Left|Right) ", "", lab) for lab in datasets.fetch_atlas_harvard_oxford("sub-maxprob-thr25-2mm", verbose=0).labels[1:]]
     names += [s for s in sub if s not in HO_SKIP]

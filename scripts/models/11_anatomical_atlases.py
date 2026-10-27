@@ -84,10 +84,9 @@ def build_atlas_matrix(masker, *, fwhm):
     """Cell 15: AAL-SPM12 parcels -> smoothed, peak-normalised vectors in masker space."""
     import nibabel as nib
     import torch
-    from nilearn import datasets
     from nilearn.image import load_img, resample_to_img, smooth_img
 
-    atlas = datasets.fetch_atlas_aal(version="SPM12")
+    atlas = fetch_aal()
     atlas_img = resample_to_img(load_img(atlas.maps), masker.mask_img_, interpolation="nearest", force_resample=True,
                                 copy_header=True)
     atlas_data = atlas_img.get_fdata()

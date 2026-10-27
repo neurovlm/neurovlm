@@ -27,7 +27,10 @@ stale copy would load other data or weights (NeuroAutoEncoder's weights on HF ch
 Inputs that were not published before went into three dataset repos on 2026-10-09: `neurovlm/neurovault_maps` (the
 NeuroVault scrape, the 4,611 maps as a tar with a sha256 list, and stage 03's `neurovault.pt` /
 `neurovault_publications.parquet`), `neurovlm/synthetic_pairs` (`synth.parquet`, `text_synth_less.parquet`) and
-`neurovlm/pubmed_ale_maps` (the original `neuro_vectors_ale.pt`). In the released `neurovault_collections.parquet`, 24
+`neurovlm/pubmed_ale_maps` (the original `neuro_vectors_ale.pt`). `neurovlm/atlases` followed on 2026-10-26 with the
+AAL atlas (GIN's `aal_for_SPM12.tar.gz` as a tar with a sha256 list, unpacked into `nilearn_data/` of the data dir and
+read by `common.fetch_aal`), because nilearn's download server fails TLS verification. In the released
+`neurovault_collections.parquet`, 24
 e-mail addresses (22 owner names, one contributor, one description) were replaced with `[email removed]`; no script
 reads those columns. An unredacted local copy from before the release is therefore reported as a mismatch by
 `--check`: replace it with `--overwrite`, or use a fresh data dir (`--data-dir`, `reproduce.sh --home`).

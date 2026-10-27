@@ -246,13 +246,21 @@ def aal_text(label: str) -> str:
     return f"{side} {text}" if side else text
 
 
+def fetch_aal():
+    """scripts/pipeline/common.fetch_aal: the AAL atlas from the pinned copy in the data dir."""
+    import sys
+
+    sys.path.insert(0, str(HERE.parents[3] / "pipeline"))
+    from common import fetch_aal as _fetch
+
+    return _fetch()
+
+
 def aal(cache_dir: Path) -> dict:
     """AAL (SPM12, 116 lateralised regions) with plain-English names."""
 
     def build():
-        from nilearn import datasets
-
-        a = datasets.fetch_atlas_aal(version="SPM12")
+        a = fetch_aal()
         labels = [str(x) for x in a.labels]
         idx = [str(x) for x in a.indices]
         keep = [i for i, n in enumerate(labels) if n.lower() != "background"]

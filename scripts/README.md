@@ -23,7 +23,7 @@ A successful run ends with "reproduction PASS: 8/8 components exact". Logs and s
 |---|---|
 | `--run-name NAME` | run directory `scripts/outputs/runs/NAME` (default `repro`). `final` is the model the response analyses read, and its figures go to `scripts/figures/main/`. |
 | `--home DIR` | data dir under `DIR`, so an existing `~/.cache/neurovlm` is left untouched |
-| `--external-dir DIR` | local copies of inputs, checked against the manifest. Put the AAL atlas in `DIR/nilearn_data/aal_SPM12/`, because nilearn's AAL server fails TLS verification. |
+| `--external-dir DIR` | local copies of inputs, checked against the manifest. |
 | `--cv-folds 0` | one cross-validation fold (about 40 min less). Fig. 5a then draws the single-split model. |
 | `--data scratch` | also reruns data stages 01-07 as provenance. Training still reads the pinned inputs. |
 | `--smoke` | every stage tiny, then figure previews on 64 samples. The metric comparison fails by design. |
@@ -68,7 +68,8 @@ provenance. They write to `scripts/outputs/data_regenerated/` and training never
 LLM text generation as a proof of concept. Details are in [`data/README.md`](data/README.md).
 
 Three dataset repos were published on 2026-10-09 for inputs that had no public copy: `neurovlm/neurovault_maps`,
-`neurovlm/synthetic_pairs` and `neurovlm/pubmed_ale_maps`. E-mail addresses were redacted from
+`neurovlm/synthetic_pairs` and `neurovlm/pubmed_ale_maps`, and `neurovlm/atlases` (the AAL atlas, whose server fails
+TLS verification) on 2026-10-26. E-mail addresses were redacted from
 `neurovault_collections.parquet`, so an older local copy is a mismatch. Replace it with `--overwrite` or start from an
 empty `--home`.
 
@@ -223,8 +224,8 @@ Two workflows run on pull requests to `main`. Both use the locked environment wi
 
 - `.github/workflows/tests.yml` runs the offline test suite (`tests/`). Tests that download data or weights carry the
   markers `network` or `requires_*` and are deselected.
-- `.github/workflows/smoke.yml` fetches the training inputs of `config/hf_manifest.json` (54 files, 8.1 GB, pinned
-  and sha256-checked) and the AAL atlas (sha256-checked), then runs the pipeline smoke test
+- `.github/workflows/smoke.yml` fetches the training inputs of `config/hf_manifest.json` (56 files, 8.1 GB, pinned
+  and sha256-checked, the AAL atlas among them), then runs the pipeline smoke test
   `tests/scripts/test_smoke_pipeline.py` (`SMOKE_COVERAGE=1 bash scripts/pipeline/smoke_pipeline.sh --skip-data
   --no-validate --device cpu`, every training stage for one batch on the CPU, every stage must exit 0). It checks that
   the pipeline runs end to end, not its numbers, and reports the coverage of the reproduction code (`.coveragerc`).
@@ -259,7 +260,8 @@ weights the installed `neurovlm` loaders cannot read. `--update-manifest` then r
 - Bitwise identity was shown on one GPU model, driver and set of library versions. PyTorch guarantees it only there,
   so another GPU may give different bits (`provenance.json` records the GPU and driver).
 - The proof runs used a warm Hugging Face cache, so the first download (about 23 GB) is not in their times.
-- nilearn's AAL server fails TLS verification, so the proof runs took the AAL atlas from `--external-dir`.
+- nilearn's AAL server fails TLS verification, so the proof runs took the AAL atlas from `--external-dir`. Since
+  2026-10-26 the atlas is pinned in the manifest (`neurovlm/atlases`) and `fetch_hf.py` unpacks it into the data dir.
 - Fig. S3 adds the NiCLIP and NeuroConText baselines from an external checkout (`--external-root`). Runs without it
   draw NeuroVLM only.
 - The published NeuroQwen3-0.6B was trained before stage 00 removed the evaluation papers from its corpus, which holds

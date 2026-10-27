@@ -1,6 +1,6 @@
 """The training pipeline's smoke test: scripts/pipeline/smoke_pipeline.sh, every stage for one batch on the CPU.
 
-Needs the pinned training inputs (``python scripts/data/fetch_hf.py --only pipeline``) and the AAL atlas, and takes
+Needs the pinned training inputs (``python scripts/data/fetch_hf.py --only pipeline``, the AAL atlas among them), and takes
 about five minutes, so it carries the ``pipeline_smoke``, ``slow`` and ``requires_data`` markers and is deselected
 from the offline suite. .github/workflows/smoke.yml runs it on every pull request that touches the scripts or the
 library:

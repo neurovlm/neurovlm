@@ -19,7 +19,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))  # scripts/pipeline/
 from common import (  # noqa: E402
-    DEFAULT_OUT_ROOT, apply_pubmed_exclusions, artifacts_exist, base_parser, data_dir, finalize_args, get_logger, hf_pinned,
+    DEFAULT_OUT_ROOT, apply_pubmed_exclusions, artifacts_exist, base_parser, data_dir, fetch_aal, finalize_args, get_logger, hf_pinned,
     hf_split_pmids, read_json, seed_worker, select_device, setup_torch, sha256_file, timed, write_json,
 )
 
@@ -27,7 +27,7 @@ RUNS_ROOT = DEFAULT_OUT_ROOT / "runs"
 
 __all__ = [
     # from scripts/pipeline/common.py
-    "artifacts_exist", "base_parser", "data_dir", "finalize_args", "get_logger", "hf_pinned", "read_json", "select_device",
+    "artifacts_exist", "base_parser", "data_dir", "fetch_aal", "finalize_args", "get_logger", "hf_pinned", "read_json", "select_device",
     "setup_torch", "sha256_file", "timed", "write_json",
     # run dirs, loaders, artifacts
     "RUNS_ROOT", "add_model_args", "resolve_run_dir", "find_input", "run_input", "pmid_split", "install_artifacts", "seed_all",

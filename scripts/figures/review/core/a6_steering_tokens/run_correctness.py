@@ -375,7 +375,7 @@ def region_parts(cache_dir: Path) -> dict[str, np.ndarray]:
     for k, v in HO_SUB.items():
         idx = [i for i, n in enumerate(slab) if n.endswith(v)]
         out[k] = C._label_vectors(sub.maps, idx).any(0)
-    aal = datasets.fetch_atlas_aal("SPM12", verbose=0)
+    aal = C.fetch_aal()
     val = dict(zip([str(x) for x in aal.labels], [int(i) for i in aal.indices]))
     out["CB"] = C._label_vectors(aal.maps, [v for n, v in val.items() if n.startswith(("Cerebelum", "Vermis"))]).any(0)
     out["VER"] = C._label_vectors(aal.maps, [v for n, v in val.items() if n.startswith("Vermis")]).any(0)
