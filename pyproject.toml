@@ -107,12 +107,11 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-  "unit: isolated offline behavior",
-  "integration: multi-component behavior",
   "slow: long-running tests",
   "network: requires external network access",
   "requires_data: requires downloaded datasets",
   "requires_pretrained: requires released model weights",
   "requires_specter: requires a Hugging Face SPECTER model",
   "notebook_smoke: exports and executes a notebook end-to-end at smoke scale",
+  "pipeline_smoke: runs scripts/pipeline/smoke_pipeline.sh (every training stage for one batch; needs the pinned inputs)",
 ]

@@ -1,0 +1,90 @@
+# Coverage counts only the code that trains the paper's models or runs inference with them.
+#
+# Measured ([run] source): the library, the pinned-input fetch (scripts/data/fetch_hf.py), the pipeline driver with its
+# helpers (scripts/pipeline/common.py, train_pipeline.py) and the training stages 00, 08, 09, 11, 12, 13, 14 and 20 with
+# their helpers (scripts/models). In the library that is the NeuroVLM client (core/client.py), the data and
+# pinned-resource loaders, the models (autoencoder, projection heads, projector, NeuroAdapter, losses, registry,
+# serialization), the MLP trainer with its run bookkeeping (training/mlp.py, pipelines/) and the evaluation and
+# retrieval metrics the trainer calls (evaluation/mlp.py, metrics/retrieval.py).
+#
+# Not measured ([run] omit): figure and review analyses (scripts/figures, evaluation/notebook_utils.py,
+# metrics/common.py, metrics/semantic.py, metrics/text_to_brain.py), validation and the reproduction check
+# (scripts/pipeline/validate_models.py, verify_reproduction.py), the Hub release script, the data stages 01-07 (the
+# pipeline fetches their released outputs at pinned revisions), the CNN family, the runtime and retrieval API, the
+# notebook-era trainers and evaluators and the brain-to-text text metrics. Functions inside measured modules that serve
+# only the CNN family, the LLM summaries of retrieval results or notebook-era analyses are dropped by
+# [report] exclude_also.
+#
+# Used by tests.yml (pytest --cov=neurovlm --cov-config=.coveragerc; the command-line --cov replaces [run] source with
+# the library alone) and smoke.yml (scripts/pipeline/smoke_pipeline.sh under coverage, subprocesses included).
+[run]
+# the script directories have no __init__.py, so each is listed for unrun files to count
+source =
+    neurovlm
+    scripts/pipeline
+    scripts/data
+    scripts/models
+omit =
+    # CNN models (not in the paper), the runtime and the retrieval API
+    */neurovlm/cnn/*
+    */neurovlm/core/runtime.py
+    */neurovlm/retrieval/*
+    # atlas-free data and coordinate helpers
+    */neurovlm/data/atlas_free_dataset.py
+    */neurovlm/data/atlas_free_text.py
+    */neurovlm/data/coordinates.py
+    # notebook-era trainers and evaluators (the scripts use training/mlp.py and evaluation/mlp.py)
+    */neurovlm/training/autoencoder.py
+    */neurovlm/training/brain_to_text.py
+    */neurovlm/training/contrastive.py
+    */neurovlm/training/text_to_brain.py
+    */neurovlm/evaluation/brain_to_text.py
+    */neurovlm/evaluation/comparison.py
+    */neurovlm/evaluation/contrastive.py
+    */neurovlm/evaluation/spatial.py
+    */neurovlm/evaluation/text_to_brain.py
+    # figure, validation and review metrics (validate_models.py and scripts/figures use them; the trainer does not)
+    */neurovlm/evaluation/notebook_utils.py
+    */neurovlm/metrics/brain_to_text.py
+    */neurovlm/metrics/common.py
+    */neurovlm/metrics/semantic.py
+    */neurovlm/metrics/text_to_brain.py
+    # data stages 01-09 and their helpers (the pipeline fetches their released outputs at pinned revisions instead)
+    scripts/data/0*.py
+    scripts/data/run_all.py
+    scripts/data/data_utils.py
+    # validation, the reproduction check, the reproduction driver and the Hub release (neither training nor inference)
+    scripts/pipeline/reproduce.py
+    scripts/pipeline/validate_models.py
+    scripts/pipeline/verify_reproduction.py
+    scripts/pipeline/push_hf_release.py
+    # figures, review analyses, run outputs
+    scripts/figures/*
+    */outputs/*
+patch = subprocess
+relative_files = true
+disable_warnings = module-not-imported, no-data-collected
+
+[report]
+exclude_also =
+    # LLM summaries of retrieval results (ollama or chat models), not model inference (core/client.py)
+    ^\s*def generate_llm_response\(
+    ^\s*def _generate_brain_to_text_response\(
+    ^\s*def _generate_text_to_brain_response\(
+    ^\s*def _format_table_as_context\(
+    ^\s*def _ranked_table\(
+    ^\s*def _wants_short_llm_output\(
+    ^\s*def _format_ranked_evidence\(
+    # CNN checkpoints and caches, notebook-era analysis caches (resources/loaders.py)
+    ^\s*def _load_atlas_free_cnn_
+    ^\s*def _ale_only_cache_filename\(
+    ^\s*def _load_ale_only_cache
+    ^\s*def _load_trusted_cnn_checkpoint\(
+    ^\s*def _load_cnn_
+    ^\s*def _load_threshold_analysis_
+    ^\s*def _load_cogatlas_term_
+    ^\s*def _load_ngram_data\(
+    # static type-checking imports
+    ^\s*if TYPE_CHECKING:
+skip_empty = true
+precision = 1

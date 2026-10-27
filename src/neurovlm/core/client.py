@@ -717,7 +717,7 @@ class _QueryBuilder:
         repetition_penalty: float = 1.18,
         no_repeat_ngram_size: int = 4,
     ) -> str | list[str]:
-        """Generate text from a brain map with the QFormer/Qwen path."""
+        """Generate text from a brain map with the NeuroQFormer projector and NeuroQwen."""
         if self.source != "brain":
             raise ValueError("generate_text is only available for brain(...) queries.")
         return self.parent.generate_text(
@@ -840,8 +840,8 @@ class NeuroVLM:
             - Flattened brain vectors of shape ``(28542,)`` or ``(N, 28542)``
             - ``nibabel.Nifti1Image``
         head : {"qformer", "infonce"}, optional
-            ``"qformer"`` generates text with the QFormer/Qwen path and is
-            the default. ``"infonce"`` retrieves text contrastively.
+            ``"qformer"`` generates text with the NeuroQFormer projector and
+            NeuroQwen and is the default. ``"infonce"`` retrieves text contrastively.
         datasets : sequence of str, optional
             Optional subset of initialized text datasets.
             Only used with ``head="infonce"``.
@@ -1978,7 +1978,7 @@ class NeuroVLM:
         return key
 
     def _prepare_brain_latent_for_generation(self, X: Any) -> torch.Tensor:
-        """Prepare NIfTI, mask-space vectors, or latent vectors for QFormer generation."""
+        """Prepare NIfTI, mask-space vectors, or latent vectors for brain-to-text generation."""
         if self._is_text_payload(X):
             raise TypeError("generate_text expects a brain image, flattened brain vector, or 384-d latent.")
 
@@ -2021,7 +2021,7 @@ class NeuroVLM:
         repetition_penalty: float = 1.18,
         no_repeat_ngram_size: int = 4,
     ) -> str | list[str]:
-        """Internal QFormer/Qwen generation path for brain inputs."""
+        """Internal NeuroQFormer and NeuroQwen generation path for brain inputs."""
         qformer_variant = self._normalize_qformer_variant(qformer_variant)
         canonical_basis = basis if canonical_basis is None else canonical_basis
         self._ensure_generative_text_model(

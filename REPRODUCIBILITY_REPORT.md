@@ -21,7 +21,7 @@ Notebooks are the committed source of truth. Generate a `.py:percent` script
 (same code, markdown cells as comments) for a selected notebook with:
 
 ```bash
-python scripts/export_notebook.py docs/01_tutorials/00_quickstart.ipynb
+python tests/notebooks/export_notebook.py docs/01_tutorials/00_quickstart.ipynb
 ```
 
 Exports default to Git-ignored `docs/generated/notebooks/`. Smoke tests export
@@ -37,20 +37,19 @@ need to be committed.
 This is **not** part of the default `pytest` run — it needs network access and the same local data cache the notebooks themselves use, and can take significant wall time. Run it explicitly:
 
 ```bash
-pytest tests/notebooks -v                       # everything
-scripts/smoke_notebooks.sh                       # everything (convenience wrapper)
-scripts/smoke_notebooks.sh public                # 01_tutorials + 02_data + 03_models only
-scripts/smoke_notebooks.sh experimental          # docs/experimental only
-scripts/smoke_notebooks.sh figures               # docs/figures only
+python -m pytest tests/notebooks -v                                                # everything
+python -m pytest tests/notebooks -v -k "01_tutorials or 02_data or 03_models"     # public docs only
+python -m pytest tests/notebooks -v -k experimental                               # docs/experimental only
+python -m pytest tests/notebooks -v -k figures                                    # docs/figures only
 ```
 
-### 3. Training smoke script
+### 3. Training smoke tests
 
 ```bash
-scripts/smoke_training.sh
+python -m pytest tests/integration/training -v
 ```
 
-Runs `tests/integration/training` — real 1-epoch training runs on tiny synthetic CPU data for every pipeline (MLP autoencoder/contrastive/text-to-brain, CNN autoencoder/contrastive/text-to-brain, brain-to-text generation), including checkpoint save/resume/reload round-trips. This suite already existed and is part of the default `pytest` run; the script is just a fast, single-purpose entry point. ~15 seconds.
+Runs `tests/integration/training` — real 1-epoch training runs on tiny synthetic CPU data for every pipeline (MLP autoencoder/contrastive/text-to-brain, CNN autoencoder/contrastive/text-to-brain, brain-to-text generation), including checkpoint save/resume/reload round-trips. This suite already existed and is part of the default `pytest` run; this command is just a fast, single-purpose entry point. ~15 seconds.
 
 ---
 
@@ -229,10 +228,10 @@ After this work was initially completed, notebooks were opened and manually save
 pytest -m "not network and not requires_data and not requires_pretrained and not requires_specter and not slow"
 
 # Training pipelines, real 1-epoch runs, ~15s
-scripts/smoke_training.sh
+python -m pytest tests/integration/training -v
 
 # Every notebook, real execution against real cached data, ~20-30 min
-scripts/smoke_notebooks.sh
+python -m pytest tests/notebooks -v
 ```
 
 Edit and commit the `.ipynb` notebook; smoke tests always export its current cells before execution.

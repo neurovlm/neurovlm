@@ -51,8 +51,19 @@ experimental/README
 api
 ```
 
+% The README is included in two parts so that its "Documentation" section stays out: that section links to files
+% of the repository root (not to docs/), which Sphinx cannot resolve and `sphinx-build -W` turns into errors.
+% Links of the included sections must be absolute URLs or targets inside docs/.
+
 ## Install
 
 ```{include} ../README.md
-:start-after: "## Install"
+:start-after: "## Installation"
+:end-before: "## Documentation"
+```
+
+## Reproducibility
+
+```{include} ../README.md
+:start-after: "## Reproducibility"
 ```

@@ -1,0 +1,8 @@
+doi,pmid,collection_id,image_ids,n_images,n_images_local_table,in_released,reasons,matched_train_pmid,score,title_token_set,title_token_sort,minilm_cos
+10.1016/j.biopsycho.2016.03.007,,3890,64596,1,1,True,f_nv_minilm_vs_train;f_nv_title_vs_train,26995784,100.0,100.0,100.0,1.0
+10.1016/j.neuroimage.2010.11.055,,5542,129390;129392;129393,3,6,True,f_nv_minilm_vs_train;f_nv_title_vs_train,21111829,100.0,100.0,100.0,1.0
+10.1016/j.neuroimage.2017.10.059,,3085,55615;55616,2,2,True,f_nv_minilm_vs_train;f_nv_title_vs_train,29107771,100.0,100.0,100.0,0.9987
+10.1016/j.neuropsychologia.2014.12.015,,1378,19115;19116;19117;19118;19119;19120;19121,7,7,True,f_nv_minilm_vs_train;f_nv_title_vs_train,25527113,100.0,100.0,100.0,1.0
+10.1073/pnas.1615773114,,1181,15995;15996;15997;15998;15999;16000,6,6,True,f_nv_title_vs_train,28439014,100.0,100.0,100.0,0.7255
+10.1523/jneurosci.5511-11.2012,,426,2883,1,1,True,f_nv_minilm_vs_train;f_nv_title_vs_train,22514317,100.0,100.0,100.0,1.0
+10.3389/fnhum.2016.00107,,1151,15658;15659;15660;15661;15662;15663;15664;15665;15666,9,9,True,f_nv_minilm_vs_train;f_nv_title_vs_train,27014038,100.0,100.0,100.0,0.9967

@@ -1,0 +1,9900 @@
+{
+"pdf": "paper/sn-article-diff.pdf",
+"sha256": "0581c52b95352ffa76756901abeacbf8e0f47db50fb0a735e7bb1f28aaaeb798",
+"date": "2026-10-26",
+"pages": 54,
+"lines": {
+"1": [
+1,
+""
+],
+"2": [
+1,
+""
+],
+"3": [
+1,
+""
+],
+"4": [
+1,
+""
+],
+"5": [
+1,
+""
+],
+"6": [
+1,
+"NeuroVLM: A generative vision-language"
+],
+"7": [
+1,
+""
+],
+"8": [
+1,
+"framework for human neuroimaging"
+],
+"9": [
+1,
+""
+],
+"10": [
+1,
+""
+],
+"11": [
+1,
+"Ryan Hammonds2*, Jerjes Aguirre-Chavez2,"
+],
+"12": [
+1,
+"Borngreat Omoma-Edosa2, Aarya Patel5, Bradley Voytek1,2,3,4"
+],
+"13": [
+1,
+""
+],
+"14": [
+1,
+"1*Department of Cognitive Science, UC San Diego, La Jolla, CA, USA."
+],
+"15": [
+1,
+"2Hal\u0131c\u0131o\u02d8glu Data Science Institute, UC San Diego, La Jolla, CA, USA."
+],
+"16": [
+1,
+"3Neurosciences Graduate Program, UC San Diego, La Jolla, CA, USA."
+],
+"17": [
+1,
+"4Kavli Institute for Brain and Mind, UC San Diego, La Jolla, CA, USA."
+],
+"18": [
+1,
+"5Department of Neurobiology, UC San Diego, La Jolla, CA, USA."
+],
+"19": [
+1,
+""
+],
+"20": [
+1,
+""
+],
+"21": [
+1,
+"*Corresponding author(s). E-mail(s):rphammonds@ucsd.edu;"
+],
+"22": [
+1,
+""
+],
+"23": [
+1,
+"Contributing authors:jaguirrechavez@ucsd.edu;"
+],
+"24": [
+1,
+"oomomaedosa@ucsd.edu;abp003@ucsd.edu;bvoytek@ucsd.edu;"
+],
+"25": [
+1,
+""
+],
+"26": [
+1,
+""
+],
+"27": [
+1,
+"Abstract"
+],
+"28": [
+1,
+"Neuroimaging research has produced tens of thousands of articles that pair natu-"
+],
+"29": [
+1,
+"ral language and activation coordinate tables. Recent advances in vision-language"
+],
+"30": [
+1,
+"models (VLMs) have provided methods to model text and images simultane-"
+],
+"31": [
+1,
+"ously. In this work, we present NeuroVLM, a model architecture for learning"
+],
+"32": [
+1,
+"from 30,826 publications that pair text with brain coordinates. The architec-"
+],
+"33": [
+1,
+"ture supports contrastive and generative objectives. The contrastive model ranks"
+],
+"34": [
+1,
+"similarity between neuroimages and text. The generative models include text-"
+],
+"35": [
+1,
+"to-neuroimage and neuroimage-to-text. These models are evaluated on network"
+],
+"36": [
+1,
+"images from a variety of atlases, statistical maps from diverse publications, and"
+],
+"37": [
+1,
+"ors from text and broad, network-level descriptions of neuroimages. They also"
+],
+"38": [
+1,
+"label networks, find the publications most related to a neuroimage query, and"
+],
+"39": [
+1,
+"find the neuroimages most related to a text query."
+],
+"40": [
+1,
+""
+],
+"41": [
+1,
+"Keywords:neuroimaging, vision-language models, generative artificial intelligence,"
+],
+"42": [
+1,
+"fMRI"
+],
+"43": [
+1,
+""
+],
+"44": [
+1,
+""
+],
+"45": [
+1,
+""
+],
+"46": [
+1,
+""
+],
+"47": [
+2,
+"1 Introduction"
+],
+"48": [
+2,
+"Over the past three decades, human functional magnetic resonance imaging (fMRI)"
+],
+"49": [
+2,
+"neuroimaging research has changed the landscape of our understanding of how the"
+],
+"50": [
+2,
+"brain gives rise to behavior and cognition. Tens of thousands of experiments have been"
+],
+"51": [
+2,
+"performed, resulting in a massive, multimodal corpus of peer-reviewed publications"
+],
+"52": [
+2,
+"that link natural language text to spatial brain coordinates. While powerful, expert"
+],
+"53": [
+2,
+"decisions on how to interpret these results and which new experiments to run are"
+],
+"54": [
+2,
+"constrained by one\u2019s own degree of familiarity with the literature. These constraints"
+],
+"55": [
+2,
+"result in, for example, variations in how individual brain regions are named, or how"
+],
+"56": [
+2,
+"collections of brain regions are grouped together and named as common networks"
+],
+"57": [
+2,
+"[1]. Inconsistencies in nomenclature and interpretations in fMRI are exacerbated by"
+],
+"58": [
+2,
+"small effect sizes [2\u20134] and large variability in data analysis approaches. Even when"
+],
+"59": [
+2,
+"working on the same datasets, different research groups can come to different con-"
+],
+"60": [
+2,
+"clusions [5]. Furthermore, many fMRI studies are interpreted in isolation from other"
+],
+"61": [
+2,
+"human brain maps, such as gene expression, neurotransmitter and modulator distri-"
+],
+"62": [
+2,
+"bution, and electrophysiology [6], giving rise to a narrow view of the brain-behavior"
+],
+"63": [
+2,
+"relationship [7]."
+],
+"64": [
+2,
+"Prior to the introduction of modern large language models (LLMs), text-mining of"
+],
+"65": [
+2,
+"neuroscientific papers was demonstrated to be capable of generating plausible hypothe-"
+],
+"66": [
+2,
+"ses by identifying gaps between text concepts mapped to a network graph [8]. In"
+],
+"67": [
+2,
+"other domains, such as materials science, high-dimensional text embeddings have been"
+],
+"68": [
+2,
+"shown to be capable of recapitulating concepts such as the periodic table of elements,"
+],
+"69": [
+2,
+"and complex structure\u2013property relationships in materials [9]."
+],
+"70": [
+2,
+"To overcome some of these limitations, a large, diverse training corpus is use-"
+],
+"71": [
+2,
+"ful for integrating information across a broad neuroscientific context [7, 10]. This"
+],
+"72": [
+2,
+"includes diverse datasets that pair text and brain activation maps, enabling models to"
+],
+"73": [
+2,
+"translate between modalities: text-to-neuroimage and neuroimage-to-text. Past text-"
+],
+"74": [
+2,
+"to-neuroimage models such as neurosynth [3] and neuroquery [11] use term-frequencies"
+],
+"75": [
+2,
+"based on a predefined corpus [3, 11]. This limits handling of unseen phrases, syn-"
+],
+"76": [
+2,
+"onymy, and context, and assumes near-independence of terms or linear additivity"
+],
+"77": [
+2,
+"across terms. These methods fail to generalize to out-of-corpus language and to account"
+],
+"78": [
+2,
+"for non-linear interactionsdo not generalize to language outside their vocabulary."
+],
+"79": [
+2,
+"Advances in language modeling architectures [12\u201314] move beyond term-"
+],
+"80": [
+2,
+"frequencies and instead use transformers to model language. Transformer architectures"
+],
+"81": [
+2,
+"are standard in LLMs, remove the dependence on . They also usea fixed vocabulary ,"
+],
+"82": [
+2,
+"and are context-sensitiveof tokens, but they compose these tokens in context. Trans-"
+],
+"83": [
+2,
+"formers are also used in vision-language models (VLMs), with the goal of aligning"
+],
+"84": [
+2,
+"text-image latent vector pairs [15]."
+],
+"85": [
+2,
+"Recent works such as neurocontext [16] and niclip [17] use LLMs to encode text"
+],
+"86": [
+2,
+"from neuroimaging publications. Contrastive loss [15] was used in these studies to learn"
+],
+"87": [
+2,
+"a bi-modal embedding space, aligning text and neuroimage representations. These"
+],
+"88": [
+2,
+"models provide similarity-based ranking and retrieval, given a corpus of publications"
+],
+"89": [
+2,
+"and neuroimages. While powerful, contrastive models cannot generate brain images"
+],
+"90": [
+2,
+"from input text, nor text outputs from 3D brain maps."
+],
+"91": [
+2,
+""
+],
+"92": [
+2,
+""
+],
+"93": [
+3,
+"Here we present, NeuroVLM (Fig. 1a), a lightweight, artificial intelligence (AI)"
+],
+"94": [
+3,
+"framework that trains both generative and contrastive models. This framework embeds"
+],
+"95": [
+3,
+"text-neuroimage pairs to a shared latent space. This latent space can be trained"
+],
+"96": [
+3,
+"with a contrastive objective to support ranking and retrieval, which allows us to"
+],
+"97": [
+3,
+"label neuroimages, e.g., spatial ICA components, with text, and to select neuroimages"
+],
+"98": [
+3,
+"most related to a text query. Decoding the latent space provides generative text-to-"
+],
+"99": [
+3,
+"neuroimage and neuroimage-to-text models.To our knowledge, NeuroVLM is the only"
+],
+"100": [
+3,
+"model that writes text from group-level brain maps. It retrieves and generates in both"
+],
+"101": [
+3,
+"directions through one shared space."
+],
+"102": [
+3,
+"Generation and context both matter. Generated maps are closer to each held-out"
+],
+"103": [
+3,
+"paper\u2019s map than the map of the most similar training paper. Generated captions"
+],
+"104": [
+3,
+"rarely carry the details of other studies, unlike retrieved captions. A contextual text"
+],
+"105": [
+3,
+"encoder also beats a context-free word2vec baseline [18], by a modest margin."
+],
+"106": [
+3,
+"To improve the accessibility of these models, we significantly reduced the compu-"
+],
+"107": [
+3,
+"tational requirements by usingamuch smaller text encoders [?] encoder, SPECTER2"
+],
+"108": [
+3,
+"[19],with 110 million parameters, rather than depending on LLMs with tens- to"
+],
+"109": [
+3,
+"hundreds-of-billions of parameters. Each component of NeuroVLM is modular and"
+],
+"110": [
+3,
+"interchangeable with larger or smaller models depending on requirementsThe text"
+],
+"111": [
+3,
+"encoder can be replaced by retraining only the small projection heads."
+],
+"112": [
+3,
+"The resulting open-source models support a variety of applications. Use cases"
+],
+"113": [
+3,
+"include generating atlases or maps coarse spatial priorsfrom a text corpus or query,"
+],
+"114": [
+3,
+"which could be used for first-pass hypothesis generation. NeuroVLM can also gener-"
+],
+"115": [
+3,
+"ate natural-language interpretations broad, network-level descriptionsof human brain"
+],
+"116": [
+3,
+"maps (Fig. 2) or automatically label functional networks (Fig. 5d). Finally, it supports"
+],
+"117": [
+3,
+"cross-modal retrieval by finding the publications most related to a statistical map, or"
+],
+"118": [
+3,
+"the statistical maps most related to a text query."
+],
+"119": [
+3,
+""
+],
+"120": [
+3,
+"2 Methods"
+],
+"121": [
+3,
+""
+],
+"122": [
+3,
+"2.1 Datasets"
+],
+"123": [
+3,
+"Data were aggregated from PubMed central, neurosynth compose [20], the cognitive"
+],
+"124": [
+3,
+"atlas [21], the network correspondence toolbox [1], and NeuroVault [22]. The networks"
+],
+"125": [
+3,
+"toolbox maps [1], NeuroVault maps [22], and a subset of the PubMed articles were left"
+],
+"126": [
+3,
+"out as test sets. The cognitive atlas is a dataset of text labels used to label activation"
+],
+"127": [
+3,
+"maps post-training."
+],
+"128": [
+3,
+""
+],
+"129": [
+3,
+"1.PubMed Central: 30,826 publications with titles, abstracts, and coordinate tables"
+],
+"130": [
+3,
+"(857,298 peaks)"
+],
+"131": [
+3,
+"2.Cognitive Atlas [21]: 1,000 cognitive terms and definitions"
+],
+"132": [
+3,
+"3.Networks [1]: 100 labeled network images 185 network maps, made of 145 atlas"
+],
+"133": [
+3,
+"maps (119 with a network label) and 40 independent components"
+],
+"134": [
+3,
+"4.NeuroVault [22]: 3, 000 183group-level activation maps ,titles, and abstracts maps"
+],
+"135": [
+3,
+"from 312 papers, with titles and abstracts"
+],
+"136": [
+3,
+"Each PubMed paper contributes one map, built from all of its peaks. The released"
+],
+"137": [
+3,
+"coordinates carry no experiment, contrast, table, or sign labels. Each map therefore"
+],
+"138": [
+3,
+""
+],
+"139": [
+4,
+"pools the experiments, contrasts, and tables of a paper, and its positive and negative"
+],
+"140": [
+4,
+"effects. It shows where a paper reports effects, not their sign. Papers were split into"
+],
+"141": [
+4,
+"23,894 training, 2,987 validation, and 2,987 test papers. The 958 papers with more"
+],
+"142": [
+4,
+"than 100 peaks or an empty map are in no split. Seven NeuroVault papers (29 maps)"
+],
+"143": [
+4,
+"duplicate a PubMed training paper and were removed, leaving 3,154 maps from 305"
+],
+"144": [
+4,
+"papers (Supplementary Fig.S5). All maps are group-level results of published studies."
+],
+"145": [
+4,
+"No participant-level data were used, so sex and gender were not analyzed."
+],
+"146": [
+4,
+""
+],
+"147": [
+4,
+"2.2 Preprocessing"
+],
+"148": [
+4,
+"Coordinates were convolved in MNI space with a 9 mm activation Gaussian kernel,"
+],
+"149": [
+4,
+"following [11]. The resulting activation maps were transformed using the dictionaries"
+],
+"150": [
+4,
+"of functional modes (DiFuMo) atlas [23]. Reconstruction replaces voxel values with"
+],
+"151": [
+4,
+"a weighted combination of DiFuMo components. Component coefficients were com-"
+],
+"152": [
+4,
+"puted as the DiFuMo-weighted mean activation and were used to reconstruct voxel"
+],
+"153": [
+4,
+"space by re-expanding the coefficients through the DiFuMo voxel maps. This returns"
+],
+"154": [
+4,
+"a voxel-space map from a linear combination of DiFuMo components (see Sec.S2.1 for"
+],
+"155": [
+4,
+"detailsSupplementary Fig.S2and SectionS2.1)."
+],
+"156": [
+4,
+""
+],
+"157": [
+4,
+""
+],
+"158": [
+4,
+"2.3 Training"
+],
+"159": [
+4,
+"Training was performed with 30,826 text-neuroimage pairs, primarily from"
+],
+"160": [
+4,
+"PubMedused the 23,894 training papers. Text included titles and abstracts of publi-"
+],
+"161": [
+4,
+"cations. Neuroimages are defined as sparsely clustered, MNI-space activation maps."
+],
+"162": [
+4,
+"PubMed training articles instead provide coordinate tables, which were smoothed"
+],
+"163": [
+4,
+"in 3D, MNI space, similar to the approach used in Neuroquery NeuroQuery[11]."
+],
+"164": [
+4,
+"Continuous statistical maps are provided in the network and neurovault datasets;"
+],
+"165": [
+4,
+"these were used as additional test sets. DOIs used in the PubMed training set"
+],
+"166": [
+4,
+"were excluded from all test sets. Software,including training scripts, are publicly"
+],
+"167": [
+4,
+"available at:https://github.com/neurovlm/neurovlmPre-trained models and datasets"
+],
+"168": [
+4,
+"are available on HuggingFace:https://huggingface.co/neurovlmNeuroVault datasets."
+],
+"169": [
+4,
+"These were used only for evaluation. The autoencoder, the projection heads, and the"
+],
+"170": [
+4,
+"stage 1 projector all learn from the training papers. The anatomically centered projec-"
+],
+"171": [
+4,
+"tion head and the stage 2 projector learn from short concept texts, paired with maps"
+],
+"172": [
+4,
+"built from training papers only. No validation or test paper trains any component"
+],
+"173": [
+4,
+"(Supplementary Fig.S5and TableS6)."
+],
+"174": [
+4,
+"We audited leakage beyond DOI matching. No DOI or PubMed identifier is shared"
+],
+"175": [
+4,
+"across splits. Each held-out paper was also compared with the training and NeuroVault"
+],
+"176": [
+4,
+"papers by fuzzy title matching and by the similarity of its title and abstract. Coordi-"
+],
+"177": [
+4,
+"nate tables were compared across all splits to find papers that repeat another paper\u2019s"
+],
+"178": [
+4,
+"peaks. These checks flag 16 test and 26 validation papers, and every evaluation leaves"
+],
+"179": [
+4,
+"them out. The PubMed test set therefore holds 2,971 papers. The language model\u2019s"
+],
+"180": [
+4,
+"training script removes the validation, test, and NeuroVault evaluation papers from"
+],
+"181": [
+4,
+"its corpus."
+],
+"182": [
+4,
+""
+],
+"183": [
+4,
+""
+],
+"184": [
+4,
+""
+],
+"185": [
+5,
+"Every component except the language model trains on one NVIDIA RTX 5090"
+],
+"186": [
+5,
+"GPU, with fixed seeds and deterministic kernels. The whole pipeline, five-fold cross-"
+],
+"187": [
+5,
+"validation included, trains from scratch in about 1.8 hours. Every input is read from"
+],
+"188": [
+5,
+"Hugging Face at a pinned, checksummed revision (see Data availability). Supplemen-"
+],
+"189": [
+5,
+"tary TableS7gives the parameters, data, epochs, optimizer settings, seed, and training"
+],
+"190": [
+5,
+"time of each component."
+],
+"191": [
+5,
+""
+],
+"192": [
+5,
+"2.4 Model Architecture"
+],
+"193": [
+5,
+"Building upon past work, we outline a general vision-language framework for neu-"
+],
+"194": [
+5,
+"roimaging applications: NeuroVLM (Fig. 1a). The encoders in this framework map"
+],
+"195": [
+5,
+"from high-dimensional text and activation-map space to low-dimensional latent vec-"
+],
+"196": [
+5,
+"tors (Fig. 1a, pink). After training, pairs of text and neuroimages encode to highly"
+],
+"197": [
+5,
+"similar vectors. Decoders are able to generate text or activation maps from latent vec-"
+],
+"198": [
+5,
+"tor embeddings. These encoders and decoders collectively provide text-to-image and"
+],
+"199": [
+5,
+"image-to-text generation. This framework is general and does not make assumptions"
+],
+"200": [
+5,
+"on the choice of encoder or decoder architectures."
+],
+"201": [
+5,
+""
+],
+"202": [
+5,
+""
+],
+"203": [
+5,
+"2.5 Autoencoder"
+],
+"204": [
+5,
+"An autoencoder was trained to compress 3D activation maps to 384-dimensional latent"
+],
+"205": [
+5,
+"vectors (Fig. 1a, blue). Maps were down-sampled, masked, flattened, and binarized"
+],
+"206": [
+5,
+"before passing through fully-connected linear layers with rectified linear unit (ReLU)"
+],
+"207": [
+5,
+"activations. Exact model architecture, including layer sizes and activation functions,"
+],
+"208": [
+5,
+"are provided in Table SSupplementary TableS1. The downsampling and masking pro-"
+],
+"209": [
+5,
+"cedure was adapted from [11] and moves from a 1 million dimensional MNI space to"
+],
+"210": [
+5,
+"28,542 dimensional space. The encoder transforms from 28,542 to a 384 dimensional"
+],
+"211": [
+5,
+"latent representation. A key component to successful training was the binarization of"
+],
+"212": [
+5,
+"the activation map prior to training and the use of binary cross entropy loss. Any"
+],
+"213": [
+5,
+"continuous map, e.g., a z-score or p-value map, can be binarized with an appropriate"
+],
+"214": [
+5,
+"threshold and clustering method. Another key component in training was sparsity,"
+],
+"215": [
+5,
+"reducing the influence of dense maps that were fully activated and lacked sparse"
+],
+"216": [
+5,
+"clusters of activation."
+],
+"217": [
+5,
+""
+],
+"218": [
+5,
+"2.6 Text Encoder"
+],
+"219": [
+5,
+""
+],
+"220": [
+5,
+"NeuroVLM uses Specter [?] SPECTER2 [19], a small, efficient, and accessi-"
+],
+"221": [
+5,
+"ble transformer. This small model allows deploying the model on edge devices"
+],
+"222": [
+5,
+"with little computational requirements. Specter Every text-encoding step uses the"
+],
+"223": [
+5,
+"allenai/specter2 aug2023refresh model. SPECTER2is based on SciBERT [24] and"
+],
+"224": [
+5,
+"incorporates citation-based connectivity graphs. Specter Itencodes title-abstract pairs"
+],
+"225": [
+5,
+"to 768-dimensional latent vectors. Despite being trained on title-abstract pairs, Specter"
+],
+"226": [
+5,
+"SPECTER2has an ad hoc query adapter, suitable for short form user queries, which"
+],
+"227": [
+5,
+"NeuroVLM uses for all text. The full model runs on a consumer CPU. On an 8-thread"
+],
+"228": [
+5,
+"desktop CPU, a text-to-brain query takes 53 ms and 0.4 GB of memory in bf16. A 128-"
+],
+"229": [
+5,
+"token brain-to-text caption takes 1.4 GB of memory, and 3.5 s with int8 quantization"
+],
+"230": [
+5,
+"or 6.3 s in bf16."
+],
+"231": [
+6,
+""
+],
+"232": [
+6,
+""
+],
+"233": [
+6,
+""
+],
+"234": [
+6,
+""
+],
+"235": [
+6,
+""
+],
+"236": [
+6,
+""
+],
+"237": [
+6,
+""
+],
+"238": [
+6,
+""
+],
+"239": [
+6,
+""
+],
+"240": [
+6,
+""
+],
+"241": [
+6,
+""
+],
+"242": [
+6,
+""
+],
+"243": [
+6,
+""
+],
+"244": [
+6,
+""
+],
+"245": [
+6,
+""
+],
+"246": [
+6,
+""
+],
+"247": [
+6,
+""
+],
+"248": [
+6,
+""
+],
+"249": [
+6,
+""
+],
+"250": [
+6,
+""
+],
+"251": [
+6,
+""
+],
+"252": [
+6,
+""
+],
+"253": [
+6,
+""
+],
+"254": [
+6,
+""
+],
+"255": [
+6,
+""
+],
+"256": [
+6,
+""
+],
+"257": [
+6,
+""
+],
+"258": [
+6,
+""
+],
+"259": [
+6,
+""
+],
+"260": [
+6,
+""
+],
+"261": [
+6,
+""
+],
+"262": [
+6,
+""
+],
+"263": [
+6,
+"Fig. 1 Model architecture. a)NeuroVLM maps pairs of activation maps and text, from the same"
+],
+"264": [
+6,
+"publication, to a shared latent vector (pink). Decoding the latent vector results in brain-to-text or"
+],
+"265": [
+6,
+"text-to-brain generation.b)The shared latent vector is the basis for contrastive models, e.g., ranking"
+],
+"266": [
+6,
+"method ranks how similar a corpus of text is to the image. All encoded vectors,N 1 and{T 1, . . . , T9}"
+],
+"267": [
+6,
+"are unit normalized. The inner product between these vector pairs is cosine similarity. Taking argmax"
+],
+"268": [
+6,
+"gives the most similar text. Any text corpus or image set may be used, suitable for a variety of use"
+],
+"269": [
+6,
+"cases. The direction may also be flipped from what is presented: comparing a single text query to a"
+],
+"270": [
+6,
+""
+],
+"271": [
+6,
+""
+],
+"272": [
+6,
+"2.7 Text Decoder"
+],
+"273": [
+6,
+"Brain-to-text generation requires a language model. We trained NeuroQwen3-0.6B is"
+],
+"274": [
+6,
+"Qwen3-0.6B on 1.2 million neuroscience articles and used this to generate descriptions"
+],
+"275": [
+6,
+"of images using a query transformer (Qformer) [?] . The Qformer [25] after continued"
+],
+"276": [
+6,
+""
+],
+"277": [
+7,
+"pretraining of all weights, without adapters, on 1,231,613 PubMed neuroimaging titles"
+],
+"278": [
+7,
+"and abstracts published from 1990 to February 2026. It trained for one epoch on one"
+],
+"279": [
+7,
+"H100 GPU and stays frozen in NeuroVLM. Its training script removes the validation,"
+],
+"280": [
+7,
+"test, and NeuroVault evaluation papers from this corpus. A multilayer perceptron"
+],
+"281": [
+7,
+"(MLP) projectorlearns a mapping from the latent image space to the token embedding"
+],
+"282": [
+7,
+"space of LLMthe language model. This training was supervised such that the decoded"
+],
+"283": [
+7,
+"text was optimized to the true, paired text."
+],
+"284": [
+7,
+"The Qformer MLP projectorreceives two complementary inputs : , a raw 384-"
+],
+"285": [
+7,
+"dimensional image latent from the image encoder and a 384-dimensional seman-"
+],
+"286": [
+7,
+"tic latent , from the contrastive model. Each input is projected into a shared"
+],
+"287": [
+7,
+"512-dimensional hidden space, producing two memory tokens : one preserving the"
+],
+"288": [
+7,
+"raw-image latent signal and one for semantic alignment information. A set of Its"
+],
+"289": [
+7,
+"residual layers map the two normalized inputs to32 learned query embeddings then"
+],
+"290": [
+7,
+"attends to these memory tokens through a 6-layer transformer decoder. The resulting"
+],
+"291": [
+7,
+"query states are mapped into the 1024-dimensional embedding space of the language"
+],
+"292": [
+7,
+"model , yielding 32 continuous prompt tokens for downstream text generationin the"
+],
+"293": [
+7,
+"1024-dimensional embedding space of the language model (28.3 million parameters,"
+],
+"294": [
+7,
+"Supplementary TableS3). The MLP projector trains in two stages. The stage 1 pro-"
+],
+"295": [
+7,
+"jector learns from PubMed training maps and summaries of their papers. The stage"
+],
+"296": [
+7,
+"2 projector starts from stage 1 and learns from short network, region, and function"
+],
+"297": [
+7,
+"texts (see Brain-to-Text below)."
+],
+"298": [
+7,
+"Captions are decoded with the vocabulary restricted to Latin-script tokens. This"
+],
+"299": [
+7,
+"removes the non-Latin characters that the multilingual language model otherwise"
+],
+"300": [
+7,
+"writes into a few captions. Steering tokens select the kind of caption (Supplementary"
+],
+"301": [
+7,
+"SectionS5). The language model generates every title, steered toward the canonical"
+],
+"302": [
+7,
+"names. After a[NETWORK]or[REGION]token, tokens that cannot continue a canonical"
+],
+"303": [
+7,
+"network or region name are masked until the title ends. The model\u2019s own probabili-"
+],
+"304": [
+7,
+"ties choose the name, so no title is an invented name. The body text and[FUNCTION]"
+],
+"305": [
+7,
+"titles are decoded without this mask."
+],
+"306": [
+7,
+"At inference, the images may come from a variety of distributions, including binary"
+],
+"307": [
+7,
+"masks and t-, z-, F-, and p-maps. The one requirement of the brain-to-text model is"
+],
+"308": [
+7,
+"to transform these maps to the range: [0,1]. In addition to a variety of map distri-"
+],
+"309": [
+7,
+"butions, thresholding and clustering depends on a variety of parameter choices. To"
+],
+"310": [
+7,
+"help improve generalization of brain-to-text generation for out-of-distribution maps,"
+],
+"311": [
+7,
+"relative to the training maps, we introduce a canonical, or stereotyped, projection"
+],
+"312": [
+7,
+"matrix. This canonical projection matrix is constructed from clean examples of net-"
+],
+"313": [
+7,
+"works, regions, and cognitive concepts. Vector projection produces a denoised semantic"
+],
+"314": [
+7,
+"conditioning vector constrained to lie near interpretable prototypes. The canonical"
+],
+"315": [
+7,
+"projection adds a layer of interpretabilityand can warn ifthe input image lies too far"
+],
+"316": [
+7,
+"from known images.See supplementary section S. It also pulls captions toward its pro-"
+],
+"317": [
+7,
+"totypes. It lowers the share of test captions that name study details from 3% to 2%,"
+],
+"318": [
+7,
+"but it raises the share that nearly copy a curated training text from 0.6% to 9.9%"
+],
+"319": [
+7,
+"(Supplementary Fig.S8). See Supplementary SectionS5for details."
+],
+"320": [
+7,
+"Warning scores flag inputs that lie far from the training data. A map is flagged"
+],
+"321": [
+7,
+"when its Pearson correlation with its autoencoder reconstruction is low or when its"
+],
+"322": [
+7,
+""
+],
+"323": [
+8,
+"latent lies far from the training latents (Mahalanobis distance). A text is flagged"
+],
+"324": [
+8,
+"when its cosine similarity to the nearest training abstract is low. With thresholds set"
+],
+"325": [
+8,
+"on the validation split, they flag about 5% of held-out inputs, every shuffled, white-"
+],
+"326": [
+8,
+"noise, and rescaled map, every off-topic text, and 61 to 80% of rotated or spun maps"
+],
+"327": [
+8,
+"(Supplementary Fig.S7). The scores are warnings, not calibrated probabilities."
+],
+"328": [
+8,
+""
+],
+"329": [
+8,
+"2.8 Contrastive Learning"
+],
+"330": [
+8,
+"Contrastive learning maximizes cosine similarity between true text-image pairs and"
+],
+"331": [
+8,
+"minimizes similarity between mismatched pairs [15, 17]. After training, unlabeled"
+],
+"332": [
+8,
+"images can be labeled by ranking cosine similarity between the target image and any"
+],
+"333": [
+8,
+"text corpus (Fig. 1b). Pretrained encoders can be used to label neuroimages with net-"
+],
+"334": [
+8,
+"works [1], cognitive concepts [21], or publication descriptions. Inversely, a set of images"
+],
+"335": [
+8,
+"may be ranked in similarity, relative to target text."
+],
+"336": [
+8,
+""
+],
+"337": [
+8,
+""
+],
+"338": [
+8,
+"2.9 Generative Models"
+],
+"339": [
+8,
+"2.9.1 Brain-to-Text: Generating Interpretations"
+],
+"340": [
+8,
+""
+],
+"341": [
+8,
+"A Qformer [?] An MLP projectoris used to generate descriptions of neuroimages"
+],
+"342": [
+8,
+"(Fig. S1a). The Qformer transforms from projector transformslatent image represen-"
+],
+"343": [
+8,
+"tations to the token embedding matrix. The token embedding matrix is decoded by a"
+],
+"344": [
+8,
+"fine-tuned NeuroQwen3-0.6B, aneuroscience-focused version of Qwen3-0.6B [25]."
+],
+"345": [
+8,
+"Training data included image-(title, abstracts). Text was summarized to general"
+],
+"346": [
+8,
+"text, removing study-specific details The stage 1 projector learns from training"
+],
+"347": [
+8,
+"maps paired with summaries of their papers. Qwen3.5-27B summarized each title"
+],
+"348": [
+8,
+"and abstract with a fixed prompt, removing low-level study details (Supplementary"
+],
+"349": [
+8,
+"SectionS2.2). This allows the model to generate higher-level descriptions of activation"
+],
+"350": [
+8,
+"maps. A final fine-tuning dataset was generated using the text-to-brain model and"
+],
+"351": [
+8,
+"synthetic descriptions of common networks, regions, and cognitionThe stage 2 projec-"
+],
+"352": [
+8,
+"tor learns from 1,106 synthetic[NETWORK],[REGION], and[FUNCTION]texts written"
+],
+"353": [
+8,
+"by Qwen3.5-27B, each paired with the map that the anatomically centered projection"
+],
+"354": [
+8,
+"head generates from it. This step allowed more control of the style of the LLM output,"
+],
+"355": [
+8,
+"pushing outputs towards shorter, general descriptions. The target was concise brain-"
+],
+"356": [
+8,
+"to-text captions, rather than plausible abstracts. Examples of brain-to-text generation"
+],
+"357": [
+8,
+"are provided (Figures2and3)."
+],
+"358": [
+8,
+"Each stage 2 training map is binarized at a percentile drawn anew for each batch,"
+],
+"359": [
+8,
+"and title tokens weigh five times in the loss. The semantic input of each text is pro-"
+],
+"360": [
+8,
+"jected onto the canonical bank of its own level, as at inference. Stage 2 was trained"
+],
+"361": [
+8,
+"with five seeds, and the seed with the lowest final validation loss was kept."
+],
+"362": [
+8,
+""
+],
+"363": [
+8,
+"2.9.2 Text-to-Brain: Generating Activation Maps"
+],
+"364": [
+8,
+"Activation maps are generated by projecting text embeddings to the latent space of"
+],
+"365": [
+8,
+"the neuroimage autoencoder (Fig SSupplementary TableS1) and using the neuroimage"
+],
+"366": [
+8,
+"decoder (Fig. S1b). Specter2 SPECTER2[19] is used to embed arbitrary text: titles,"
+],
+"367": [
+8,
+""
+],
+"368": [
+8,
+""
+],
+"369": [
+9,
+"abstracts, descriptions, or user queries. A small neural network, the projection text-to-"
+],
+"370": [
+9,
+"brainhead, maps thesefrozenembeddings to the shared latent space. The projection"
+],
+"371": [
+9,
+"head allows the language model weights to be frozen while providing fine-tuning,"
+],
+"372": [
+9,
+"similar to low-rank adaptation (LoRA)adapters [?] autoencoder latent (Supplemen-"
+],
+"373": [
+9,
+"tary TableS2). It is trained to predict each training paper\u2019s latent, with a loss that"
+],
+"374": [
+9,
+"also scores the decoded map. Its settings and training epoch were chosen on the vali-"
+],
+"375": [
+9,
+"dation set (Supplementary SectionS4). The neuroimage decoder then transforms the"
+],
+"376": [
+9,
+"latent embeddings to MNI space.Generated maps are calibrated to the scale of the"
+],
+"377": [
+9,
+"training maps by one factor per model, fitted on the validation set and applied iden-"
+],
+"378": [
+9,
+"tically to every map (clipped at 1), before they are encoded or scored. The factor is"
+],
+"379": [
+9,
+"the median, over validation-set maps, of the training maps\u2019 peak (1) divided by the"
+],
+"380": [
+9,
+"generated map\u2019s peak. No map is rescaled individually. These maps are coarse spatial"
+],
+"381": [
+9,
+"priors. They show where effects are likely, without effect size, sign, or uncertainty."
+],
+"382": [
+9,
+"A second, anatomically centered projection head maps text to the same latent."
+],
+"383": [
+9,
+"It learns from synthetic text-map pairs, built from atlas regions and training papers"
+],
+"384": [
+9,
+"only, and from PubMed training pairs. It generates the maps on which the stage 2"
+],
+"385": [
+9,
+"projector trains."
+],
+"386": [
+9,
+""
+],
+"387": [
+9,
+"2.10 Performance Metrics"
+],
+"388": [
+9,
+"The main performance metric used for test evaluation was the recall@k curve. This"
+],
+"389": [
+9,
+"measure was used for both contrastive and generative models. Cosine similarity"
+],
+"390": [
+9,
+"between all pairs of latent text and neuroimages is computed. Recall@k measures how"
+],
+"391": [
+9,
+"often the true neuroimage-text pair was found in the top-k most similar pairs [16]."
+],
+"392": [
+9,
+"Given a reference latent neuroimage, recall@k measures how often the paired latent"
+],
+"393": [
+9,
+"text is in the top-k most similar pairs. The inverse is performed using a reference"
+],
+"394": [
+9,
+"latent text and computing recall@k against latent neuroimages. We step k from 1 to"
+],
+"395": [
+9,
+"the max size of the test set and compute recall@k for each threshold. The area under"
+],
+"396": [
+9,
+"this curve is reported, where 0.5 is chance performance and 1.0 is perfect performance."
+],
+"397": [
+9,
+"This chance level holds when each query has one target. A NeuroVault paper has sev-"
+],
+"398": [
+9,
+"eral maps, so its chance level is estimated by shuffling texts across papers and applying"
+],
+"399": [
+9,
+"the same choice of target (Supplementary SectionS2.3). Retrieval is also reported"
+],
+"400": [
+9,
+"as recall@1, recall@5, recall@10, mean reciprocal rank, and median rank. These are"
+],
+"401": [
+9,
+"computed among all test papers and among hard negatives, the test papers of the"
+],
+"402": [
+9,
+"query\u2019s own cognitive domain (Supplementary TableS8).Recall@k is used for the"
+],
+"403": [
+9,
+"contrastive model, examining how well aligned the text and neuroimage representa-"
+],
+"404": [
+9,
+"tions are. For generative models, recall@k is computed from latent representations of"
+],
+"405": [
+9,
+"generated outputs and true targets."
+],
+"406": [
+9,
+"In addition to recall@k, we also provided contrastive cosine similarity, Dice score,"
+],
+"407": [
+9,
+"Pearson correlation, and spin-tests for text-to-brain generation. For brain-to-text gen-"
+],
+"408": [
+9,
+"eration, contrastive cosine similarity, BERTScore, semantic cosine similarity, and a"
+],
+"409": [
+9,
+"contrastive null test were performed. Matched distributions, or true (image, text)"
+],
+"410": [
+9,
+"pairs, were compared against a randomly shuffled distribution of (image, text) pairs"
+],
+"411": [
+9,
+"().Fig. 4). Every generated map is calibrated, as described above, before it is encoded"
+],
+"412": [
+9,
+"or scored."
+],
+"413": [
+9,
+""
+],
+"414": [
+9,
+""
+],
+"415": [
+10,
+"Text-to-brain maps were also scored outside NeuroVLM\u2019s representation space."
+],
+"416": [
+10,
+"Each map was compared in voxel space with the test paper\u2019s map as the autoencoder"
+],
+"417": [
+10,
+"reconstructs it, by Dice and Pearson correlation. The simplest baseline was NeuroVLM"
+],
+"418": [
+10,
+"with a linear head, a ridge regression from the SPECTER2 embedding to the autoen-"
+],
+"419": [
+10,
+"coder latent, decoded by the same decoder. The other simple baselines were the mean"
+],
+"420": [
+10,
+"training map, the mean map of the query\u2019s cognitive domain, atlas-based labeling"
+],
+"421": [
+10,
+"of the regions named in the text, and the map of the nearest training paper. The"
+],
+"422": [
+10,
+"published models were Neurosynth [3], NeuroQuery [11], and Text2Brain [26], used"
+],
+"423": [
+10,
+"as released. Their training corpora each hold nearly half the test papers. Generated"
+],
+"424": [
+10,
+"captions were compared with the caption of the nearest training paper, a retrieval"
+],
+"425": [
+10,
+"baseline. They were also scored for study details, such as sample sizes, patient groups,"
+],
+"426": [
+10,
+"or tasks. Each qualitative example is placed by its percentile among all items of its"
+],
+"427": [
+10,
+"set, by cosine similarity in the shared space."
+],
+"428": [
+10,
+""
+],
+"429": [
+10,
+"3 Results"
+],
+"430": [
+10,
+""
+],
+"431": [
+10,
+"3.1 Generative Models"
+],
+"432": [
+10,
+"Text-to-brain outputs are coarse spatial priors, without effect size, sign, or uncertainty."
+],
+"433": [
+10,
+"Brain-to-text outputs are broad network-level labels, not interpretations of a specific"
+],
+"434": [
+10,
+"study or mechanism."
+],
+"435": [
+10,
+""
+],
+"436": [
+10,
+""
+],
+"437": [
+10,
+"3.1.1 Networks"
+],
+"438": [
+10,
+"The network dataset [1] was used to demonstrate text-to-brain and brain-to-text gener-"
+],
+"439": [
+10,
+"ative models, because it provides some degree of ground truth, given that the collection"
+],
+"440": [
+10,
+"of networks were labeled by experts (Fig. 2for examples,Fig. 5dfor quantitative met-"
+],
+"441": [
+10,
+"rics). The text-to-brain model transformed networks\u2019 definitions to the latent space"
+],
+"442": [
+10,
+"using the encoder. The latent vectors were then transformed to neuroimages using the"
+],
+"443": [
+10,
+"decoder. The brain-to-text model generates text related to a neuroimage input from"
+],
+"444": [
+10,
+"the network dataset. This brain-to-text model uses a Qformer the stage 2 MLP pro-"
+],
+"445": [
+10,
+"jectorto map from latent image space to the latent token embedding space [?] ()."
+],
+"446": [
+10,
+"(Fig. S1). Seven of the eight network titles name the reference network exactly, and"
+],
+"447": [
+10,
+"all eight name the right system. Generated maps lie at the 31st to 76th percentile and"
+],
+"448": [
+10,
+"generated texts at the 19th to 99th percentile of all atlas networks. Supplementary"
+],
+"449": [
+10,
+"TableS5gives the complete texts."
+],
+"450": [
+10,
+""
+],
+"451": [
+10,
+"3.1.2 NeuroVault"
+],
+"452": [
+10,
+""
+],
+"453": [
+10,
+"Generative neuroimage-to-text and text-to-neuroimage models were evaluated on"
+],
+"454": [
+10,
+"the neurovault NeuroVaulttest set, which provides unthresholded brain maps not"
+],
+"455": [
+10,
+"in the PubMed training set. Qualitative results are shown inFig. 3, where each"
+],
+"456": [
+10,
+"row in this figure corresponds to one group-level activation map and study from"
+],
+"457": [
+10,
+"neurovaultNeuroVault. Titles and abstracts from neurovault NeuroVaultwere used to"
+],
+"458": [
+10,
+"generate 3D brain maps; only true and predicted (generated ) titles are shown. . Each"
+],
+"459": [
+10,
+"true title and each complete generated caption is shown. The rows were chosen from"
+],
+"460": [
+10,
+"the top, middle, and bottom thirds of both similarity scores."
+],
+"461": [
+11,
+""
+],
+"462": [
+11,
+""
+],
+"463": [
+11,
+""
+],
+"464": [
+11,
+""
+],
+"465": [
+11,
+""
+],
+"466": [
+11,
+""
+],
+"467": [
+11,
+""
+],
+"468": [
+11,
+""
+],
+"469": [
+11,
+""
+],
+"470": [
+11,
+""
+],
+"471": [
+11,
+""
+],
+"472": [
+11,
+""
+],
+"473": [
+11,
+""
+],
+"474": [
+11,
+""
+],
+"475": [
+11,
+""
+],
+"476": [
+11,
+""
+],
+"477": [
+11,
+""
+],
+"478": [
+11,
+""
+],
+"479": [
+11,
+""
+],
+"480": [
+11,
+""
+],
+"481": [
+11,
+""
+],
+"482": [
+11,
+""
+],
+"483": [
+11,
+""
+],
+"484": [
+11,
+""
+],
+"485": [
+11,
+""
+],
+"486": [
+11,
+""
+],
+"487": [
+11,
+""
+],
+"488": [
+11,
+""
+],
+"489": [
+11,
+""
+],
+"490": [
+11,
+""
+],
+"491": [
+11,
+""
+],
+"492": [
+11,
+""
+],
+"493": [
+11,
+""
+],
+"494": [
+11,
+""
+],
+"495": [
+11,
+""
+],
+"496": [
+11,
+""
+],
+"497": [
+11,
+""
+],
+"498": [
+11,
+""
+],
+"499": [
+11,
+""
+],
+"500": [
+11,
+""
+],
+"501": [
+11,
+""
+],
+"502": [
+11,
+"Fig. 2 Networks: text-to-brain and brain-to-text generation. The input to text-to-brain"
+],
+"503": [
+11,
+"generation was a high-level summary of Auditory and default mode networks showthe reference"
+],
+"504": [
+11,
+"imagecomplete generated texts, and the other six their three generated titles. The input to"
+],
+"505": [
+11,
+"reference column for map thatthe group who produced text-to-brain head generates fromthe map."
+],
+"506": [
+11,
+"Text-to-brain generation used text network\u2019sdescription of networks to generate a set of activation"
+],
+"507": [
+12,
+""
+],
+"508": [
+12,
+""
+],
+"509": [
+12,
+""
+],
+"510": [
+12,
+""
+],
+"511": [
+12,
+""
+],
+"512": [
+12,
+""
+],
+"513": [
+12,
+""
+],
+"514": [
+12,
+""
+],
+"515": [
+12,
+""
+],
+"516": [
+12,
+""
+],
+"517": [
+12,
+""
+],
+"518": [
+12,
+""
+],
+"519": [
+12,
+""
+],
+"520": [
+12,
+""
+],
+"521": [
+12,
+""
+],
+"522": [
+12,
+""
+],
+"523": [
+12,
+""
+],
+"524": [
+12,
+""
+],
+"525": [
+12,
+""
+],
+"526": [
+12,
+""
+],
+"527": [
+12,
+""
+],
+"528": [
+12,
+""
+],
+"529": [
+12,
+""
+],
+"530": [
+12,
+""
+],
+"531": [
+12,
+""
+],
+"532": [
+12,
+""
+],
+"533": [
+12,
+""
+],
+"534": [
+12,
+""
+],
+"535": [
+12,
+""
+],
+"536": [
+12,
+""
+],
+"537": [
+12,
+""
+],
+"538": [
+12,
+""
+],
+"539": [
+12,
+""
+],
+"540": [
+12,
+""
+],
+"541": [
+12,
+""
+],
+"542": [
+12,
+""
+],
+"543": [
+12,
+""
+],
+"544": [
+12,
+""
+],
+"545": [
+12,
+""
+],
+"546": [
+12,
+""
+],
+"547": [
+12,
+""
+],
+"548": [
+12,
+""
+],
+"549": [
+12,
+"Fig. 3 NeuroVault: text-to-brain and brain-to-text generation. Pairs Rows are papers with"
+],
+"550": [
+12,
+"clean captions nearest the centerof group-level activation maps and publication text the third holding"
+],
+"551": [
+12,
+"both shared-space cosines( titles and abstractsdensities over 305 papers) were taken from NeuroVault,"
+],
+"552": [
+12,
+"High and Medium with a one-domain title and clustered true map. Text was used to generate brain"
+],
+"553": [
+13,
+"3.1.3 PubMed"
+],
+"554": [
+13,
+"The PubMed test set (n= 2987n= 2,971) was used to evaluate both generative"
+],
+"555": [
+13,
+"directions (Fig. 4). Retrieval performance was quantified with a normalized recall@k"
+],
+"556": [
+13,
+"curve. For each generated output, we computed its similarity to every candidate item"
+],
+"557": [
+13,
+"in the test set using the NeuroVLM contrastive embedding space, then asked whether"
+],
+"558": [
+13,
+"the correct paired item appeared within the top-kranked candidates. For text-to-"
+],
+"559": [
+13,
+"brain generation, generated brain maps were embedded with the image contrastive"
+],
+"560": [
+13,
+"projection head and ranked against the source text embeddings. For brain-to-text"
+],
+"561": [
+13,
+"generation, generated text was embedded with the text projection head and ranked"
+],
+"562": [
+13,
+"against the source image embeddings. We report the area under the recall curve over"
+],
+"563": [
+13,
+"normalized rank, k"
+],
+"564": [
+13,
+"N , so that random retrieval has expected AUC 0.5, while perfect"
+],
+"565": [
+13,
+"retrieval has AUC 1.0. Perfect performance would mean that every generated output"
+],
+"566": [
+13,
+"is most similar to its true paired input than to any mismatched item in the test set."
+],
+"567": [
+13,
+"In addition to retrieval AUC, we evaluated the paired contrastive cosine similarity"
+],
+"568": [
+13,
+"between each generated output and its true conditioning input. This metric directly"
+],
+"569": [
+13,
+"measures alignment in the learned NeuroVLM multimodal space. Matched pairs were"
+],
+"570": [
+13,
+"compared against a null distribution formed by mismatching generated outputs with"
+],
+"571": [
+13,
+"inputs from other PubMed examples. Thus, higher matched cosine similarity indi-"
+],
+"572": [
+13,
+"cates that the generated brain map or generated text preserves information that is"
+],
+"573": [
+13,
+"specifically aligned with the correct paired modality, rather than only matching broad"
+],
+"574": [
+13,
+"dataset-level structure."
+],
+"575": [
+13,
+"For text-to-brain generation, we also quantified spatial accuracy of the generated"
+],
+"576": [
+13,
+"brain maps. Dice score measured overlap between thresholded predicted and true acti-"
+],
+"577": [
+13,
+"vation maps. Pearson correlation measured voxelwise spatial correspondence between"
+],
+"578": [
+13,
+"predicted and true maps, capturing graded similarity beyond binary overlap. Finally,"
+],
+"579": [
+13,
+"spin-test p-values assessed whether the observed spatial overlap exceeded what would"
+],
+"580": [
+13,
+"be expected under spatially autocorrelated cortical null maps. The spin-tests were"
+],
+"581": [
+13,
+"limited to examples that had predominantly surface activation. This provides a more"
+],
+"582": [
+13,
+"conservative test of anatomical specificity, since neighboring brain locations are not"
+],
+"583": [
+13,
+"statistically independent."
+],
+"584": [
+13,
+"For brain-to-text generation, we evaluated the generated descriptions using com-"
+],
+"585": [
+13,
+"plementary text-based and contrastive metrics. BERTScore F1 measured contextual"
+],
+"586": [
+13,
+"token-level overlap between generated and reference PubMed text, while semantic"
+],
+"587": [
+13,
+"cosine similarity measured sentence-level semantic agreement using text embeddings"
+],
+"588": [
+13,
+"from a generic language embedding model,all-MiniLM-L6-v2. Because reference"
+],
+"589": [
+13,
+"PubMed abstracts can contain broad methodological and domain-general content,"
+],
+"590": [
+13,
+"these lexical and semantic metrics may remain high even for mismatched pairs. We"
+],
+"591": [
+13,
+"also included a contrastive null test: for each generated text, we compared its Neu-"
+],
+"592": [
+13,
+"roVLM contrastive similarity to the true source brain map against its similarity to"
+],
+"593": [
+13,
+"mismatched brain maps from the test set. The resulting empirical p-value measures"
+],
+"594": [
+13,
+"whether the generated text is more specifically aligned to its own source brain map"
+],
+"595": [
+13,
+"than to other plausible PubMed brain maps."
+],
+"596": [
+13,
+"Generated outputs find their true pair, with retrieval AUC 0.95 in both directions"
+],
+"597": [
+13,
+"(Fig. 4and Supplementary TableS4). Generated maps overlap their paper\u2019s map more"
+],
+"598": [
+13,
+"than shuffled pairs do (Dice 0.53 against 0.41) and correlate more with it (Pearson"
+],
+"599": [
+14,
+"r0.32 against 0.12). Of the 1,332 cortical maps, 58% beat their spatial nulls atp <"
+],
+"600": [
+14,
+"0.05. Generated captions are closer to their paper\u2019s text than to other papers\u2019 texts"
+],
+"601": [
+14,
+"(MiniLM cosine 0.46 against 0.40). BERTScore separates them only weakly (0.553"
+],
+"602": [
+14,
+"against 0.548), because unrescaled BERTScore stays near 0.58 even for two unrelated"
+],
+"603": [
+14,
+"test papers and rewards the style of the reference summaries more than their content."
+],
+"604": [
+14,
+"The matched caption still scores higher for 57% of maps. In the contrastive null test,"
+],
+"605": [
+14,
+"70% of captions reachp <0.05, against 5% expected by chance."
+],
+"606": [
+14,
+"NeuroVLM gives the most accurate text-to-brain maps of the methods compared"
+],
+"607": [
+14,
+"(Supplementary Fig.S6). It leads narrowly ahead of NeuroVLM with a linear head"
+],
+"608": [
+14,
+"and ahead of Text2Brain, Neurosynth, NeuroQuery, mean and domain maps, and atlas"
+],
+"609": [
+14,
+"labeling (Dice 0.53 against at most 0.49). Generated maps are also closer to each test"
+],
+"610": [
+14,
+"paper\u2019s map than the map of the nearest training paper (Dice 0.53 against 0.40). By"
+],
+"611": [
+14,
+"MiniLM cosine, generated captions are as close to the paper\u2019s text as the caption of"
+],
+"612": [
+14,
+"the nearest training paper. But 57% of the retrieved captions report details of another"
+],
+"613": [
+14,
+"study, against 2% of generated captions (Supplementary Fig.S8)."
+],
+"614": [
+14,
+""
+],
+"615": [
+14,
+""
+],
+"616": [
+14,
+""
+],
+"617": [
+14,
+""
+],
+"618": [
+14,
+""
+],
+"619": [
+14,
+""
+],
+"620": [
+14,
+""
+],
+"621": [
+14,
+""
+],
+"622": [
+14,
+""
+],
+"623": [
+14,
+""
+],
+"624": [
+14,
+""
+],
+"625": [
+14,
+""
+],
+"626": [
+14,
+""
+],
+"627": [
+14,
+""
+],
+"628": [
+14,
+""
+],
+"629": [
+14,
+""
+],
+"630": [
+14,
+""
+],
+"631": [
+14,
+""
+],
+"632": [
+14,
+""
+],
+"633": [
+14,
+""
+],
+"634": [
+14,
+""
+],
+"635": [
+14,
+""
+],
+"636": [
+14,
+""
+],
+"637": [
+14,
+""
+],
+"638": [
+14,
+""
+],
+"639": [
+14,
+""
+],
+"640": [
+14,
+""
+],
+"641": [
+14,
+""
+],
+"642": [
+14,
+""
+],
+"643": [
+14,
+""
+],
+"644": [
+14,
+""
+],
+"645": [
+15,
+""
+],
+"646": [
+15,
+""
+],
+"647": [
+15,
+""
+],
+"648": [
+15,
+""
+],
+"649": [
+15,
+""
+],
+"650": [
+15,
+""
+],
+"651": [
+15,
+""
+],
+"652": [
+15,
+""
+],
+"653": [
+15,
+""
+],
+"654": [
+15,
+""
+],
+"655": [
+15,
+""
+],
+"656": [
+15,
+""
+],
+"657": [
+15,
+""
+],
+"658": [
+15,
+""
+],
+"659": [
+15,
+""
+],
+"660": [
+15,
+""
+],
+"661": [
+15,
+""
+],
+"662": [
+15,
+""
+],
+"663": [
+15,
+""
+],
+"664": [
+15,
+""
+],
+"665": [
+15,
+"Fig. 4 Generative Performance.Generative performance.Text-to-brain(a)and brain-"
+],
+"666": [
+15,
+"to-text(b)generation performance on the PubMed test set (n= 2987n = 2,971). Top row:"
+],
+"667": [
+15,
+"text-to-brain generation was evaluated by normalized recallRecall@ k kcurves showretrievalof"
+],
+"668": [
+15,
+"the true pair, contrastive cosine similaritywithk/nthe fraction of all candidates. Boxes com-"
+],
+"669": [
+15,
+"pare matched pairs (Match, Dice overlapblue) with shuffled pairs (Null, Pearson correlation, and"
+],
+"670": [
+15,
+"recall@k retrievalDice uses each map\u2019s top 30% of voxels. The spin test (1, contrastive cosine similarity,"
+],
+"671": [
+15,
+"BERTScore F1, semantic cosine similarity, 332 cortical maps)and a thecontrastive null testshow"
+],
+"672": [
+15,
+"each map\u2019s\u2212log 10 p, withp= 0.05 dashed. Matched pairs are compared against mismatched null"
+],
+"673": [
+15,
+"panels( 0.5Supplementary TableS4) to perfect retrieval (1.0). Null distributions are and one-sided"
+],
+"674": [
+15,
+"binomial tests of the share belowp= 0.05in gray, they represent randomly shuffled pairsthe twop"
+],
+"675": [
+15,
+"panels. T-tests were conducted to compare all match versus null distributionsOne, \u2217p <1e\u2212100 was"
+],
+"676": [
+15,
+"found for all comparisonstwo, and three stars markp <0.05, 0.01, and 0.001."
+],
+"677": [
+15,
+""
+],
+"678": [
+15,
+""
+],
+"679": [
+15,
+""
+],
+"680": [
+15,
+""
+],
+"681": [
+15,
+""
+],
+"682": [
+15,
+""
+],
+"683": [
+15,
+""
+],
+"684": [
+15,
+""
+],
+"685": [
+15,
+""
+],
+"686": [
+15,
+""
+],
+"687": [
+15,
+""
+],
+"688": [
+15,
+""
+],
+"689": [
+15,
+""
+],
+"690": [
+15,
+""
+],
+"691": [
+16,
+""
+],
+"692": [
+16,
+""
+],
+"693": [
+16,
+""
+],
+"694": [
+16,
+""
+],
+"695": [
+16,
+""
+],
+"696": [
+16,
+""
+],
+"697": [
+16,
+""
+],
+"698": [
+16,
+""
+],
+"699": [
+16,
+""
+],
+"700": [
+16,
+""
+],
+"701": [
+16,
+""
+],
+"702": [
+16,
+""
+],
+"703": [
+16,
+""
+],
+"704": [
+16,
+""
+],
+"705": [
+16,
+""
+],
+"706": [
+16,
+""
+],
+"707": [
+16,
+""
+],
+"708": [
+16,
+""
+],
+"709": [
+16,
+""
+],
+"710": [
+16,
+""
+],
+"711": [
+16,
+""
+],
+"712": [
+16,
+""
+],
+"713": [
+16,
+""
+],
+"714": [
+16,
+""
+],
+"715": [
+16,
+""
+],
+"716": [
+16,
+""
+],
+"717": [
+16,
+""
+],
+"718": [
+16,
+""
+],
+"719": [
+16,
+""
+],
+"720": [
+16,
+""
+],
+"721": [
+16,
+""
+],
+"722": [
+16,
+""
+],
+"723": [
+16,
+""
+],
+"724": [
+16,
+""
+],
+"725": [
+16,
+""
+],
+"726": [
+16,
+""
+],
+"727": [
+16,
+""
+],
+"728": [
+16,
+""
+],
+"729": [
+16,
+""
+],
+"730": [
+16,
+""
+],
+"731": [
+16,
+""
+],
+"732": [
+16,
+""
+],
+"733": [
+16,
+""
+],
+"734": [
+16,
+""
+],
+"735": [
+16,
+""
+],
+"736": [
+16,
+""
+],
+"737": [
+17,
+"3.2 Contrastive Model"
+],
+"738": [
+17,
+""
+],
+"739": [
+17,
+""
+],
+"740": [
+17,
+""
+],
+"741": [
+17,
+""
+],
+"742": [
+17,
+""
+],
+"743": [
+17,
+""
+],
+"744": [
+17,
+""
+],
+"745": [
+17,
+""
+],
+"746": [
+17,
+""
+],
+"747": [
+17,
+""
+],
+"748": [
+17,
+""
+],
+"749": [
+17,
+""
+],
+"750": [
+17,
+""
+],
+"751": [
+17,
+""
+],
+"752": [
+17,
+""
+],
+"753": [
+17,
+""
+],
+"754": [
+17,
+""
+],
+"755": [
+17,
+""
+],
+"756": [
+17,
+""
+],
+"757": [
+17,
+""
+],
+"758": [
+17,
+""
+],
+"759": [
+17,
+""
+],
+"760": [
+17,
+""
+],
+"761": [
+17,
+""
+],
+"762": [
+17,
+""
+],
+"763": [
+17,
+""
+],
+"764": [
+17,
+""
+],
+"765": [
+17,
+""
+],
+"766": [
+17,
+""
+],
+"767": [
+17,
+""
+],
+"768": [
+17,
+"Fig. 5 Contrastive Performance. Results are presented for the neuroimage autoencoder,"
+],
+"769": [
+17,
+"contrastive models, and generative models. Contrastive performance.a) PubMed.Recall@k has"
+],
+"770": [
+17,
+"expected random performance of area-under-the-curve (AUC=0.5), along the diagonalfrom five-fold"
+],
+"771": [
+17,
+"cross-validation. Perfect performanceis AUC=1.0. b) NeuroVault.Recall@k measures how often the"
+],
+"772": [
+17,
+"true pair when each paper\u2019s targetis in the top-k most cosine similar pairs. a) PubMed. Contrastive"
+],
+"773": [
+17,
+"Contrastive recall , every map( AUC=0.78multi-target) curve , or its worst map(lowest, lower bound),"
+],
+"774": [
+17,
+"with p-maps inverted. With the best map, theAUC =is0.85 )from text to brain and 0.79 from"
+],
+"775": [
+17,
+"brain to text. c) Autoencoder. Binary voxel performance Chance( AUCROC=0.94dashed)gives"
+],
+"776": [
+17,
+"each paper\u2019s text to another paper at random, applies the same rule,and bits-per-pixel gain from"
+],
+"777": [
+17,
+"from argmaxPicking the bestof cosine similarity between contrastive embeddingsseveral maps lifts"
+],
+"778": [
+17,
+"chance above the diagonal even for an unrelated text, as a confusion matrixand picking the worst"
+],
+"779": [
+17,
+"lowers it. Themulti-target rule picks nothing, so chance is thediagonalfrom brain to text but above"
+],
+"780": [
+17,
+"it from text to brain, where any of a paper\u2019s mapsis correct classifications (dark blue)a hit. Counts"
+],
+"781": [
+17,
+"0.974 on the PubMed test set and 0.939 on NeuroVault.d) Network classification.Confusion"
+],
+"782": [
+17,
+"matrixof true-sample the 119 labeled atlas maps (accuracy 0.82), with the percentage of each true"
+],
+"783": [
+18,
+"3.2.1 Network Labeling"
+],
+"784": [
+18,
+"Cosine similarity between text-image embeddings was used to label 300 network images"
+],
+"785": [
+18,
+"the 119 atlas maps that carry one of eight network labels[1]. The argmax of cosine"
+],
+"786": [
+18,
+"similarity is taken as the predicted label. The confusion matrix shows a vast majority of"
+],
+"787": [
+18,
+"images Of the 119 maps, 98were labeled correctly using this approach ((82%,Fig. 5d)."
+],
+"788": [
+18,
+"Network images were embedded to a common latent space and then compared against"
+],
+"789": [
+18,
+"latent text embeddings corresponding to networks, regions, and cognition. Example"
+],
+"790": [
+18,
+"network images and associated text are shown inFig. 2."
+],
+"791": [
+18,
+"The network dataset [1] also contains unlabeled independent components (IC) for"
+],
+"792": [
+18,
+"the Human Connectome Project and UK Biobank. Independent component analysis"
+],
+"793": [
+18,
+"(ICA) of resting state networks has historically required manual classification of net-"
+],
+"794": [
+18,
+"works versus noise components [27]. Semi-supervised approaches also require manual"
+],
+"795": [
+18,
+"classification for a classifier to learn from [28, 29]. These methods classify compo-"
+],
+"796": [
+18,
+"nents as either noise or target components. The40ICA components from the network"
+],
+"797": [
+18,
+"dataset are labeled automatically using the contrastive model(Fig. S4), with more"
+],
+"798": [
+18,
+"detail, e.g., the names of various networks. Although noise is not directly modeled,"
+],
+"799": [
+18,
+"noise components will have low similarity with a resting-state text corpus."
+],
+"800": [
+18,
+""
+],
+"801": [
+18,
+"3.2.2 NeuroVault"
+],
+"802": [
+18,
+""
+],
+"803": [
+18,
+"The NeuroVault [22] test set was used to test the contrastive model. This shows that"
+],
+"804": [
+18,
+"the model generalizes from coordinate tables during training to group-level activation"
+],
+"805": [
+18,
+"maps at inference. Recall@k measures how often the true neuroimage-text pair was"
+],
+"806": [
+18,
+"found in the top-k most similar pairs A NeuroVault paper has several maps but one"
+],
+"807": [
+18,
+"text. With each paper\u2019s best-matching map as its target, the AUC is 0.85 from text"
+],
+"808": [
+18,
+"to brain and 0.79 from brain to text(Fig. 5b , left)[16]. Similar to AUROC, the area"
+],
+"809": [
+18,
+"under the curve is expected to be 0.5 for a randomly initialized, untrained model."
+],
+"810": [
+18,
+"After training with the PubMed set). This choice inflates the score and gives an upper"
+],
+"811": [
+18,
+"bound. Each paper\u2019s worst-matching map gives a lower bound, and a multi-target"
+],
+"812": [
+18,
+"score counts any of a paper\u2019s maps as a hit. Each rule has its own chance curve, from"
+],
+"813": [
+18,
+"texts shuffled across papers. Under every rule, the AUC stays about 0.1 above chance."
+],
+"814": [
+18,
+"With every map as its own target, the AUC reached 0.85. is 0.62 from text to brain"
+],
+"815": [
+18,
+"and 0.63 from brain to text, against 0.50. Supplementary SectionS2.3reports each"
+],
+"816": [
+18,
+"map type separately (Supplementary TableS9)."
+],
+"817": [
+18,
+""
+],
+"818": [
+18,
+"3.2.3 PubMed"
+],
+"819": [
+18,
+"The PubMed test set was used to test the contrastive and generative models (Fig. 5a)."
+],
+"820": [
+18,
+"These results are from 5-fold cross-validation, showing moderate AUC for the con-"
+],
+"821": [
+18,
+"trastive models (AUC=0.83 from text to brain and0.82 ). Additional results show"
+],
+"822": [
+18,
+"that the contrastive model performs similarly to neurocontext and niclip ()from brain"
+],
+"823": [
+18,
+"to text). On the test set, the true pair is among the top 10 of 2,971 candidates for"
+],
+"824": [
+18,
+"9% of queries, against 0.3% by chance (Supplementary TableS8). Hard negatives, the"
+],
+"825": [
+18,
+"test papers of the query\u2019s own cognitive domain, are only slightly harder than ran-"
+],
+"826": [
+18,
+"dom papers of the same number (recall@10 0.24 against 0.28). On the 366 test papers"
+],
+"827": [
+18,
+"that neither NiCLIP nor NeuroConText was trained on, NeuroVLM is slightly ahead"
+],
+"828": [
+18,
+""
+],
+"829": [
+19,
+"of both (Fig. S3),with AUC ranging from 0.80 to 0.83. All test examples in this"
+],
+"830": [
+19,
+"comparison were left out of training from all three models. 0.84."
+],
+"831": [
+19,
+""
+],
+"832": [
+19,
+"3.3 Autoencoder"
+],
+"833": [
+19,
+""
+],
+"834": [
+19,
+""
+],
+"835": [
+19,
+""
+],
+"836": [
+19,
+""
+],
+"837": [
+19,
+""
+],
+"838": [
+19,
+""
+],
+"839": [
+19,
+""
+],
+"840": [
+19,
+""
+],
+"841": [
+19,
+""
+],
+"842": [
+19,
+""
+],
+"843": [
+19,
+""
+],
+"844": [
+19,
+""
+],
+"845": [
+19,
+""
+],
+"846": [
+19,
+""
+],
+"847": [
+19,
+""
+],
+"848": [
+19,
+""
+],
+"849": [
+19,
+""
+],
+"850": [
+19,
+""
+],
+"851": [
+19,
+""
+],
+"852": [
+19,
+""
+],
+"853": [
+19,
+""
+],
+"854": [
+19,
+""
+],
+"855": [
+19,
+""
+],
+"856": [
+19,
+""
+],
+"857": [
+19,
+""
+],
+"858": [
+19,
+""
+],
+"859": [
+19,
+""
+],
+"860": [
+19,
+""
+],
+"861": [
+19,
+""
+],
+"862": [
+19,
+"Fig. 6 Autoencoder test set reconstructions.Example reconstructions for maps fromthe net-"
+],
+"863": [
+19,
+"works, NeuroVault, and PubMed datasets. The test sets (top in ofeach box is the true image. The"
+],
+"864": [
+19,
+"autoencoder encodes the images to latent space) and their reconstructions (bottom), then decodes"
+],
+"865": [
+19,
+"reconstructed predictions are shown below each true image. All images NeuroVault and PubMed"
+],
+"866": [
+19,
+"mapswere randomly selected from drawn at random, andthe test setseight networks are curated"
+],
+"867": [
+19,
+"examples of the network dataset."
+],
+"868": [
+19,
+""
+],
+"869": [
+19,
+"The first step in training is to learn an autoencoder that can reconstruct neuroimages."
+],
+"870": [
+19,
+"This was performed on the PubMed training set. Each MNI space activation map is"
+],
+"871": [
+19,
+"encoded to a 384-dimensional latent vector then decoded back to MNI space. This"
+],
+"872": [
+19,
+"latent vector space is the target for encoding text, resulting in text-to-brain decoding."
+],
+"873": [
+19,
+"The autoencoder was trained on binarized targets and predicts logits, e.g., each voxel"
+],
+"874": [
+19,
+""
+],
+"875": [
+20,
+"was modeled as a binary classification problem. The model output is interpreted as"
+],
+"876": [
+20,
+"the probability of each voxel being active. Performance is quantified by area under the"
+],
+"877": [
+20,
+"receiver operating characteristic (AUROC = 0.9750.974 on the PubMed test set and"
+],
+"878": [
+20,
+"0.939 on NeuroVault) and normalized negative log likelihood (bits/voxel) [30] that"
+],
+"879": [
+20,
+"measures improvement relative to a naive baseline (Fig. 5c). The test set included"
+],
+"880": [
+20,
+"network maps, NeuroVault images, and PubMed (Fig. 6)."
+],
+"881": [
+20,
+""
+],
+"882": [
+20,
+"4 Discussion"
+],
+"883": [
+20,
+""
+],
+"884": [
+20,
+"One of the most central dogmas of neuroscience is that of functional localization:"
+],
+"885": [
+20,
+"the idea that specific cognitive and behavioral functions can be localized to specific"
+],
+"886": [
+20,
+"brain regions. This view has been updated to a richer, network-level view of behavior"
+],
+"887": [
+20,
+"and cognition. The history of human brain imaging is such that vast amounts of"
+],
+"888": [
+20,
+"natural language data have been generated in attempts to describe the populations"
+],
+"889": [
+20,
+"from whom brain images were recorded, under what experimental conditions, with"
+],
+"890": [
+20,
+"expert narratives describing the resulting brain maps. Together, these texts and images"
+],
+"891": [
+20,
+"provide a rich set of data upon which we collectively build novel hypotheses about the"
+],
+"892": [
+20,
+"neural basis of behavior, cognition, and disease."
+],
+"893": [
+20,
+"Here, we introduce NeuroVLM, a generative AI framework that can serve as an"
+],
+"894": [
+20,
+"expert collaborator in this process of narrative building and hypothesis generation."
+],
+"895": [
+20,
+"This generative approach builds upon past works that focused on text-to-brain models,"
+],
+"896": [
+20,
+"constrained to a finite, predefined corpus [3,11]. The text-to-brain model was expanded"
+],
+"897": [
+20,
+"to BERT-based text encoders [26]. More recent efforts have trained contrastive models"
+],
+"898": [
+20,
+"to rank similarity between text-brain pairs using LLM embeddings [16,17]."
+],
+"899": [
+20,
+"NeuroVLM is an integrative framework (Fig. 1a) that is capable of generating text"
+],
+"900": [
+20,
+"from neuroimages or neuroimages from text. This framework relies on encoding to,"
+],
+"901": [
+20,
+"and decoding from, a common latent space. This general framework is not dependent"
+],
+"902": [
+20,
+"on the choice of encoders or decoders. Instead, we The text encoder can be replaced"
+],
+"903": [
+20,
+"by retraining only the small projection heads. Replacing SPECTER2 with a context-"
+],
+"904": [
+20,
+"free word2vec encoder [18] lowers performance modestly (retrieval AUC 0.81 against"
+],
+"905": [
+20,
+"0.83, Supplementary Fig.S9). Weprovide a neuroimage autoencoder, a model to"
+],
+"906": [
+20,
+"project text embeddings to the shared latent space, and an interpretable method to"
+],
+"907": [
+20,
+"generate text from neuroimages. These models were trained on 30,826 23,894publica-"
+],
+"908": [
+20,
+"tions and extend to group-level statistical maps [22] and network atlases [1]. Use cases"
+],
+"909": [
+20,
+"include generating atlases or maps given a textcorpus, generating text interpretations"
+],
+"910": [
+20,
+"coarse spatial priors from text, generating network-level descriptionsof 3D brain maps,"
+],
+"911": [
+20,
+"labeling networks with coactive brain regions, finding publications most related to a"
+],
+"912": [
+20,
+"statistical map query, or finding statistical maps most related to a text query."
+],
+"913": [
+20,
+"Generation adds to retrieval. Generated maps are closer to held-out papers\u2019 maps"
+],
+"914": [
+20,
+"than the maps of the most similar training papers. Generated captions match a paper\u2019s"
+],
+"915": [
+20,
+"text as well as retrieved captions, but rarely carry details of other studies. Context"
+],
+"916": [
+20,
+"also helps, by a modest margin. Decoded latent dimensions match the Neurosynth"
+],
+"917": [
+20,
+"maps of their top terms (Supplementary Fig.S10). The contrastive cross-entropy loss"
+],
+"918": [
+20,
+"matters most for retrieval (Supplementary TableS10)."
+],
+"919": [
+20,
+""
+],
+"920": [
+20,
+""
+],
+"921": [
+21,
+"A central limitation to our approach is that our training neuroimages are not native"
+],
+"922": [
+21,
+"statistical maps, but proxy maps reconstructed from reported peak coordinates and"
+],
+"923": [
+21,
+"smoothed with a fixed kernel. Coordinate tables are not intended to be a sufficient"
+],
+"924": [
+21,
+"statistic for the underlying effects \u2013\u2013 they omit subthreshold structure, cluster shape,"
+],
+"925": [
+21,
+"effect-size information, variance, and many study-specific details such as contrast def-"
+],
+"926": [
+21,
+"initions, preprocessing choices, and sample characteristics. This choice is pragmatic"
+],
+"927": [
+21,
+"for scale, but it bounds the quality of what the model can learn.Each map also pools"
+],
+"928": [
+21,
+"all experiments, contrasts, and tables of a paper, and its positive and negative effects,"
+],
+"929": [
+21,
+"because the released coordinates do not label them. It shows where a paper reports"
+],
+"930": [
+21,
+"effects, not their sign. We trained on titles and abstracts, which exist for every paper."
+],
+"931": [
+21,
+"Table captions exist only for papers with open-access full text, about 40% of the cor-"
+],
+"932": [
+21,
+"pus. They also rarely say where the coordinates lie. A classifier predicts a table\u2019s main"
+],
+"933": [
+21,
+"region from its caption at chance level (macro-F1 0.06 against 0.05), but does better"
+],
+"934": [
+21,
+"from the abstract."
+],
+"935": [
+21,
+"Another limitation involves topics that are under-powered and under-studied."
+],
+"936": [
+21,
+"While common networks and widely used terminology are well-represented, rare con-"
+],
+"937": [
+21,
+"structs, emerging topics, or underrepresented populations can be mapped less reliably."
+],
+"938": [
+21,
+"For more niche, specific topics, additional fine-tuning is recommended."
+],
+"939": [
+21,
+"In addition, it is important to emphasize that generative models often can introduce"
+],
+"940": [
+21,
+"confident predictions that go beyond the evidence. Using NeuroVLM, brain maps"
+],
+"941": [
+21,
+"will be generated from any text input, no matter how ludicrous. For example, \u00a8show"
+],
+"942": [
+21,
+"\u201cshowme the hot dog areas of the brain, \u00a8\u201dwill result in beautiful 3D brain images \u2013"
+],
+"943": [
+21,
+"largely regions related to gustation and reward, as it turns out (so perhaps not entirely"
+],
+"944": [
+21,
+"ludicrous). Nevertheless, NeuroVLM should be viewed as an AI collaborator \u2013 a tool"
+],
+"945": [
+21,
+"for organizing and navigating the literature, suggesting candidate networks, concepts,"
+],
+"946": [
+21,
+"and related papers \u2013 rather than as an oracle that provides mechanistic explanations"
+],
+"947": [
+21,
+"or ground truth maps."
+],
+"948": [
+21,
+"Text-to-brain outputs are coarse spatial priors, without effect size, sign, or uncer-"
+],
+"949": [
+21,
+"tainty. The values of a generated map are not probabilities. Brain-to-text outputs are"
+],
+"950": [
+21,
+"broad network-level labels, not interpretations of a specific study or mechanism. Fail-"
+],
+"951": [
+21,
+"ures are not rare. In 16% of test captions, the similarity to the paper\u2019s text is negative."
+],
+"952": [
+21,
+"Many of these failures start in the data. For 37% of them, the paper\u2019s own text and"
+],
+"953": [
+21,
+"map are already among the least similar pairs of the test set, against 5% of other"
+],
+"954": [
+21,
+"maps. Maps with few or scattered foci fail no more often than others. A typical failure"
+],
+"955": [
+21,
+"is a fluent description of a different system.[NETWORK]titles are the least reliable of"
+],
+"956": [
+21,
+"the three outputs, especially for single-study maps. Titles are steered toward canon-"
+],
+"957": [
+21,
+"ical names, but the body text can still contain invented words or stray fragments."
+],
+"958": [
+21,
+"NeuroVLM also ignores negation. A sentence and its negation give nearly the same"
+],
+"959": [
+21,
+"map (r= 0.84 to 1.00). Composition is roughly additive. Joining two concepts gives a"
+],
+"960": [
+21,
+"map that covers both, and we find no evidence of composition beyond addition. The"
+],
+"961": [
+21,
+"out-of-distribution scores flag unusual inputs, but they are warnings, not calibrated"
+],
+"962": [
+21,
+"probabilities."
+],
+"963": [
+21,
+"Despite these caveats, our work suggests that large-scale, paired text-neuroimage"
+],
+"964": [
+21,
+"corpora are sufficient to learn a useful shared representation that supports practi-"
+],
+"965": [
+21,
+"cal tasks such as retrieval, labeling, and coarse generation. Our strongest limitations"
+],
+"966": [
+21,
+""
+],
+"967": [
+22,
+"involve access to neuroimaging data rather than model architecture. Contributions to"
+],
+"968": [
+22,
+"open-access repositories, such as NeuroVault [22] and OpenNeuro [31], will improve"
+],
+"969": [
+22,
+"the future generations of multimodal neuroscience models; or more simply: higher"
+],
+"970": [
+22,
+"quality, expertly labeled and annotated data can yield better results [32]."
+],
+"971": [
+22,
+"Looking ahead, we believe that it is critical to strengthen the ecosystem around"
+],
+"972": [
+22,
+"standardized benchmarks and reproducible evaluation. Network labeling and recall-"
+],
+"973": [
+22,
+"style retrieval provide accessible demonstrations, but they do not fully measure"
+],
+"974": [
+22,
+"neuroscientific correctness, robustness to analysis pipelines, or calibration under"
+],
+"975": [
+22,
+"dataset shift. Progress will benefit from community benchmarks that specify train-test"
+],
+"976": [
+22,
+"splits, map types, preprocessing, and query sets, and that evaluate multiple axes of"
+],
+"977": [
+22,
+"performance: retrieval utility, interpretability, out-of-distribution generalization, and"
+],
+"978": [
+22,
+"failure modes. Open model checkpoints, transparent preprocessing, and reproducible"
+],
+"979": [
+22,
+"training scripts should be prioritized."
+],
+"980": [
+22,
+"NeuroVLM frames the neuroimaging literature as a bidirectional link between"
+],
+"981": [
+22,
+"how studies are described in language and where effects are reported in the brain."
+],
+"982": [
+22,
+"This enables a single framework to support retrieval, labeling, and generation from"
+],
+"983": [
+22,
+"tens-of-thousands of tens of thousands ofpaired examples. These models can help orga-"
+],
+"984": [
+22,
+"nize a fragmented literature into a searchable, cross-modal interface: a way to move"
+],
+"985": [
+22,
+"from maps to candidate concepts and related papers, and from text queries to spa-"
+],
+"986": [
+22,
+"tial priors and exemplar results. By making these capabilities accessible with modular"
+],
+"987": [
+22,
+"components and modest compute, this work reduces the barrier to using modern multi-"
+],
+"988": [
+22,
+"modal methods for everyday neuroscientific workflows.NeuroVLM runs on a consumer"
+],
+"989": [
+22,
+"CPU, and the whole model retrains from scratch in about 1.8 hours on one GPU."
+],
+"990": [
+22,
+"Our results underscore that the limiting factor for biological fidelity is often"
+],
+"991": [
+22,
+"the structure of what the field reports and shares. When the community primarily"
+],
+"992": [
+22,
+"provides NeuroVLM learns frompeak coordinates, models inherit the constraints"
+],
+"993": [
+22,
+"of peak-coordinate reconstructions; in contrast, sharing more data, such as not full"
+],
+"994": [
+22,
+"statistical maps. Coordinate-based meta-analysis loses information that image-based"
+],
+"995": [
+22,
+"meta-analysis keeps, such as effect sizes and subthreshold effects [33]. Models trained"
+],
+"996": [
+22,
+"on coordinates inherit these losses. Sharingfull statistical maps, contrast definitions,"
+],
+"997": [
+22,
+"and rich metadata ,creates a virtuous cycle and allows would allowmodels to learn"
+],
+"998": [
+22,
+"quantitative, uncertainty-aware representations that better reflect the evidence [32]."
+],
+"999": [
+22,
+"NeuroVLM is a step toward computational tools that augment, rather than replace,"
+],
+"1000": [
+22,
+"expert interpretation. Its most immediate value is as a literature navigation and"
+],
+"1001": [
+22,
+"hypothesis-generation aid that can surface relevant work, highlight commonalities"
+],
+"1002": [
+22,
+"across maps and descriptions, and provide interpretable suggestions. The broader"
+],
+"1003": [
+22,
+"opportunity is to couple these models with standardized benchmarks and richer open"
+],
+"1004": [
+22,
+"data so that future systems are reliable, reproducible, and grounded in the full"
+],
+"1005": [
+22,
+"statistical record of human neuroimaging research."
+],
+"1006": [
+22,
+"Data availability. All data used in this work are public. The datasets are in the"
+],
+"1007": [
+22,
+"NeuroVLM organization on Hugging Face (https://huggingface.co/neurovlm), at the"
+],
+"1008": [
+22,
+"revisions below."
+],
+"1009": [
+22,
+""
+],
+"1010": [
+22,
+"\u2022 neurovlm/neuro image papers (revision bfda6c9): PubMed titles, abstracts, coordi-"
+],
+"1011": [
+22,
+"nate tables, and summaries."
+],
+"1012": [
+22,
+""
+],
+"1013": [
+23,
+"\u2022 neurovlm/embedded text (revision 7f861d8): PubMed maps, text embeddings,"
+],
+"1014": [
+23,
+"network maps, and NeuroVault maps."
+],
+"1015": [
+23,
+"\u2022 neurovlm/neurovault maps (revision 4324288): NeuroVault maps, collections, and"
+],
+"1016": [
+23,
+"texts."
+],
+"1017": [
+23,
+"\u2022 neurovlm/pubmed summary qa (revision 2d53307): summaries of the PubMed"
+],
+"1018": [
+23,
+"abstracts."
+],
+"1019": [
+23,
+"\u2022 neurovlm/synthetic pairs (revision 3005bb0): synthetic and curated concept texts."
+],
+"1020": [
+23,
+"\u2022 neurovlm/pubmed ale maps (revision 1766fad) and neurovlm/cognitive atlas (revi-"
+],
+"1021": [
+23,
+"sion 46194ce)."
+],
+"1022": [
+23,
+"The language model is neurovlm/NeuroQwen3-0.6B (revision 23f50c9). Its adaptation"
+],
+"1023": [
+23,
+"corpus consists of PubMed titles and abstracts, which are public. The released model"
+],
+"1024": [
+23,
+"weights are in the same organization. The final model of this paper is retrained from"
+],
+"1025": [
+23,
+"these inputs by one command (see Code availability). The code repository lists the"
+],
+"1026": [
+23,
+"revision and checksum of every file it reads. The coordinates come from PubMed and"
+],
+"1027": [
+23,
+"Neurosynth Compose [20], the group-level maps from NeuroVault [22], and the network"
+],
+"1028": [
+23,
+"maps from the network correspondence toolbox [1]. Every figure and table is drawn"
+],
+"1029": [
+23,
+"by a script in the code repository from these data. Fig.S3also uses the published"
+],
+"1030": [
+23,
+"NiCLIP and NeuroConText checkpoints."
+],
+"1031": [
+23,
+""
+],
+"1032": [
+23,
+"Code availability. The code is athttps://github.com/neurovlm/neurovlmunder"
+],
+"1033": [
+23,
+"the Apache-2.0 license. It holds the library, the training pipeline, and a script for"
+],
+"1034": [
+23,
+"every figure and table, with a guide that names the script behind each figure. One"
+],
+"1035": [
+23,
+"command builds the pinned environment, fetches every input from Hugging Face at"
+],
+"1036": [
+23,
+"pinned, checksummed revisions, retrains the model, redraws the figures, and checks"
+],
+"1037": [
+23,
+"each metric against the paper. Two runs from scratch gave byte-identical weights on"
+],
+"1038": [
+23,
+"the same GPU model and library versions. Continuous integration trains every model"
+],
+"1039": [
+23,
+"for one batch on a CPU, which tests the whole pipeline."
+],
+"1040": [
+23,
+""
+],
+"1041": [
+23,
+""
+],
+"1042": [
+23,
+""
+],
+"1043": [
+23,
+""
+],
+"1044": [
+23,
+""
+],
+"1045": [
+23,
+""
+],
+"1046": [
+23,
+""
+],
+"1047": [
+23,
+""
+],
+"1048": [
+23,
+""
+],
+"1049": [
+23,
+""
+],
+"1050": [
+23,
+""
+],
+"1051": [
+23,
+""
+],
+"1052": [
+23,
+""
+],
+"1053": [
+23,
+""
+],
+"1054": [
+23,
+""
+],
+"1055": [
+23,
+""
+],
+"1056": [
+23,
+""
+],
+"1057": [
+23,
+""
+],
+"1058": [
+23,
+""
+],
+"1059": [
+24,
+"Supplementary information."
+],
+"1060": [
+24,
+""
+],
+"1061": [
+24,
+"S1 Generation"
+],
+"1062": [
+24,
+""
+],
+"1063": [
+24,
+""
+],
+"1064": [
+24,
+""
+],
+"1065": [
+24,
+""
+],
+"1066": [
+24,
+""
+],
+"1067": [
+24,
+""
+],
+"1068": [
+24,
+""
+],
+"1069": [
+24,
+""
+],
+"1070": [
+24,
+""
+],
+"1071": [
+24,
+""
+],
+"1072": [
+24,
+""
+],
+"1073": [
+24,
+""
+],
+"1074": [
+24,
+""
+],
+"1075": [
+24,
+""
+],
+"1076": [
+24,
+""
+],
+"1077": [
+24,
+""
+],
+"1078": [
+24,
+"Fig. S1 Generating and interpreting neuroimages. a)Brain-to-text generation is used to"
+],
+"1079": [
+24,
+"predict text interpretations of input brain maps. An activation map is first encoded to the latent"
+],
+"1080": [
+24,
+"vector (pink). The Qformer MLP projector(green) then transforms the latent vector to the token"
+],
+"1081": [
+24,
+"A text query is first encoded with Specter2SPECTER2, a frozen, pre-trained text encoder. The"
+],
+"1082": [
+24,
+"projection head is a small, trainable network that transforms from Specter2SPECTER2\u2019s embedding"
+],
+"1083": [
+24,
+"space to the bi-modal, text-neuroimage embedding latentspace (pink). This latent vector is decoded"
+],
+"1084": [
+24,
+"(blue) to generate activation maps."
+],
+"1085": [
+24,
+""
+],
+"1086": [
+24,
+"S2 Preprocessing"
+],
+"1087": [
+24,
+""
+],
+"1088": [
+24,
+"S2.1 Coordinate Tables"
+],
+"1089": [
+24,
+""
+],
+"1090": [
+24,
+"Coordinate tables (n=30826n= 30,826 papers, 857,298 peaks, median 17 per paper)"
+],
+"1091": [
+24,
+"were collected from PubMed and NeuroSynth Compose databases.All peaks of a"
+],
+"1092": [
+24,
+"paper, from every experiment, contrast, and table, were pooled into one map. The"
+],
+"1093": [
+24,
+"released coordinates carry no experiment, contrast, table, or sign labels.Coordinates"
+],
+"1094": [
+24,
+"were convolved with a 9mm Gaussian kernel. The kernel was normalized to val-"
+],
+"1095": [
+24,
+"ues between zero and one. The zero-to-one range allows using binary cross-entropy"
+],
+"1096": [
+24,
+"loss when training the autoencoder. The MNI-space convolutional product,X, was"
+],
+"1097": [
+24,
+"clamped to values between zero and one. The 512-dimensional DiFuMo atlas,P, was"
+],
+"1098": [
+24,
+"used to transform the convolved products (Fig. S2). This is in contrast to using the"
+],
+"1099": [
+24,
+"512-dimensional embedding directly, as in [16,17]. Instead, the autoencoder is trained"
+],
+"1100": [
+24,
+"to learn a data-driven, low-dimensional embedding space."
+],
+"1101": [
+24,
+"\u02c6X=XP"
+],
+"1102": [
+24,
+"diag(s) \u22121 P\u22a4,wheres j = \u2211\ufe02Pvj"
+],
+"1103": [
+24,
+"v"
+],
+"1104": [
+24,
+""
+],
+"1105": [
+25,
+"The DiFuMo reconstructions were resampled to 4mm isotropic voxel space,"
+],
+"1106": [
+25,
+"matching [11]. Masking and flattening produced a 28,542 dimensional vector per image."
+],
+"1107": [
+25,
+""
+],
+"1108": [
+25,
+""
+],
+"1109": [
+25,
+""
+],
+"1110": [
+25,
+""
+],
+"1111": [
+25,
+""
+],
+"1112": [
+25,
+""
+],
+"1113": [
+25,
+""
+],
+"1114": [
+25,
+""
+],
+"1115": [
+25,
+""
+],
+"1116": [
+25,
+""
+],
+"1117": [
+25,
+""
+],
+"1118": [
+25,
+""
+],
+"1119": [
+25,
+""
+],
+"1120": [
+25,
+""
+],
+"1121": [
+25,
+""
+],
+"1122": [
+25,
+""
+],
+"1123": [
+25,
+""
+],
+"1124": [
+25,
+"Fig. S2 Gaussian products transformed to DiFuMo.Points, fromeach study\u2019scoordinate"
+],
+"1125": [
+25,
+"tablestable, were first convolved with a Gaussian kernel (top).With a single study, the ALE kernel"
+],
+"1126": [
+25,
+"reduces to this Gaussian kernel. The image output from Gaussian kernel convolution was recon-"
+],
+"1127": [
+25,
+"structed with DiFuMo (bottom)."
+],
+"1128": [
+25,
+""
+],
+"1129": [
+25,
+"S2.2 Text"
+],
+"1130": [
+25,
+""
+],
+"1131": [
+25,
+"Text included titles and abstracts (n=30826n= 30,826) from PubMed publications."
+],
+"1132": [
+25,
+"All text is paired to a DOI. Text was embedded using Specter2 [19]SPECTER2 [19]"
+],
+"1133": [
+25,
+", the allenai/specter2 aug2023refresh model with its ad hoc query adapter. This pro-"
+],
+"1134": [
+25,
+"duces a 768-dimensional vector per publication. Specter2 SPECTER2was trained with"
+],
+"1135": [
+25,
+"contrastive loss, promoting ranking similarity between pairs. These embeddings almost"
+],
+"1136": [
+25,
+"collapse to a mean. This results in high cosine similarity for unrelated pairs, e.g. the"
+],
+"1137": [
+25,
+"expected cosine similarity distribution is shifted upwards by a constant. For text-to-"
+],
+"1138": [
+25,
+"brain decoding, the embeddings are demeaned with an empty text embedding, shifting"
+],
+"1139": [
+25,
+"the expected value of cosine similarity between random pairs to zero. Additionally,"
+],
+"1140": [
+25,
+"text embeddings were unit normalized, as contrastive loss is scale insensitive."
+],
+"1141": [
+25,
+"Qwen3.5-27B (Qwen/Qwen3.5-27B) summarized each paper with the sum-"
+],
+"1142": [
+25,
+"mary prompt below as its system message, removing low-level study details. The"
+],
+"1143": [
+25,
+"user message was the paper\u2019s title and abstract, joined by a separator token"
+],
+"1144": [
+25,
+"(title[SEP]abstract). Decoding sampled with temperature 0.3, top-p 0.9, and top-k"
+],
+"1145": [
+25,
+"50, with at most 256 new tokens. The stage 1 projector learns from these summaries."
+],
+"1146": [
+25,
+"Qwen3.5-27B wrote short entries with the synthetic-text prompt below. The seeds"
+],
+"1147": [
+25,
+"were region names from nilearn\u2019s brain atlases, Cognitive Atlas concepts, and the"
+],
+"1148": [
+25,
+"network names of the network atlases. The user message was the seed alone, such"
+],
+"1149": [
+25,
+"as \u201cInsula\u201d. Decoding used temperature 0.1 and top-p 0.9, with thinking mode off."
+],
+"1150": [
+25,
+""
+],
+"1151": [
+26,
+"Sampling each seed several times gave re-wordings of one concept. The anatomically"
+],
+"1152": [
+26,
+"centered projection head learns from these entries."
+],
+"1153": [
+26,
+"The stage 2 projector learns from 1,106 synthetic texts about networks, regions, and"
+],
+"1154": [
+26,
+"functions, which Qwen3.5-27B wrote in the same way. Scripts in the code repository"
+],
+"1155": [
+26,
+"re-create the summaries and the synthetic texts. Their outputs cover the same topics"
+],
+"1156": [
+26,
+"as the released texts."
+],
+"1157": [
+26,
+""
+],
+"1158": [
+26,
+""
+],
+"1159": [
+26,
+""
+],
+"1160": [
+26,
+""
+],
+"1161": [
+26,
+""
+],
+"1162": [
+26,
+""
+],
+"1163": [
+26,
+""
+],
+"1164": [
+26,
+""
+],
+"1165": [
+26,
+""
+],
+"1166": [
+26,
+""
+],
+"1167": [
+26,
+""
+],
+"1168": [
+26,
+""
+],
+"1169": [
+26,
+""
+],
+"1170": [
+26,
+""
+],
+"1171": [
+26,
+""
+],
+"1172": [
+26,
+""
+],
+"1173": [
+26,
+""
+],
+"1174": [
+26,
+""
+],
+"1175": [
+26,
+""
+],
+"1176": [
+26,
+""
+],
+"1177": [
+26,
+""
+],
+"1178": [
+26,
+""
+],
+"1179": [
+26,
+""
+],
+"1180": [
+26,
+""
+],
+"1181": [
+26,
+""
+],
+"1182": [
+26,
+""
+],
+"1183": [
+26,
+""
+],
+"1184": [
+26,
+""
+],
+"1185": [
+26,
+""
+],
+"1186": [
+26,
+""
+],
+"1187": [
+26,
+""
+],
+"1188": [
+26,
+""
+],
+"1189": [
+26,
+""
+],
+"1190": [
+26,
+""
+],
+"1193": [
+26,
+""
+],
+"1194": [
+26,
+"INPUT:"
+],
+"1196": [
+26,
+"GOAL:"
+],
+"1197": [
+27,
+""
+],
+"1198": [
+27,
+""
+],
+"1199": [
+27,
+""
+],
+"1200": [
+27,
+""
+],
+"1201": [
+27,
+"One complete example of each kind of text follows."
+],
+"1202": [
+27,
+"\u2022 Summary of a training paper (stage 1 projector). Theory of Mind (ToM) and empa-"
+],
+"1203": [
+27,
+"thy are crucial processes in social cognition, enabling individuals to attribute mental"
+],
+"1204": [
+27,
+"states and infer emotional experiences in others. These processes involve a network"
+],
+"1205": [
+27,
+"of brain regions, including the medial prefrontal cortex, superior temporal sulcus,"
+],
+"1206": [
+27,
+"and temporal pole. ToM and empathy share overlapping but distinct neuronal net-"
+],
+"1207": [
+27,
+"works, with common areas of activation including the medial prefrontal cortex and"
+],
+"1208": [
+27,
+"temporoparietal junction."
+],
+"1209": [
+27,
+"\u2022 Synthetic text \u201cInsula\u201d (anatomically centered projection head). The insula is a"
+],
+"1210": [
+27,
+"deep cortical region situated within the lateral sulcus of the cerebral hemisphere."
+],
+"1211": [
+27,
+"This area maintains connections with structures such as the anterior cingulate cortex"
+],
+"1212": [
+27,
+"and the amygdala. Processes occurring in this region are often linked to perceptions"
+],
+"1213": [
+27,
+"of internal bodily states and emotional awareness. It contributes to the integration"
+],
+"1214": [
+27,
+"of sensory information with subjective experience across various brain networks."
+],
+"1215": [
+27,
+"\u2022 Curated[NETWORK]text \u201cSalience Network\u201d (stage 2 projector). The salience net-"
+],
+"1216": [
+27,
+"work commonly includes anterior insula and dorsal anterior cingulate cortex. It is"
+],
+"1217": [
+27,
+"associated with detecting and prioritizing behaviorally relevant internal and exter-"
+],
+"1218": [
+27,
+"nal information. Its connections with limbic, autonomic, and frontoparietal systems"
+],
+"1219": [
+27,
+"support flexible shifts between internal monitoring and externally oriented control."
+],
+"1220": [
+27,
+"\u2022 Curated[FUNCTION]text \u201cLanguage Comprehension\u201d (stage 2 projector). Lan-"
+],
+"1221": [
+27,
+"guage comprehension commonly involves superior temporal cortex, middle temporal"
+],
+"1222": [
+27,
+"cortex, inferior frontal cortex, angular gyrus, and anterior temporal cortex. These"
+],
+"1223": [
+27,
+"regions support speech and text meaning, syntactic structure, and semantic inte-"
+],
+"1224": [
+27,
+"gration. Left-hemisphere regions are often prominent, although bilateral temporal"
+],
+"1225": [
+27,
+"systems can contribute to broader language understanding."
+],
+"1226": [
+27,
+""
+],
+"1227": [
+27,
+""
+],
+"1228": [
+27,
+"S2.3 NeuroVault"
+],
+"1229": [
+27,
+"NeuroVault images (n= 4553maps (n= 3,183 from 312 papers) span several group-"
+],
+"1230": [
+27,
+"level map types reflecting different analysis outputs, including inferential statistics"
+],
+"1231": [
+27,
+"maps: t-, z-, and F-maps (voxelwise test statistics for a contrast model) and p-maps"
+],
+"1232": [
+27,
+"(the corresponding voxelwise significance values). We also included beta maps (uni-"
+],
+"1233": [
+27,
+"variate GLM estimates and multivariate/decoding weight maps)as well as ROI/masks"
+],
+"1234": [
+27,
+"(binary/probabilistic inclusion maps) and parcellations (discrete region labels) ."
+],
+"1235": [
+27,
+"Masks, parcellations, anatomical maps, and variance maps were removed before eval-"
+],
+"1236": [
+27,
+"uation. Seven papers (29 maps) duplicate a PubMed training paper and were also"
+],
+"1237": [
+27,
+"removed, leaving 3, which define spatial subsets or atlas assignments rather than"
+],
+"1238": [
+27,
+"continuous statistics154 maps from 305 papers. Of the 480 maps their uploaders"
+],
+"1239": [
+27,
+"labeled Other, 70 mean or variance images and 10 maps that could not be typed were"
+],
+"1240": [
+27,
+"also excluded, leaving 3,074 maps from 298 papers for retrieval."
+],
+"1241": [
+27,
+""
+],
+"1242": [
+27,
+""
+],
+"1243": [
+28,
+"P-maps were inverted to 1\u2212p, so that high values mark strong effects. Signed"
+],
+"1244": [
+28,
+"maps keep their positive tail. Using both tails, or adding negative tails as extra"
+],
+"1245": [
+28,
+"maps, reduced evaluation performance. Supplementary TableS9reports each map"
+],
+"1246": [
+28,
+"type separately.Activation maps were cluster-thresholded. For each map, we applied"
+],
+"1247": [
+28,
+"a high-intensity threshold at the 99th percentile and removed small clusters using a"
+],
+"1248": [
+28,
+"minimum cluster extent of 50 voxels. The surviving suprathreshold clusters were then"
+],
+"1249": [
+28,
+"re-vectorized with the same masker into a fixed-length feature vector,d= 28542, and"
+],
+"1250": [
+28,
+"used in testing. Finally, we binarized the resulting vectors (presence/absence of sur-"
+],
+"1251": [
+28,
+"viving voxels) because the absolute scaling of values across map types (e.g., t-, z-, p-,"
+],
+"1252": [
+28,
+"F-, and beta maps) is not directly comparable; binarization yields a uniform support"
+],
+"1253": [
+28,
+"that emphasizes spatial localization over intensity."
+],
+"1254": [
+28,
+"NeuroVault text was limited to titles and abstracts, since per-image contrast"
+],
+"1255": [
+28,
+"definitions were often noisy or missing. Since multiple images were paired to each"
+],
+"1256": [
+28,
+"title-abstract pair, the contrastive model was used to select the most similar image."
+],
+"1257": [
+28,
+"This inflates scores and provides an upper performance bound. All n= 4553 images A"
+],
+"1258": [
+28,
+"lower bound keeps each paper\u2019s worst-matching map, and a multi-target score counts"
+],
+"1259": [
+28,
+"any of a paper\u2019s maps as a hit. A per-map score makes every map its own target."
+],
+"1260": [
+28,
+"The chance level of each rule comes from the same rule applied after shuffling texts"
+],
+"1261": [
+28,
+"across papers (mean of 20 shufflings). It is not 0.5 for the upper and lower bounds,"
+],
+"1262": [
+28,
+"because the target is chosen with the same similarities that are ranked (Fig. 5b). All"
+],
+"1263": [
+28,
+"3,154 mapswere used when evaluating the autoencoder, since the autoencoder does"
+],
+"1264": [
+28,
+"not require text-image pairs."
+],
+"1265": [
+28,
+""
+],
+"1266": [
+28,
+"S3 Autoencoder"
+],
+"1267": [
+28,
+""
+],
+"1268": [
+28,
+"S3.1 Architecture"
+],
+"1269": [
+28,
+""
+],
+"1270": [
+28,
+""
+],
+"1271": [
+28,
+"Table S1Autoencoder architecture (layer-wise)."
+],
+"1272": [
+28,
+""
+],
+"1273": [
+28,
+"Layer Module Input\u2192Output Activation"
+],
+"1274": [
+28,
+"Encoder 1 Linear 28542\u21921024 ReLU"
+],
+"1275": [
+28,
+"Encoder 2 Linear 1024\u2192512 ReLU"
+],
+"1276": [
+28,
+"Encoder 3 Linear 512\u2192384 None"
+],
+"1277": [
+28,
+"Decoder 1 Linear 384\u2192512 ReLU"
+],
+"1278": [
+28,
+"Decoder 2 Linear 512\u21921024 ReLU"
+],
+"1279": [
+28,
+"Decoder 3 Linear 1024\u219228542 None"
+],
+"1280": [
+28,
+"Shapes omit batch dimension."
+],
+"1281": [
+28,
+""
+],
+"1282": [
+28,
+""
+],
+"1283": [
+28,
+"After resampling to 4 mm3 voxel space, masking, and flattening, each neuroimage"
+],
+"1284": [
+28,
+"is a 28,542 dimensional vector. The exact layers, sizes, and activation functions are"
+],
+"1285": [
+28,
+"provided inTab. S1. The encoder maps from 28,542 to 384, then the decoder maps"
+],
+"1286": [
+28,
+"from 384 back to 28,542. ReLU activations are used. The model can be thought of as"
+],
+"1287": [
+28,
+"a single masked convolution per layer, with a kernel size equal to the input size. This"
+],
+"1288": [
+28,
+""
+],
+"1289": [
+29,
+"simplifies handling sparsity from outside-of-brain voxels. Alternatively, convolutional"
+],
+"1290": [
+29,
+"and transposed convolutional layers with a smaller kernel could be explored in future"
+],
+"1291": [
+29,
+"work."
+],
+"1292": [
+29,
+""
+],
+"1293": [
+29,
+"S3.2 Binary Cross-Entropy Loss"
+],
+"1294": [
+29,
+"The autoencoder was trained with binary cross-entropy (BCE)-with-logits loss. Let"
+],
+"1295": [
+29,
+"x(i) \u2208[0,1] D denote a masked and flattened activation map withd= 28542. The"
+],
+"1296": [
+29,
+"decoder produces logitsz (i) \u2208R d, that are transformed to probabilities using the"
+],
+"1297": [
+29,
+"sigmoid function,\u03c3(u)."
+],
+"1298": [
+29,
+""
+],
+"1299": [
+29,
+"(\ufe02"
+],
+"1301": [
+29,
+"We minimize the binary cross-entropy betweenx (i) and \u02c6x(i) using the numerically"
+],
+"1302": [
+29,
+"stable BCE-with-logits form:"
+],
+"1303": [
+29,
+""
+],
+"1304": [
+29,
+""
+],
+"1305": [
+29,
+"(\ufe02 D\u2211\ufe02 [\ufe02 )\ufe01 log(\ufe011\u2212\u03c3(z (i)"
+],
+"1306": [
+29,
+"LBCELogits x(i) ,z (i) )\ufe02=\u2212 1 x(i) (2)"
+],
+"1307": [
+29,
+"D j log\u03c3(z (i)j ) + (\ufe011\u2212x (i)j j ))\ufe01]\ufe02"
+],
+"1308": [
+29,
+"D\u2211\ufe02 (\ufe02"
+],
+"1309": [
+29,
+"= 1 max(z (i) \u2212|z (i). (3)"
+],
+"1310": [
+29,
+"D j ,0)\u2212z (i)j x(i)j + log(\ufe011 + exp(j |) )\ufe01)\ufe02"
+],
+"1311": [
+29,
+""
+],
+"1312": [
+29,
+"The overall reconstruction loss is the minibatch average overBexamples:"
+],
+"1313": [
+29,
+""
+],
+"1314": [
+29,
+"B\u2211\ufe02 (\ufe02"
+],
+"1316": [
+29,
+"i=1"
+],
+"1317": [
+29,
+"S3.3 Training"
+],
+"1318": [
+29,
+""
+],
+"1319": [
+29,
+"The autoencoder was trained for 100 101epochs using AdamW with a learning rate"
+],
+"1320": [
+29,
+"of 5\u00d710 \u22125 and a batch size of 256. 256, and the epoch with the lowest validation loss"
+],
+"1321": [
+29,
+"was kept.Reconstruction was optimized with binary cross-entropy loss with logits as"
+],
+"1322": [
+29,
+"described above."
+],
+"1323": [
+29,
+""
+],
+"1324": [
+29,
+"S4 Projection Head"
+],
+"1325": [
+29,
+""
+],
+"1326": [
+29,
+"S4.1 Architecture"
+],
+"1327": [
+29,
+""
+],
+"1328": [
+29,
+"There are three types of projection heads. The first two are used to transform 768"
+],
+"1329": [
+29,
+"dimensional Specter2 SPECTER2embeddings to 384 dimensions. These two projec-"
+],
+"1330": [
+29,
+"tion heads were the same size but trained on different targets. One was trained to map"
+],
+"1331": [
+29,
+"latent The text-to-brain head mapstext to the autoencoder\u2019s latent space, provid-"
+],
+"1332": [
+29,
+"ing text-to-brain decoding. The other text projection head was learned alongside the"
+],
+"1333": [
+29,
+"neuro projection head, optimized with the contrastive objective, InfoNCE loss. The"
+],
+"1334": [
+29,
+"neuro projection head maps from the autoencoder latent space to the bi-modal latent"
+],
+"1335": [
+30,
+"Table S2Projection head architecture (layer-wise)."
+],
+"1336": [
+30,
+"Layer Module Input\u2192Output Activation"
+],
+"1337": [
+30,
+""
+],
+"1338": [
+30,
+"Text 1 Linear 768\u2192512 ReLU"
+],
+"1339": [
+30,
+"Text 2 Linear 512\u2192384 None"
+],
+"1340": [
+30,
+"Neuro 1 Linear 384\u2192384 ReLU"
+],
+"1341": [
+30,
+"Neuro 2 Linear 384\u2192384 None"
+],
+"1342": [
+30,
+"Shapes omit batch dimension."
+],
+"1343": [
+30,
+""
+],
+"1344": [
+30,
+""
+],
+"1345": [
+30,
+"space.Tab. S2contains the exact layers sizes.A larger, anatomically centered pro-"
+],
+"1346": [
+30,
+"jection head (3.8 million parameters) maps concept texts to the autoencoder latent."
+],
+"1347": [
+30,
+""
+],
+"1348": [
+30,
+""
+],
+"1349": [
+30,
+""
+],
+"1350": [
+30,
+"S4.2 InfoNCE Loss"
+],
+"1351": [
+30,
+"Contrastive projection heads were trained with Info Noise Contrastive Estimation"
+],
+"1352": [
+30,
+"(InfoNCE) loss. LetI\u2208R B\u00d7d andT\u2208R B\u00d7d represent a batch of image and text"
+],
+"1353": [
+30,
+"embeddings, respectively, whereBis the batch size anddis the embedding dimension."
+],
+"1354": [
+30,
+"We usedB= 2048 and\u2113 2-normalize each embedding fori\u2208 {1, . . . , B}:"
+],
+"1355": [
+30,
+""
+],
+"1356": [
+30,
+"\u02dcii = ii"
+],
+"1357": [
+30,
+"\u2225i i\u22252 , \u02dcti = ti\u2225t i\u22252 , (5)"
+],
+"1358": [
+30,
+"We then compute the pairwise cosine similarity matrix:"
+],
+"1359": [
+30,
+""
+],
+"1360": [
+30,
+"S= 1"
+],
+"1361": [
+30,
+"\u03c4 \u02dcI \u02dcT\u22a4 \u2208R B\u00d7B , (6)"
+],
+"1362": [
+30,
+"The temperature parameter was learnable and initialized to was fixed at\u03c4= 0.07"
+],
+"1363": [
+30,
+"[15]. The correct text-image pair for each indexiis the diagonal entryS ii, all off-"
+],
+"1364": [
+30,
+"diagonal entries are mismatched pairs, i.e., text-image pairs from mismatched studies."
+],
+"1365": [
+30,
+"Thus, target labels are the identity matrix. We optimize a symmetrized cross-entropy"
+],
+"1366": [
+30,
+"loss over image-to-text (L i2t) and text-to-image (L t2i) retrieval. The final loss is the"
+],
+"1367": [
+30,
+"mean of the two."
+],
+"1368": [
+30,
+""
+],
+"1369": [
+30,
+"B\u2211\ufe02"
+],
+"1370": [
+30,
+"Li2t =\u2212 1 log exp(\u2211\ufe01BS ii)"
+],
+"1371": [
+30,
+"B i=1 k=1 exp(S ik) (7)"
+],
+"1372": [
+30,
+"B\u2211\ufe02"
+],
+"1373": [
+30,
+"Lt2i =\u2212 1 log exp(\u2211\ufe01BS ii)"
+],
+"1374": [
+30,
+"B i=1 k=1 exp(S ki) (8)"
+],
+"1375": [
+30,
+""
+],
+"1376": [
+30,
+"LInfoNCE = 12 (Li2t +L t2i) . (9)"
+],
+"1377": [
+30,
+""
+],
+"1378": [
+30,
+""
+],
+"1379": [
+30,
+""
+],
+"1380": [
+30,
+""
+],
+"1381": [
+31,
+"S4.3 Training"
+],
+"1382": [
+31,
+"The projection head for text-to-brain generation was trained for 200 epochs with a"
+],
+"1383": [
+31,
+"batch size of 1024 using AdamW with a learning rate of 5\u00d710 \u22125 .Optimization of this"
+],
+"1384": [
+31,
+"text-to-brain model used a BCE-with-logits objective. head predicts the autoencoder"
+],
+"1385": [
+31,
+"latent of each training paper. Its loss is the mean squared error of the latent plus two"
+],
+"1386": [
+31,
+"correlation terms between the decoded map and the decoded true latent, one on logits"
+],
+"1387": [
+31,
+"and one on probabilities, weighted 1.0 and 0.3. During training, Gaussian noise of scale"
+],
+"1388": [
+31,
+"0.5 (standard deviation 0.5/ \u221a768 per dimension) is added to the input embeddings,"
+],
+"1389": [
+31,
+"which are then normalized to unit length, and the output bias starts at the mean"
+],
+"1390": [
+31,
+"training latent. The head was trained with AdamW (learning rate 10\u22123 , weight decay"
+],
+"1391": [
+31,
+"0.01, batch size 512) for up to 80 epochs, and the epoch with the best validation"
+],
+"1392": [
+31,
+"Dice was kept (epoch 30). A linear head, fit by ridge regression from SPECTER2"
+],
+"1393": [
+31,
+"to the latent, is the simplest form of this mapping. Supplementary Fig.S6compares"
+],
+"1394": [
+31,
+"NeuroVLM with this linear head and with the non-linear head.For joint text\u2013image"
+],
+"1395": [
+31,
+"contrastive alignment, we trained paired projection heads using a symmetric InfoNCE"
+],
+"1396": [
+31,
+"contrastive objective with temperature,\u03c4= 0.07. Models were optimized with AdamW"
+],
+"1397": [
+31,
+"for 300 301epochs using a batch size of 2048 and learning rate of 1\u00d710 \u22125 . The"
+],
+"1398": [
+31,
+"anatomically centered head learns from 6,309 synthetic text-map pairs, built from atlas"
+],
+"1399": [
+31,
+"regions and training papers, and from 512 random PubMed training pairs per step"
+],
+"1400": [
+31,
+"with the text-to-brain loss. It was trained for up to 2,000 epochs, and the epoch with"
+],
+"1401": [
+31,
+"the best PubMed validation recall was kept (epoch 200). Supplementary TableS10"
+],
+"1402": [
+31,
+"compares other losses for these heads."
+],
+"1403": [
+31,
+""
+],
+"1404": [
+31,
+""
+],
+"1405": [
+31,
+"S5 Query TransformerBrain-to-Text Projector"
+],
+"1406": [
+31,
+"The Qformer MLP projectormaps raw (r) and semantic (s) latent image embeddings"
+],
+"1407": [
+31,
+"to the token embedding space of the language model, here , the neuroscience-adapted"
+],
+"1408": [
+31,
+"Qwen3-0NeuroQwen3-0.6B. The semantic embeddings are raw image embeddings"
+],
+"1409": [
+31,
+"projected onto the text-semantic space using the contrastive projection heads. The"
+],
+"1410": [
+31,
+"language model predicts text, given these latent representations:"
+],
+"1411": [
+31,
+""
+],
+"1412": [
+31,
+"P(text|r, s)"
+],
+"1413": [
+31,
+""
+],
+"1414": [
+31,
+"The Qformer MLP projectortransforms the latent embeddings to the token embed-"
+],
+"1415": [
+31,
+"ding matrix (Z) of the LLM. During training, Stage 1 trains ons is used. At inference ."
+],
+"1416": [
+31,
+"Stage 2 trains ons projmay alternatively be used, the projection ofsonto the canonical"
+],
+"1417": [
+31,
+"bank of the text\u2019s own level, as at inference."
+],
+"1418": [
+31,
+""
+],
+"1419": [
+31,
+"Z= QformerProjector(r, s) (10)"
+],
+"1420": [
+31,
+"The MLP projector is residual (Supplementary TableS3). Layer normalization is"
+],
+"1421": [
+31,
+"applied to each input, and the two are concatenated. A linear layer maps them to"
+],
+"1422": [
+31,
+"a width of 704, followed by two pre-normalized residual blocks. A final linear layer"
+],
+"1423": [
+31,
+"produces 32 tokens of 1024 dimensions. Each token adds a learned query embedding"
+],
+"1424": [
+31,
+"and passes through layer normalization. An alignment head maps the mean token back"
+],
+"1425": [
+31,
+"to the semantic space for the alignment term of stage 1."
+],
+"1426": [
+31,
+""
+],
+"1427": [
+32,
+"Semantic embeddings may optionally be projected onto a canonical semantic space."
+],
+"1428": [
+32,
+"This improves robustness to noise and preprocessing variation by replacing a predicted"
+],
+"1429": [
+32,
+"semantic embedding with a soft mixture of clean, interpretable canonical prototypes."
+],
+"1430": [
+32,
+"Letsdenote the predicted semantic embedding and letCdenote a bank ofkcanonical"
+],
+"1431": [
+32,
+"embeddings in the samed-dimensional contrastive space:"
+],
+"1432": [
+32,
+""
+],
+"1433": [
+32,
+"r, s\u2208R d, C\u2208R k\u00d7d ."
+],
+"1434": [
+32,
+"Bothsand the rows ofCare\u2113 2-normalized. ProjectingsontoCis the cosine sim-"
+],
+"1435": [
+32,
+"ilarity betweensand each canonical prototype. These similarities are passed through"
+],
+"1436": [
+32,
+"softmax with a temperature parameter (\u03c4) that determines smoothing across concept"
+],
+"1437": [
+32,
+"embeddings. With lower temperature, the projection behaves more like nearest-"
+],
+"1438": [
+32,
+"neighbor assignment. With higher temperature, it averages across more canonical"
+],
+"1439": [
+32,
+"concepts. This improves the decoding of maps that are similar enough to, yet outside"
+],
+"1440": [
+32,
+"of, the training distribution."
+],
+"1441": [
+32,
+""
+],
+"1442": [
+32,
+"(\ufe03sC\u22a4 )\ufe03"
+],
+"1443": [
+32,
+"w= softmax \u2208R k (11)"
+],
+"1444": [
+32,
+"\u03c4"
+],
+"1445": [
+32,
+"\u02dcsproj =wC\u2208R d (12)"
+],
+"1446": [
+32,
+""
+],
+"1447": [
+32,
+"sproj = \u02dcsproj"
+],
+"1448": [
+32,
+"\u2225\u02dcsproj\u22252 (13)"
+],
+"1449": [
+32,
+"The canonical embedding matrix can be split into subtypes: regions, networks, and"
+],
+"1450": [
+32,
+"function. This allows steering the LLM towards these targets. For example append-"
+],
+"1451": [
+32,
+"ing the[NETWORK]token to the bottom ofZsteers language generation towards"
+],
+"1452": [
+32,
+"network-level descriptions while[FUNCTION]token steers towards higher-level, cogni-"
+],
+"1453": [
+32,
+"tive interpretations. Appending[REGION]generates text related to the most dominant"
+],
+"1454": [
+32,
+"region in the image. Future work could increase these steering tokens to various"
+],
+"1455": [
+32,
+"sub-domains, given curated datasets."
+],
+"1456": [
+32,
+"Captions are decoded greedily or by beam search with a repetition penalty, with the"
+],
+"1457": [
+32,
+"vocabulary restricted to Latin-script tokens. After a[NETWORK]or[REGION]token,"
+],
+"1458": [
+32,
+"tokens that cannot continue a canonical name of that bank are masked until the line"
+],
+"1459": [
+32,
+"ends. The language model\u2019s own probabilities choose among the remaining tokens, so"
+],
+"1460": [
+32,
+"the title is still generated, steered toward the canonical names rather than looked up."
+],
+"1461": [
+32,
+"Without the mask, 23% of test[NETWORK]titles and 9% of[REGION]titles matched"
+],
+"1462": [
+32,
+"no canonical or atlas name. With it, none do. The body text and[FUNCTION]titles"
+],
+"1463": [
+32,
+"are not masked."
+],
+"1464": [
+32,
+"Stage 1 was trained with AdamW (learning rate 3\u00d710 \u22124 with cosine decay, batch"
+],
+"1465": [
+32,
+"size 32) and early stopping, and the epoch with the lowest validation loss was kept"
+],
+"1466": [
+32,
+"(epoch 4). Its loss is next-token cross-entropy through the frozen language model plus"
+],
+"1467": [
+32,
+"an alignment term. Stage 2 starts from stage 1 and trains for 30 epochs with AdamW"
+],
+"1468": [
+32,
+"(learning rate 10\u22124 with cosine decay, batch size 18) on 972 concept texts, with 134"
+],
+"1469": [
+32,
+"for validation. Each training map is binarized at a percentile drawn from 90 to 97"
+],
+"1470": [
+32,
+"for each batch, with voxel dropout in half the maps, and title tokens weigh five times"
+],
+"1471": [
+32,
+""
+],
+"1472": [
+32,
+""
+],
+"1473": [
+33,
+"in the loss. Stage 2 was trained with seeds 1 to 5, and the seed with the lowest final"
+],
+"1474": [
+33,
+"validation loss (seed 3) was kept."
+],
+"1475": [
+33,
+""
+],
+"1479": [
+33,
+"latent"
+],
+"1481": [
+33,
+"normalization two LN-MLPs, 384\u2192512\u2192512"
+],
+"1482": [
+33,
+"LN of each input, concatenated"
+],
+"1484": [
+33,
+"Input layer 768\u2192704"
+],
+"1486": [
+33,
+"Transformer 6 layers, 8 heads, FFN width"
+],
+"1487": [
+33,
+"decoder Residual 2048 2 pre-LN MLP blocks,"
+],
+"1488": [
+33,
+"blocks 704\u21921408\u2192704"
+],
+"1490": [
+33,
+"Output layer Linear, 704\u219232\u00d71024"
+],
+"1491": [
+33,
+"Query tokens 32 learned embeddings, LN B\u00d732\u00d71024 34,816"
+],
+"1493": [
+33,
+"1024\u2192512\u2192384"
+],
+"1495": [
+33,
+"QFormer"
+],
+"1496": [
+33,
+"Projectortotal"
+],
+"1497": [
+33,
+"Table S3 Query transformer architecture.Brain-to-text MLP projector architecture.Bdenotes"
+],
+"1500": [
+33,
+""
+],
+"1501": [
+33,
+""
+],
+"1502": [
+33,
+""
+],
+"1503": [
+33,
+""
+],
+"1504": [
+33,
+"S6 Generative Performance"
+],
+"1505": [
+33,
+""
+],
+"1506": [
+33,
+"In the submitted version, the BERTScore null mean (0.52) came from a cached score"
+],
+"1507": [
+33,
+"of an earlier generation run, and every null in Supplementary TableS4is computed"
+],
+"1508": [
+33,
+"from the same captions as the matched scores."
+],
+"1509": [
+33,
+""
+],
+"1510": [
+33,
+""
+],
+"1511": [
+33,
+""
+],
+"1512": [
+33,
+""
+],
+"1513": [
+33,
+""
+],
+"1514": [
+33,
+""
+],
+"1515": [
+33,
+""
+],
+"1516": [
+33,
+""
+],
+"1517": [
+33,
+""
+],
+"1518": [
+33,
+""
+],
+"1519": [
+34,
+""
+],
+"1520": [
+34,
+"Table S4Match-versus-null evaluation of brain-to-text and text-to-brain generation on the PubMed test set"
+],
+"1521": [
+34,
+"(n= 2987n= 2,971). Null scores were computed from mismatched image-text pairs. Welch\u2019st-tests compare matched and"
+],
+"1522": [
+34,
+""
+],
+"1523": [
+34,
+"Direction Metric Match mean Null mean t p"
+],
+"1524": [
+34,
+"Brain-to-text Contrastive cosine 0.27 0.28 0.02 0.01 86.54 95.46 1.61\u00d710 \u221210257\u00d710 \u22121158"
+],
+"1525": [
+34,
+"Brain-to-text BERTScore F1 0.56 0.553 0.52 0.548 68.03 8.88 8.44\u00d710 \u22127379\u00d710 \u221219"
+],
+"1526": [
+34,
+"Brain-to-text Semantic cosine 0.47 0.46 0.40 22.94 22.73 1.51\u00d710 \u22121111\u00d710 \u2212109"
+],
+"1527": [
+34,
+""
+],
+"1528": [
+34,
+"Text-to-brain Contrastive cosine 0.28 0.34 0.11 0.00 52.00 95.41 3.22\u00d710 \u22124824\u00d710 \u22121116"
+],
+"1529": [
+34,
+"Text-to-brain Dice 0.47 0.53 0.40 0.41 24.07 35.18 3.25\u00d710 \u22121222\u00d710 \u2212246"
+],
+"1530": [
+34,
+"Text-to-brain Pearson 0.29 0.32 0.17 0.12 26.66 38.61 7.46\u00d710 \u22121486\u00d710 \u2212290"
+],
+"1531": [
+34,
+""
+],
+"1532": [
+34,
+""
+],
+"1533": [
+34,
+"S7 Model Comparison"
+],
+"1534": [
+34,
+""
+],
+"1535": [
+34,
+""
+],
+"1536": [
+34,
+""
+],
+"1537": [
+34,
+""
+],
+"1538": [
+34,
+""
+],
+"1539": [
+34,
+""
+],
+"1540": [
+34,
+""
+],
+"1541": [
+34,
+""
+],
+"1542": [
+34,
+""
+],
+"1543": [
+34,
+""
+],
+"1544": [
+34,
+""
+],
+"1545": [
+34,
+"Fig. S3 Contrastive model comparison.Recall@k test setcurves for NeuroVLM (blue), NiCLIP"
+],
+"1546": [
+34,
+"(orange), and NeuroConText (green) .Models performed similarly across onthe methods366 PubMed"
+],
+"1547": [
+34,
+"imageand abstracts onlydashed lines image to text. NeuroVLM uses a language encoder that is 63"
+],
+"1548": [
+34,
+"times smaller than NiCLIP and NeuroConText, 110 million versus 7 billion parameters."
+],
+"1549": [
+34,
+""
+],
+"1550": [
+34,
+""
+],
+"1551": [
+34,
+"S8 Independent Component Labeling"
+],
+"1552": [
+34,
+""
+],
+"1553": [
+34,
+""
+],
+"1554": [
+34,
+""
+],
+"1555": [
+34,
+""
+],
+"1556": [
+34,
+""
+],
+"1557": [
+34,
+""
+],
+"1558": [
+34,
+""
+],
+"1559": [
+34,
+""
+],
+"1560": [
+34,
+""
+],
+"1561": [
+34,
+""
+],
+"1562": [
+34,
+""
+],
+"1563": [
+34,
+""
+],
+"1564": [
+34,
+""
+],
+"1565": [
+35,
+""
+],
+"1566": [
+35,
+""
+],
+"1567": [
+35,
+""
+],
+"1568": [
+35,
+""
+],
+"1569": [
+35,
+""
+],
+"1570": [
+35,
+""
+],
+"1571": [
+35,
+""
+],
+"1572": [
+35,
+""
+],
+"1573": [
+35,
+""
+],
+"1574": [
+35,
+""
+],
+"1575": [
+35,
+""
+],
+"1576": [
+35,
+""
+],
+"1577": [
+35,
+""
+],
+"1578": [
+35,
+""
+],
+"1579": [
+35,
+""
+],
+"1580": [
+35,
+""
+],
+"1581": [
+35,
+""
+],
+"1582": [
+35,
+""
+],
+"1583": [
+35,
+""
+],
+"1584": [
+35,
+""
+],
+"1585": [
+35,
+""
+],
+"1586": [
+35,
+""
+],
+"1587": [
+35,
+""
+],
+"1588": [
+35,
+""
+],
+"1589": [
+35,
+""
+],
+"1590": [
+35,
+""
+],
+"1591": [
+35,
+""
+],
+"1592": [
+35,
+""
+],
+"1593": [
+35,
+""
+],
+"1594": [
+35,
+""
+],
+"1595": [
+35,
+""
+],
+"1596": [
+35,
+""
+],
+"1597": [
+35,
+""
+],
+"1598": [
+35,
+""
+],
+"1599": [
+35,
+""
+],
+"1600": [
+35,
+""
+],
+"1601": [
+35,
+""
+],
+"1602": [
+35,
+""
+],
+"1603": [
+35,
+""
+],
+"1604": [
+35,
+""
+],
+"1605": [
+35,
+"Fig. S4 Independent Component Labeling.Automated labeling of resting-state components"
+],
+"1606": [
+35,
+"fromUK Biobank (top) andthe Human Connectome Project and UK Biobank(bottom). Each row"
+],
+"1607": [
+35,
+"corresponds to one network. The contrastive columns are Bars givethe top-5 fivemost similar pairs"
+],
+"1608": [
+35,
+"labelsfrom the contrastive models,andtakingargmaxgives the predicted label for that image. The"
+],
+"1609": [
+35,
+"generated column is brain-to-text generation using the Qformer model[NETWORK]caption of the stage"
+],
+"1610": [
+35,
+"2 MLP projector, its title in bold.Components lie at the 6th to 99th percentile of all 40 components"
+],
+"1611": [
+36,
+"S9Network Examples"
+],
+"1612": [
+36,
+"Fig.2shortens the generated texts so that its maps stay legible. A generated text is"
+],
+"1613": [
+36,
+"best judged in full, so Supplementary TableS5gives the complete input description and"
+],
+"1614": [
+36,
+"the complete generated texts of every network in Fig.2. The texts describe networks,"
+],
+"1615": [
+36,
+"regions, and functions in general terms, as the stage 2 projector was trained to do."
+],
+"1616": [
+36,
+""
+],
+"1617": [
+36,
+"Table S5:Complete texts of Fig.2. The input description is the text"
+],
+"1618": [
+36,
+"the text-to-brain head turns into a map. The stage 2 projector writes"
+],
+"1619": [
+36,
+"the generated titles and texts for the atlas map."
+],
+"1620": [
+36,
+""
+],
+"1621": [
+36,
+"Text (generated Complete text"
+],
+"1622": [
+36,
+"title)"
+],
+"1623": [
+36,
+"Visual(YeoLab VisualA)"
+],
+"1624": [
+36,
+"Input descriptionThe visual network supports perception and interpretation of visual"
+],
+"1625": [
+36,
+"information. It is centered on primary visual cortex, extrastriate"
+],
+"1626": [
+36,
+"occipital cortex, and lateral occipital cortex. It supports visual feature"
+],
+"1627": [
+36,
+"processing, object perception, motion perception, spatial layout, and"
+],
+"1628": [
+36,
+"visual attention."
+],
+"1629": [
+36,
+"Network The object perception network includes extrastriate cortex,"
+],
+"1630": [
+36,
+"Object particularly the right inferior temporal cortex, and includes lateral"
+],
+"1631": [
+36,
+"Perception occipital regions. It is commonly associated with the perception of"
+],
+"1632": [
+36,
+"Network object form, location, motion, and depth. The network is often"
+],
+"1633": [
+36,
+"described as supporting the coordinated analysis of visual input."
+],
+"1634": [
+36,
+"Anatomy The lateral occipital cortex is a ventral occipital region. It is commonly"
+],
+"1635": [
+36,
+"Lateral associated with object form and visual identity. This region is often"
+],
+"1636": [
+36,
+"Occipital described as supporting perception of complex visual structures."
+],
+"1637": [
+36,
+"Cortex"
+],
+"1638": [
+36,
+"Cognition Visual analysis is the processing of visual form, object structure, and"
+],
+"1639": [
+36,
+"cortex, intrastriate temporoparietal cortex, lateral temporal cortex,"
+],
+"1640": [
+36,
+"and fusiform gyrus. This concept supports recognizing complex visual"
+],
+"1641": [
+36,
+"patterns, object form, spatial layout, and visual object identity."
+],
+"1642": [
+36,
+"Language(Glasser Language)"
+],
+"1643": [
+36,
+"Input descriptionThe language network supports comprehension and production of"
+],
+"1644": [
+36,
+"spoken and written language. It is mainly left-lateralized, involving"
+],
+"1645": [
+36,
+"inferior frontal cortex, posterior superior temporal cortex, middle"
+],
+"1646": [
+36,
+"temporal cortex, and angular gyrus. It supports semantic access, syntax,"
+],
+"1647": [
+36,
+"phonology, speech comprehension, reading, and verbal expression."
+],
+"1648": [
+36,
+"Network The language network commonly includes inferior frontal gyrus, middle"
+],
+"1649": [
+36,
+"Language temporal pole, superior temporal gyrus, and lateral temporal cortex. It"
+],
+"1650": [
+36,
+"Network is associated with phonological processing, syntactic analysis, and"
+],
+"1651": [
+36,
+"meaning construction. The network is often described as supporting"
+],
+"1652": [
+36,
+"the comprehension and production of spoken or written language."
+],
+"1653": [
+36,
+"Anatomy The middle temporal gyrus lies along the lateral surface of the superior"
+],
+"1654": [
+36,
+"Temporal Gyrus language comprehension, and semantic content. This region is often"
+],
+"1655": [
+36,
+"described as supporting the analysis of spoken words."
+],
+"1656": [
+36,
+""
+],
+"1657": [
+37,
+"TableS5(continued)"
+],
+"1658": [
+37,
+"Text (generated Complete text"
+],
+"1659": [
+37,
+"title)"
+],
+"1660": [
+37,
+"Cognition Language comprehension commonly involves inferior frontal gyrus,"
+],
+"1661": [
+37,
+"Language middle temporal gyrus, and superior temporal gyrus. These regions"
+],
+"1662": [
+37,
+"Comprehension support processing of spoken and written language, including"
+],
+"1663": [
+37,
+"phonology, syntax, semantics, and meaning retrieval."
+],
+"1664": [
+37,
+"Auditory(Shirer Auditory)"
+],
+"1665": [
+37,
+"Input descriptionThe auditory network supports perception and interpretation of sound."
+],
+"1666": [
+37,
+"It is centered on Heschl\u2019s gyrus, primary auditory cortex, planum"
+],
+"1667": [
+37,
+"temporale, and superior temporal gyrus. It supports pitch, loudness,"
+],
+"1668": [
+37,
+"rhythm, timbre, speech-sound processing, and auditory scene analysis."
+],
+"1669": [
+37,
+"Network The auditory network includes Heschl\u2019s gyrus, superior temporal"
+],
+"1670": [
+37,
+"Auditory gyrus, planum temporale, and inferior frontal cortex. It is commonly"
+],
+"1671": [
+37,
+"Network associated with the processing of sound, speech, and environmental"
+],
+"1672": [
+37,
+"auditory perception. Its coordinated activity is thought to support the"
+],
+"1673": [
+37,
+"integration of auditory information across the brain."
+],
+"1674": [
+37,
+"Anatomy The superior temporal gyrus is centered on the superior temporal"
+],
+"1675": [
+37,
+"Superior sulcus. It is commonly associated with auditory processing, speech"
+],
+"1676": [
+37,
+"Temporal Gyrus perception, and sound-related associations. Its anatomy supports"
+],
+"1677": [
+37,
+"representation of acoustic features such as frequency, timbre, and pitch."
+],
+"1678": [
+37,
+"Cognition Early auditory processing is the analysis of sound input at high"
+],
+"1679": [
+37,
+"Early Auditory frequencies. It involves primary auditory cortex in Heschl\u2019s gyrus,"
+],
+"1680": [
+37,
+"Processing superior temporal gyrus, and planum temporale. This concept"
+],
+"1681": [
+37,
+"supports speech recognition, pitch detection, and low-frequency sound"
+],
+"1682": [
+37,
+"processing."
+],
+"1683": [
+37,
+"Somatomotor(WashU LateralSM)"
+],
+"1684": [
+37,
+"Input descriptionThe somatomotor network supports movement and body sensation. It"
+],
+"1685": [
+37,
+"spans precentral gyrus, postcentral gyrus, supplementary motor area,"
+],
+"1686": [
+37,
+"and paracentral lobule. It supports voluntary movement, touch,"
+],
+"1687": [
+37,
+"Network The somatomotor network is commonly associated with somatomotor"
+],
+"1688": [
+37,
+"Somatomotor representation in the primary motor cortex. It is broadly tied to bodily"
+],
+"1689": [
+37,
+"Network motion, tactile sensation, and motor control. The network is often"
+],
+"1690": [
+37,
+"described as a central hub for somatosensory-to-motor integration."
+],
+"1691": [
+37,
+"Anatomy Primary somatosensory cortex lies in the posterior parietal lobe. It is"
+],
+"1692": [
+37,
+"Primary commonly associated with tactile, proprioceptive, and body-related"
+],
+"1693": [
+37,
+"Somatosensory sensory representations. It supports the integration of sensory"
+],
+"1694": [
+37,
+"Cortex information across the body."
+],
+"1695": [
+37,
+"Cognition Tactile encoding is the representation of touch in the body. It involves"
+],
+"1696": [
+37,
+"Tactile primary somatosensory cortex in the parietal operculum, secondary"
+],
+"1697": [
+37,
+"Encoding somatosensorium in the insular cortex, and posterior insula. This"
+],
+"1698": [
+37,
+"integration of sensory feedback with cognitive processing."
+],
+"1699": [
+37,
+""
+],
+"1700": [
+37,
+""
+],
+"1701": [
+37,
+""
+],
+"1702": [
+37,
+""
+],
+"1703": [
+38,
+"TableS5(continued)"
+],
+"1704": [
+38,
+"Text (generated Complete text"
+],
+"1705": [
+38,
+"title)"
+],
+"1706": [
+38,
+"Interoception(Laird Interoception)"
+],
+"1707": [
+38,
+"Input descriptionThe interoception network supports awareness of internal bodily state."
+],
+"1708": [
+38,
+"It is centered on the insula and anterior cingulate cortex, with"
+],
+"1709": [
+38,
+"contributions from midcingulate cortex. It supports visceral sensation,"
+],
+"1710": [
+38,
+"autonomic monitoring, bodily awareness, pain appraisal, and affective"
+],
+"1711": [
+38,
+"feeling states."
+],
+"1712": [
+38,
+"Network The interoceptive network includes anterior insula, posterior insula,"
+],
+"1713": [
+38,
+"Interoceptive anterior cingulate cortex, thalamus, and somatosensory cortex. It is"
+],
+"1714": [
+38,
+"Network commonly associated with salience of internal states, bodily awareness,"
+],
+"1715": [
+38,
+"and integration of bodily and emotional information."
+],
+"1716": [
+38,
+"Anterior Insula salience, emotion, and bodily awareness. It is often linked with"
+],
+"1717": [
+38,
+"interoception, affective salience, and the integration of internal and"
+],
+"1718": [
+38,
+"external states. Its anatomy supports the interplay between subjective"
+],
+"1719": [
+38,
+"experience and cortical processing."
+],
+"1720": [
+38,
+"Cognition Interoceptive processing is the evaluation of internal bodily signals. It"
+],
+"1721": [
+38,
+"Interoceptive is commonly associated with anterior insula, posterior insula, anterior"
+],
+"1722": [
+38,
+"Processing cingulate cortex, and corticospinal tracts. This function supports"
+],
+"1723": [
+38,
+"awareness of bodily state, salience of internal concerns, and integration"
+],
+"1724": [
+38,
+"of interoceptive and affective information."
+],
+"1725": [
+38,
+"Default Mode Network(Shen Default mode)"
+],
+"1726": [
+38,
+"Input descriptionThe default mode network supports internally oriented cognition. It"
+],
+"1727": [
+38,
+"includes medial prefrontal cortex, posterior cingulate cortex,"
+],
+"1728": [
+38,
+"precuneus, angular gyrus, and medial temporal lobe. It supports"
+],
+"1729": [
+38,
+"autobiographical memory, self-referential thought, future simulation,"
+],
+"1730": [
+38,
+"social inference, and narrative reasoning."
+],
+"1731": [
+38,
+"Default Mode cingulate cortex, precuneus, angular gyrus, lateral parietal cortex, and"
+],
+"1732": [
+38,
+"Network medial temporal regions. It is commonly associated with internally"
+],
+"1733": [
+38,
+"oriented cognition, autobiographical memory, self-referential thought,"
+],
+"1734": [
+38,
+"and the integration of personal and social context."
+],
+"1735": [
+38,
+"Anatomy The precuneus lies on the medial parietal cortex. It is commonly"
+],
+"1736": [
+38,
+"Precuneus associated with autobiographical memory, self-related imagery, and"
+],
+"1737": [
+38,
+"mental context. This region is often described as supporting"
+],
+"1738": [
+38,
+"integration of personal and external information."
+],
+"1739": [
+38,
+"Cognition Autobiographical memory is commonly associated with the medial"
+],
+"1740": [
+38,
+"Autobiographi- prefrontal cortex, posterior cingulate cortex, precuneus, angular gyrus,"
+],
+"1741": [
+38,
+"cal parahippocampal cortex, retrosplenial cortex, and lateral parietal"
+],
+"1742": [
+38,
+"spatial context, and internally constructed events."
+],
+"1743": [
+38,
+""
+],
+"1744": [
+38,
+""
+],
+"1745": [
+38,
+""
+],
+"1746": [
+38,
+""
+],
+"1747": [
+38,
+""
+],
+"1748": [
+38,
+""
+],
+"1749": [
+39,
+"TableS5(continued)"
+],
+"1750": [
+39,
+"Text (generated Complete text"
+],
+"1751": [
+39,
+"title)"
+],
+"1752": [
+39,
+"Frontoparietal Control Network(Du FPN-A)"
+],
+"1753": [
+39,
+"Input descriptionThe frontoparietal control network supports flexible cognitive control."
+],
+"1754": [
+39,
+"It links lateral prefrontal cortex, inferior frontal junction, intraparietal"
+],
+"1755": [
+39,
+"sulcus, and inferior parietal lobule. It supports task goals, working"
+],
+"1756": [
+39,
+"memory, planning, rule use, attentional control, and adaptive"
+],
+"1757": [
+39,
+"decision-making."
+],
+"1758": [
+39,
+"Network The frontoparietal control network includes dorsolateral prefrontal"
+],
+"1759": [
+39,
+"Frontoparietal cortex, angular gyrus, intraparietal cortex, inferior parietal lobule, and"
+],
+"1760": [
+39,
+"Control posterior parietal cortex. It is commonly associated with executive"
+],
+"1761": [
+39,
+"Network control, working memory, and goal-directed behavior."
+],
+"1762": [
+39,
+"Inferior Frontal associated with the handling of language and the manipulation of"
+],
+"1763": [
+39,
+"Gyrus conceptual knowledge. Its function is generally described as supporting"
+],
+"1764": [
+39,
+"high-level cognition. It is thought to play a central role in executive"
+],
+"1765": [
+39,
+"control."
+],
+"1766": [
+39,
+"Cognition Working memory commonly involves dorsolateral prefrontal cortex,"
+],
+"1767": [
+39,
+"Working inferior parietal lobule, intraparietal sulcus, and lateral frontal cortex."
+],
+"1768": [
+39,
+"Memory These regions support the maintenance and manipulation of"
+],
+"1769": [
+39,
+"information in working memory. Their anatomy aligns with the"
+],
+"1770": [
+39,
+"frontoparietal network."
+],
+"1771": [
+39,
+"Salience Network(Du SAL/PMN)"
+],
+"1772": [
+39,
+"Input descriptionThe salience network supports detection of behaviorally relevant"
+],
+"1773": [
+39,
+"events. It is centered on anterior insula, frontal operculum, dorsal"
+],
+"1774": [
+39,
+"anterior cingulate cortex, and midcingulate cortex. It supports salience"
+],
+"1775": [
+39,
+"detection, interoceptive appraisal, attentional orienting, conflict"
+],
+"1776": [
+39,
+"monitoring, and response selection."
+],
+"1777": [
+39,
+"Salience cortex, and posterior cingulate gyrus. It is commonly associated with"
+],
+"1778": [
+39,
+"Network monitoring internal and external events, detecting relevant"
+],
+"1779": [
+39,
+"information, and shifting foci of inquiry."
+],
+"1780": [
+39,
+"Anatomy The anterior cingulate cortex is a medial region of the frontal lobe. It"
+],
+"1781": [
+39,
+"Anterior is commonly linked with control, monitoring, and self-regulation. This"
+],
+"1782": [
+39,
+"Cingulate region is often described as supporting the evaluation of salient"
+],
+"1783": [
+39,
+"Cortex information."
+],
+"1784": [
+39,
+"Cognition Executive control is the regulation of thought, behavior, and"
+],
+"1785": [
+39,
+"Executive performance. It involves dorsolateral prefrontal cortex, anterior"
+],
+"1786": [
+39,
+"Control cingulate cortex, frontoparietal regions, basal ganglia, and dorsal"
+],
+"1787": [
+39,
+"anterior insula. This concept supports adaptation, flexibility,"
+],
+"1788": [
+39,
+""
+],
+"1789": [
+39,
+"S10Data Flow and Training Details"
+],
+"1790": [
+39,
+""
+],
+"1791": [
+39,
+"Several components learn from the same training papers, and a held-out paper could"
+],
+"1792": [
+39,
+"reach a later stage through the synthetic or language-model data. Supplementary"
+],
+"1793": [
+39,
+"Fig.S5therefore shows which data train each component and which sets are used"
+],
+"1794": [
+39,
+""
+],
+"1795": [
+40,
+"only for evaluation. Supplementary TableS6gives the training and validation sizes"
+],
+"1796": [
+40,
+"of each component, and Supplementary TableS7gives the settings needed to retrain"
+],
+"1797": [
+40,
+"it. The training papers are reused across stages, and the stage 1 projector uses the"
+],
+"1798": [
+40,
+"22,547 training papers that have a summary. No validation or test paper trains any"
+],
+"1799": [
+40,
+"component."
+],
+"1800": [
+40,
+""
+],
+"1801": [
+40,
+""
+],
+"1802": [
+40,
+""
+],
+"1803": [
+40,
+""
+],
+"1804": [
+40,
+""
+],
+"1805": [
+40,
+""
+],
+"1806": [
+40,
+""
+],
+"1807": [
+40,
+""
+],
+"1808": [
+40,
+""
+],
+"1809": [
+40,
+""
+],
+"1810": [
+40,
+""
+],
+"1811": [
+40,
+""
+],
+"1812": [
+40,
+""
+],
+"1813": [
+40,
+""
+],
+"1814": [
+40,
+""
+],
+"1815": [
+40,
+""
+],
+"1816": [
+40,
+""
+],
+"1817": [
+40,
+""
+],
+"1818": [
+40,
+""
+],
+"1819": [
+40,
+""
+],
+"1820": [
+40,
+""
+],
+"1821": [
+40,
+""
+],
+"1822": [
+40,
+""
+],
+"1823": [
+40,
+""
+],
+"1824": [
+40,
+""
+],
+"1825": [
+40,
+""
+],
+"1826": [
+40,
+""
+],
+"1827": [
+40,
+""
+],
+"1828": [
+40,
+""
+],
+"1829": [
+40,
+""
+],
+"1830": [
+40,
+""
+],
+"1831": [
+40,
+"Fig. S5Data flow of the final model.Numbered boxes are the trained components in training"
+],
+"1832": [
+40,
+"order. Gray arrows carry training data or weights, and orange dashed arrows evaluation-only sets."
+],
+"1833": [
+40,
+"The splits sum to 29,868, because 958 papers with more than 100 peaks or an empty map are in"
+],
+"1834": [
+40,
+"no split. The stage 1 projector uses only split papers with an LLM summary. The stage 2 projector"
+],
+"1835": [
+40,
+"trains on 1,106 synthetic concept texts, split 972/134 by title, and is tested on held-out real maps."
+],
+"1836": [
+40,
+"set its learning rate. PubMed validation recall selects its checkpoint."
+],
+"1837": [
+40,
+""
+],
+"1838": [
+40,
+""
+],
+"1839": [
+40,
+""
+],
+"1840": [
+40,
+""
+],
+"1841": [
+41,
+""
+],
+"1842": [
+41,
+""
+],
+"1843": [
+41,
+""
+],
+"1844": [
+41,
+""
+],
+"1845": [
+41,
+""
+],
+"1846": [
+41,
+""
+],
+"1847": [
+41,
+""
+],
+"1848": [
+41,
+""
+],
+"1849": [
+41,
+""
+],
+"1850": [
+41,
+""
+],
+"1851": [
+41,
+""
+],
+"1852": [
+41,
+"Table S6Training data per component.Training and validation sizes of each trained"
+],
+"1853": [
+41,
+"component of the final model. The text-to-brain head is selected on 2,961 validation papers, the"
+],
+"1854": [
+41,
+"2,987 minus the 26 removed by the leakage audit."
+],
+"1855": [
+41,
+""
+],
+"1856": [
+41,
+"Component Data TrainValidationUnit"
+],
+"1857": [
+41,
+""
+],
+"1858": [
+41,
+"Autoencoder PubMed coordinate maps 23,894 2,987papers"
+],
+"1859": [
+41,
+"Contrastive heads SPECTER2 text and map 23,894 2,987papers"
+],
+"1860": [
+41,
+"latents"
+],
+"1861": [
+41,
+"23,894 2,961papers"
+],
+"1862": [
+41,
+"Text-to-brain head SPECTER2 text and map"
+],
+"1863": [
+41,
+"latents"
+],
+"1864": [
+41,
+"Anatomically centered synthetic concept 6,309 64 pairs"
+],
+"1865": [
+41,
+"projection head text-map pairs from"
+],
+"1866": [
+41,
+"training papers"
+],
+"1867": [
+41,
+"22,547 2,837papers"
+],
+"1868": [
+41,
+"Stage 1 projector map latents and LLM"
+],
+"1869": [
+41,
+"(MLP) summaries"
+],
+"1870": [
+41,
+"Stage 2 projector [NETWORK],[REGION], 972 134texts"
+],
+"1871": [
+41,
+"(MLP) [FUNCTION]texts"
+],
+"1872": [
+41,
+"1.22 M 12,317articles"
+],
+"1873": [
+41,
+"NeuroQwen3-0.6BPubMed titles and"
+],
+"1874": [
+41,
+"abstracts"
+],
+"1875": [
+41,
+""
+],
+"1876": [
+41,
+""
+],
+"1877": [
+41,
+""
+],
+"1878": [
+41,
+""
+],
+"1879": [
+41,
+""
+],
+"1880": [
+41,
+""
+],
+"1881": [
+41,
+""
+],
+"1882": [
+41,
+""
+],
+"1883": [
+41,
+""
+],
+"1884": [
+41,
+""
+],
+"1885": [
+41,
+""
+],
+"1886": [
+41,
+""
+],
+"1887": [
+42,
+""
+],
+"1888": [
+42,
+""
+],
+"1889": [
+42,
+""
+],
+"1890": [
+42,
+""
+],
+"1891": [
+42,
+""
+],
+"1892": [
+42,
+""
+],
+"1893": [
+42,
+""
+],
+"1894": [
+42,
+""
+],
+"1895": [
+42,
+""
+],
+"1896": [
+42,
+""
+],
+"1897": [
+42,
+""
+],
+"1898": [
+42,
+""
+],
+"1899": [
+42,
+"Table S7Training details.Trainable parameters, training data, epochs, learning rate, batch size,"
+],
+"1900": [
+42,
+"seed, and training time of each component of the final model. All use AdamW, with epochs selected"
+],
+"1901": [
+42,
+"on the validation set. Times are for one RTX 5090 GPU, except for NeuroQwen3-0.6B (one H100)."
+],
+"1902": [
+42,
+"Component ParamsData, train / Epochs Learning rate SeedTime"
+],
+"1903": [
+42,
+"validation (selection) (decay), batch"
+],
+"1904": [
+42,
+""
+],
+"1905": [
+42,
+"Autoencoder 59.9 M PubMed maps 101 (lowest 5e-5, 256 0 10 min"
+],
+"1906": [
+42,
+""
+],
+"1907": [
+42,
+"Contrastive heads 0.59 M, Text, map latents 301 (last) 1e-5, 2,048 123 6 s"
+],
+"1908": [
+42,
+"Text-to-brain 0.59 M Text, map latents 30 of at most 80 1e-3, 512 0 22 s"
+],
+"1909": [
+42,
+"head 23,894 / 2,961 (best Dice)"
+],
+"1910": [
+42,
+"Anatomically 3.8 M Synthetic pairs 200 of 2,000 2e-4, 2,048 123 103 s"
+],
+"1911": [
+42,
+"centered head 6,309 / 64, (best recall)"
+],
+"1912": [
+42,
+"and PubMed pairs"
+],
+"1913": [
+42,
+"Stage 1 projector 28.3 M Maps, summaries 4 of at most 30 3e-4 (cosine), 3217 17 min"
+],
+"1914": [
+42,
+"(MLP) 22,547 / 2,837 (lowest loss)"
+],
+"1915": [
+42,
+"Stage 2 projector 28.3 M Concept texts 30 (last) 1e-4 (cosine), 183 5 min"
+],
+"1916": [
+42,
+"(MLP) 972 / 134"
+],
+"1917": [
+42,
+"NeuroQwen3-0.6B596 M PubMed abstracts 1 5e-6 (cosine), 1234514 h"
+],
+"1918": [
+42,
+"1.22 M / 12,317 16\u00d71,024"
+],
+"1919": [
+42,
+""
+],
+"1920": [
+42,
+""
+],
+"1921": [
+42,
+""
+],
+"1922": [
+42,
+""
+],
+"1923": [
+42,
+""
+],
+"1924": [
+42,
+""
+],
+"1925": [
+42,
+""
+],
+"1926": [
+42,
+""
+],
+"1927": [
+42,
+""
+],
+"1928": [
+42,
+""
+],
+"1929": [
+42,
+""
+],
+"1930": [
+42,
+""
+],
+"1931": [
+42,
+""
+],
+"1932": [
+42,
+""
+],
+"1933": [
+43,
+"S11Text-to-Brain Baselines and Retrieval"
+],
+"1934": [
+43,
+"Scores computed in NeuroVLM\u2019s own latent space could favor NeuroVLM\u2019s own maps."
+],
+"1935": [
+43,
+"We therefore also scored text-to-brain maps in voxel space, against simple baselines"
+],
+"1936": [
+43,
+"and published models. Each method turns a test paper\u2019s title and abstract into a"
+],
+"1937": [
+43,
+"map, which is scored against that paper\u2019s map as the autoencoder reconstructs it"
+],
+"1938": [
+43,
+"(Supplementary Fig.S6). NeuroVLM (linear head) replaces the non-linear head with"
+],
+"1939": [
+43,
+"ridge regression from the SPECTER2 embedding to the autoencoder latent, with its"
+],
+"1940": [
+43,
+"penalty chosen on the validation set, and keeps the same decoder. The domain mean"
+],
+"1941": [
+43,
+"map is the mean training map of the query\u2019s nearest of ten cognitive domains, found"
+],
+"1942": [
+43,
+"by k-means on the training latents. Atlas-based labeling is the union of the Harvard-"
+],
+"1943": [
+43,
+"Oxford regions named in the text. Neurosynth, NeuroQuery, and Text2Brain were"
+],
+"1944": [
+43,
+"used as released. Their corpora include 1,386 (Neurosynth) or 1,295 (NeuroQuery and"
+],
+"1945": [
+43,
+"Text2Brain) of the 2,971 test papers. NeuroVLM (non-linear head) gives the most"
+],
+"1946": [
+43,
+"accurate maps by both Dice and correlation. It narrowly leads NeuroVLM (linear"
+],
+"1947": [
+43,
+"head), which learns the same mapping without a hidden layer, and it leads Text2Brain"
+],
+"1948": [
+43,
+"(Dice 0.53 against 0.49) and the map of the nearest training paper. The area under the"
+],
+"1949": [
+43,
+"recall curve summarizes all ranks, so Supplementary TableS8also reports conventional"
+],
+"1950": [
+43,
+"retrieval measures among all test papers and among hard negatives. Hard negatives are"
+],
+"1951": [
+43,
+"only slightly harder than random papers of the same number (recall@10 0.24 against"
+],
+"1952": [
+43,
+"0.28)."
+],
+"1953": [
+43,
+""
+],
+"1954": [
+43,
+""
+],
+"1955": [
+43,
+""
+],
+"1956": [
+43,
+""
+],
+"1957": [
+43,
+""
+],
+"1958": [
+43,
+""
+],
+"1959": [
+43,
+""
+],
+"1960": [
+43,
+""
+],
+"1961": [
+43,
+""
+],
+"1962": [
+43,
+""
+],
+"1963": [
+43,
+""
+],
+"1964": [
+43,
+""
+],
+"1965": [
+43,
+""
+],
+"1966": [
+43,
+""
+],
+"1967": [
+43,
+""
+],
+"1968": [
+43,
+""
+],
+"1969": [
+43,
+""
+],
+"1970": [
+43,
+""
+],
+"1971": [
+43,
+""
+],
+"1972": [
+43,
+""
+],
+"1973": [
+43,
+""
+],
+"1974": [
+43,
+""
+],
+"1975": [
+43,
+""
+],
+"1976": [
+43,
+""
+],
+"1977": [
+43,
+""
+],
+"1978": [
+43,
+""
+],
+"1979": [
+44,
+""
+],
+"1980": [
+44,
+""
+],
+"1981": [
+44,
+""
+],
+"1982": [
+44,
+""
+],
+"1983": [
+44,
+""
+],
+"1984": [
+44,
+""
+],
+"1985": [
+44,
+""
+],
+"1986": [
+44,
+""
+],
+"1987": [
+44,
+""
+],
+"1988": [
+44,
+""
+],
+"1989": [
+44,
+""
+],
+"1990": [
+44,
+""
+],
+"1991": [
+44,
+""
+],
+"1992": [
+44,
+""
+],
+"1993": [
+44,
+""
+],
+"1994": [
+44,
+""
+],
+"1995": [
+44,
+""
+],
+"1996": [
+44,
+""
+],
+"1997": [
+44,
+""
+],
+"1998": [
+44,
+""
+],
+"1999": [
+44,
+""
+],
+"2000": [
+44,
+""
+],
+"2001": [
+44,
+"Fig. S6Text-to-brain baselines.Text-to-brain maps from NeuroVLM and other methods, scored"
+],
+"2002": [
+44,
+"against each test paper\u2019s reconstructed map (n= 2,971). Panels show (a) Dice and (b) voxelwise Pear-"
+],
+"2003": [
+44,
+"sonr, with means and 95% bootstrap intervals. Dice uses each map\u2019s top 30% of voxels. Neurosynth,"
+],
+"2004": [
+44,
+"1,295 (NeuroQuery and Text2Brain) test papers, which can only favor them. Text2Brain\u2019s training"
+],
+"2005": [
+44,
+"split is unreleased, so instead of retraining we scored the 1,157 papers in neither corpus, and Neu-"
+],
+"2006": [
+44,
+"roVLM still beats all three."
+],
+"2007": [
+44,
+""
+],
+"2008": [
+44,
+""
+],
+"2009": [
+44,
+""
+],
+"2010": [
+44,
+""
+],
+"2011": [
+44,
+""
+],
+"2012": [
+44,
+""
+],
+"2013": [
+44,
+""
+],
+"2014": [
+44,
+""
+],
+"2015": [
+44,
+""
+],
+"2016": [
+44,
+""
+],
+"2017": [
+44,
+""
+],
+"2018": [
+44,
+""
+],
+"2019": [
+44,
+""
+],
+"2020": [
+44,
+""
+],
+"2021": [
+44,
+""
+],
+"2022": [
+44,
+""
+],
+"2023": [
+44,
+""
+],
+"2024": [
+44,
+""
+],
+"2025": [
+45,
+"Table S8Contrastive retrieval on the PubMed test set.Retrieval among all 2,971"
+],
+"2026": [
+45,
+"test papers, among hard negatives, the test papers of the query\u2019s own cognitive domain,"
+],
+"2027": [
+45,
+""
+],
+"2028": [
+45,
+"Recall@1Recall@5Recall@10MRRMedian rank"
+],
+"2029": [
+45,
+"All candidates(2,971 test papers)"
+],
+"2030": [
+45,
+"Text\u2192brain 0.018 0.053 0.088 0.045 230"
+],
+"2031": [
+45,
+"Brain\u2192text 0.013 0.052 0.088 0.041 217"
+],
+"2032": [
+45,
+"Chance <0.001 0.002 0.003 0.003 1,486"
+],
+"2033": [
+45,
+"Hard negatives(papers of the query\u2019s own domain, mean 585)"
+],
+"2034": [
+45,
+"Text\u2192brain 0.054 0.160 0.242 0.118 44"
+],
+"2035": [
+45,
+"Brain\u2192text 0.059 0.176 0.263 0.126 40"
+],
+"2036": [
+45,
+"Chance 0.003 0.017 0.034 0.019 250"
+],
+"2037": [
+45,
+""
+],
+"2038": [
+45,
+"Random negatives(random papers, as many as the hard negatives)"
+],
+"2039": [
+45,
+"Text\u2192brain 0.069 0.196 0.283 0.142 35"
+],
+"2040": [
+45,
+"Brain\u2192text 0.071 0.201 0.289 0.144 35"
+],
+"2041": [
+45,
+"Chance 0.003 0.017 0.034 0.019 250"
+],
+"2042": [
+45,
+""
+],
+"2043": [
+45,
+""
+],
+"2044": [
+45,
+"S12NeuroVault Bounds and Map Types"
+],
+"2045": [
+45,
+"Each NeuroVault paper has several maps, and choosing the map most similar to the"
+],
+"2046": [
+45,
+"text inflates the score.Fig. 5btherefore compares rules that choose the target in other"
+],
+"2047": [
+45,
+"ways. The best map gives an upper bound, the worst map a lower bound, and the"
+],
+"2048": [
+45,
+"multi-target rule counts any of a paper\u2019s maps as a hit. Under every rule, retrieval"
+],
+"2049": [
+45,
+"AUC stays about 0.1 above its own chance level. NeuroVault also mixes map types"
+],
+"2050": [
+45,
+"whose values mean different things. P-maps were inverted and signed maps keep their"
+],
+"2051": [
+45,
+"positive tail (Supplementary SectionS2.3). Supplementary TableS9reports each map"
+],
+"2052": [
+45,
+"type separately. Every declared map type with more than ten maps scores above chance"
+],
+"2053": [
+45,
+"in both directions. Components and gradients labeled Other, whose sign is arbitrary,"
+],
+"2054": [
+45,
+"score at chance."
+],
+"2055": [
+45,
+""
+],
+"2056": [
+45,
+""
+],
+"2057": [
+45,
+""
+],
+"2058": [
+45,
+""
+],
+"2059": [
+45,
+""
+],
+"2060": [
+45,
+""
+],
+"2061": [
+45,
+""
+],
+"2062": [
+45,
+""
+],
+"2063": [
+45,
+""
+],
+"2064": [
+45,
+""
+],
+"2065": [
+45,
+""
+],
+"2066": [
+45,
+""
+],
+"2067": [
+45,
+""
+],
+"2068": [
+45,
+""
+],
+"2069": [
+45,
+""
+],
+"2070": [
+45,
+""
+],
+"2071": [
+46,
+"Table S9NeuroVault results by map type.AUC with every map as its own target (chance"
+],
+"2072": [
+46,
+"0.50). Other marks maps their uploaders labeled Other, typed from file names, descriptions, and"
+],
+"2073": [
+46,
+"excluded."
+],
+"2074": [
+46,
+""
+],
+"2075": [
+46,
+"AUC"
+],
+"2076": [
+46,
+"Text\u2192 \u2192text"
+],
+"2077": [
+46,
+"Map type MapsPapersHandling brain Brain"
+],
+"2078": [
+46,
+"T 1,761 189positive tail 0.64 0.64"
+],
+"2079": [
+46,
+"Z 811 75 positive tail 0.57 0.58"
+],
+"2080": [
+46,
+"beta, univariate 43 5 positive tail 0.61 0.77"
+],
+"2081": [
+46,
+"F 40 17 positive tail 0.64 0.55"
+],
+"2082": [
+46,
+"beta, multivariate 14 5 positive tail 0.84 0.83"
+],
+"2083": [
+46,
+"p 3 2 inverted (1\u2212p) 0.64 0.60"
+],
+"2084": [
+46,
+"1\u2212p 2 1 used as is 0.54 0.44"
+],
+"2085": [
+46,
+"Other, t, z, or F 204 23 positive tail 0.63 0.70"
+],
+"2086": [
+46,
+"Other, component or gradient 93 8 positive tail 0.49 0.51"
+],
+"2087": [
+46,
+""
+],
+"2088": [
+46,
+""
+],
+"2089": [
+46,
+"S13Out-of-Distribution Inputs"
+],
+"2090": [
+46,
+""
+],
+"2091": [
+46,
+"NeuroVLM returns a caption for any map and a map for any text, even when the"
+],
+"2092": [
+46,
+"input is unlike its training data. We therefore tested warning scores on inputs built to"
+],
+"2093": [
+46,
+"lie outside the training distribution. Maps were rotated by 90 degrees or at random,"
+],
+"2094": [
+46,
+"spun on the cortical surface, shuffled across voxels, replaced by white noise, or scaled"
+],
+"2095": [
+46,
+"by 100 or 0.01. Off-topic texts came from Wikipedia (WikiText) and cooking recipes."
+],
+"2096": [
+46,
+"Supplementary Fig.S7shows the warning scores of each input. A map is flagged when"
+],
+"2097": [
+46,
+"its Pearson correlation with its autoencoder reconstruction is lower than in 97.5% of"
+],
+"2098": [
+46,
+"validation maps, or when the Mahalanobis distance of its latent from the training"
+],
+"2099": [
+46,
+"latents is larger than in 97.5% of them. Correlation, unlike the plain cosine, ignores"
+],
+"2100": [
+46,
+"the constant offset that a dense map shares with its smooth reconstruction, which hid"
+],
+"2101": [
+46,
+"white noise. A text is flagged when its cosine similarity to the nearest training abstract"
+],
+"2102": [
+46,
+"is lower than in 95% of validation abstracts. The scores flag 4% of test maps, 5% of test"
+],
+"2103": [
+46,
+"abstracts, every shuffled, white-noise, and rescaled map, every off-topic text, and 61 to"
+],
+"2104": [
+46,
+"80% of rotated or spun maps. The scores are warnings, not calibrated probabilities."
+],
+"2105": [
+46,
+""
+],
+"2106": [
+46,
+""
+],
+"2107": [
+46,
+""
+],
+"2108": [
+46,
+""
+],
+"2109": [
+46,
+""
+],
+"2110": [
+46,
+""
+],
+"2111": [
+46,
+""
+],
+"2112": [
+46,
+""
+],
+"2113": [
+46,
+""
+],
+"2114": [
+46,
+""
+],
+"2115": [
+46,
+""
+],
+"2116": [
+46,
+""
+],
+"2117": [
+47,
+""
+],
+"2118": [
+47,
+""
+],
+"2119": [
+47,
+""
+],
+"2120": [
+47,
+""
+],
+"2121": [
+47,
+""
+],
+"2122": [
+47,
+""
+],
+"2123": [
+47,
+""
+],
+"2124": [
+47,
+""
+],
+"2125": [
+47,
+""
+],
+"2126": [
+47,
+""
+],
+"2127": [
+47,
+""
+],
+"2128": [
+47,
+""
+],
+"2129": [
+47,
+""
+],
+"2130": [
+47,
+""
+],
+"2131": [
+47,
+""
+],
+"2132": [
+47,
+""
+],
+"2133": [
+47,
+""
+],
+"2134": [
+47,
+""
+],
+"2135": [
+47,
+""
+],
+"2136": [
+47,
+""
+],
+"2137": [
+47,
+""
+],
+"2138": [
+47,
+""
+],
+"2139": [
+47,
+""
+],
+"2140": [
+47,
+""
+],
+"2141": [
+47,
+""
+],
+"2142": [
+47,
+""
+],
+"2143": [
+47,
+""
+],
+"2144": [
+47,
+""
+],
+"2145": [
+47,
+""
+],
+"2146": [
+47,
+""
+],
+"2147": [
+47,
+""
+],
+"2148": [
+47,
+""
+],
+"2149": [
+47,
+""
+],
+"2150": [
+47,
+""
+],
+"2151": [
+47,
+"Fig. S7Out-of-distribution warnings.Panels show (a) each input\u2019s similarity to the training"
+],
+"2152": [
+47,
+"data, (b) the distance of a map\u2019s latent from the training latents, and (c) the share of inputs flagged."
+],
+"2153": [
+47,
+"Dashed lines mark thresholds set on the validation split. Blue marks held-out test inputs."
+],
+"2154": [
+47,
+""
+],
+"2155": [
+47,
+""
+],
+"2156": [
+47,
+""
+],
+"2157": [
+47,
+""
+],
+"2158": [
+47,
+""
+],
+"2159": [
+47,
+""
+],
+"2160": [
+47,
+""
+],
+"2161": [
+47,
+""
+],
+"2162": [
+47,
+""
+],
+"2163": [
+48,
+"S14Caption Granularity"
+],
+"2164": [
+48,
+"A decoder that collapses to a fixed set of captions would be no better than retrieving"
+],
+"2165": [
+48,
+"the caption of the nearest training paper. The canonical projection could also push"
+],
+"2166": [
+48,
+"captions toward its prototypes. We therefore measured how specific the captions are."
+],
+"2167": [
+48,
+"A caption names a study detail if it names a sample size, patient group, or task."
+],
+"2168": [
+48,
+"Supplementary Fig.S8compares retrieved captions with captions generated at each"
+],
+"2169": [
+48,
+"stage. Over 99% of stage 2 test captions are unique, so the decoder does not collapse."
+],
+"2170": [
+48,
+"The share that names a study detail falls from 36% at stage 1 to 2% at stage 2, against"
+],
+"2171": [
+48,
+"57% of retrieved captions. Generated captions are as close to the paper\u2019s text as"
+],
+"2172": [
+48,
+"retrieved captions. The canonical projection does pull captions toward its prototypes,"
+],
+"2173": [
+48,
+"and about one stage 2 caption in ten nearly copies a curated training text."
+],
+"2174": [
+48,
+""
+],
+"2175": [
+48,
+""
+],
+"2176": [
+48,
+""
+],
+"2177": [
+48,
+""
+],
+"2178": [
+48,
+""
+],
+"2179": [
+48,
+""
+],
+"2180": [
+48,
+""
+],
+"2181": [
+48,
+""
+],
+"2182": [
+48,
+""
+],
+"2183": [
+48,
+""
+],
+"2184": [
+48,
+""
+],
+"2185": [
+48,
+""
+],
+"2186": [
+48,
+""
+],
+"2187": [
+48,
+""
+],
+"2188": [
+48,
+""
+],
+"2189": [
+48,
+""
+],
+"2190": [
+48,
+""
+],
+"2191": [
+48,
+""
+],
+"2192": [
+48,
+"Fig. S8Granularity of generated captions.Captions of PubMed test maps and NeuroVault"
+],
+"2193": [
+48,
+"papers, retrieved or generated at each stage. Panels show (a) the share naming a study detail and"
+],
+"2194": [
+48,
+"the MiniLM cosine (b) with the paper\u2019s own text and (c) with the nearest training text."
+],
+"2195": [
+48,
+""
+],
+"2196": [
+48,
+"S15Context-Free Encoder"
+],
+"2197": [
+48,
+""
+],
+"2198": [
+48,
+"SPECTER2 reads each word in the context of the whole title and abstract. To mea-"
+],
+"2199": [
+48,
+"sure what this context adds, we compared it with a context-free baseline. We replaced"
+],
+"2200": [
+48,
+"SPECTER2 with the mean word2vec embedding [18] of each title and abstract and"
+],
+"2201": [
+48,
+"retrained only the projection heads (Supplementary Fig.S9). The word2vec vocabu-"
+],
+"2202": [
+48,
+"lary covers 87% of the words. SPECTER2 leads on both tasks by a modest margin."
+],
+"2203": [
+48,
+"Retrieval AUC is 0.83 against 0.81, and text-to-brain Dice and voxel correlation are"
+],
+"2204": [
+48,
+"also higher with SPECTER2."
+],
+"2205": [
+48,
+""
+],
+"2206": [
+48,
+""
+],
+"2207": [
+48,
+""
+],
+"2208": [
+48,
+""
+],
+"2209": [
+49,
+""
+],
+"2210": [
+49,
+""
+],
+"2211": [
+49,
+""
+],
+"2212": [
+49,
+""
+],
+"2213": [
+49,
+""
+],
+"2214": [
+49,
+""
+],
+"2215": [
+49,
+""
+],
+"2216": [
+49,
+""
+],
+"2217": [
+49,
+""
+],
+"2218": [
+49,
+""
+],
+"2219": [
+49,
+""
+],
+"2220": [
+49,
+""
+],
+"2221": [
+49,
+""
+],
+"2222": [
+49,
+""
+],
+"2223": [
+49,
+""
+],
+"2224": [
+49,
+""
+],
+"2225": [
+49,
+"Fig. S9Context-free encoder.PubMed test-set performance with SPECTER2 or with the mean"
+],
+"2227": [
+49,
+"show (a) retrieval AUC in both directions and (b) text-to-brain Dice and voxel correlation."
+],
+"2228": [
+49,
+""
+],
+"2229": [
+49,
+""
+],
+"2230": [
+49,
+"S16Latent Dimensions and Loss Ablations"
+],
+"2231": [
+49,
+"Encoder weights are hard to read directly. We therefore interpreted the latent dimen-"
+],
+"2232": [
+49,
+"sions that texts and maps share. Each dimension was decoded to a map and labeled"
+],
+"2233": [
+49,
+"with the Cognitive Atlas terms most associated with it. We also retrained the heads"
+],
+"2234": [
+49,
+"with other losses, to test which modeling choices matter. For the clearest latent dimen-"
+],
+"2235": [
+49,
+"sions, the decoded map matches the Neurosynth map of the dimension\u2019s top term, such"
+],
+"2236": [
+49,
+"as listening in superior temporal cortex (r= 0.65, Supplementary Fig.S10). Text and"
+],
+"2237": [
+49,
+"maps agree on what each dimension means. The contrastive cross-entropy loss matters"
+],
+"2238": [
+49,
+"most for retrieval (Supplementary TableS10). Without it, retrieval AUC drops from"
+],
+"2239": [
+49,
+"0.83 to 0.62, while the temperature and a one-directional loss barely matter. The final"
+],
+"2240": [
+49,
+"text-to-brain head also beats heads trained with other losses."
+],
+"2241": [
+49,
+""
+],
+"2242": [
+49,
+""
+],
+"2243": [
+49,
+""
+],
+"2244": [
+49,
+""
+],
+"2245": [
+49,
+""
+],
+"2246": [
+49,
+""
+],
+"2247": [
+49,
+""
+],
+"2248": [
+49,
+""
+],
+"2249": [
+49,
+""
+],
+"2250": [
+49,
+""
+],
+"2251": [
+49,
+""
+],
+"2252": [
+49,
+""
+],
+"2253": [
+49,
+""
+],
+"2254": [
+49,
+""
+],
+"2255": [
+50,
+""
+],
+"2256": [
+50,
+""
+],
+"2257": [
+50,
+""
+],
+"2258": [
+50,
+""
+],
+"2259": [
+50,
+""
+],
+"2260": [
+50,
+""
+],
+"2261": [
+50,
+""
+],
+"2262": [
+50,
+""
+],
+"2263": [
+50,
+""
+],
+"2264": [
+50,
+""
+],
+"2265": [
+50,
+""
+],
+"2266": [
+50,
+""
+],
+"2267": [
+50,
+""
+],
+"2268": [
+50,
+""
+],
+"2269": [
+50,
+""
+],
+"2270": [
+50,
+""
+],
+"2271": [
+50,
+""
+],
+"2272": [
+50,
+""
+],
+"2273": [
+50,
+""
+],
+"2274": [
+50,
+""
+],
+"2275": [
+50,
+""
+],
+"2276": [
+50,
+""
+],
+"2277": [
+50,
+""
+],
+"2278": [
+50,
+""
+],
+"2279": [
+50,
+""
+],
+"2280": [
+50,
+""
+],
+"2281": [
+50,
+""
+],
+"2282": [
+50,
+""
+],
+"2283": [
+50,
+""
+],
+"2284": [
+50,
+""
+],
+"2285": [
+50,
+""
+],
+"2286": [
+50,
+""
+],
+"2287": [
+50,
+""
+],
+"2288": [
+50,
+"Fig. S10Latent dimensions.(a) Decoded maps of six latent dimensions, each labeled with its"
+],
+"2289": [
+50,
+"three most associated Cognitive Atlas terms and its correlationrwith the top term\u2019s Neurosynth"
+],
+"2290": [
+50,
+"shuffled dimensions."
+],
+"2291": [
+50,
+""
+],
+"2292": [
+50,
+""
+],
+"2293": [
+50,
+""
+],
+"2294": [
+50,
+""
+],
+"2295": [
+50,
+""
+],
+"2296": [
+50,
+""
+],
+"2297": [
+50,
+""
+],
+"2298": [
+50,
+""
+],
+"2299": [
+50,
+""
+],
+"2300": [
+50,
+""
+],
+"2301": [
+51,
+"Table S10Loss ablations.Heads retrained on the final model\u2019s latents with the loss shown"
+],
+"2302": [
+51,
+"and scored on the PubMed test set. Values are means of three seeds."
+],
+"2303": [
+51,
+"Loss Test-set score"
+],
+"2304": [
+51,
+""
+],
+"2305": [
+51,
+"Contrastive heads, retrieval AUC"
+],
+"2306": [
+51,
+"Symmetric InfoNCE cross-entropy,\u03c4= 0.07 (final) 0.833"
+],
+"2307": [
+51,
+""
+],
+"2308": [
+51,
+"One direction only, text\u2192brain / brain\u2192text 0.834 / 0.827"
+],
+"2310": [
+51,
+""
+],
+"2311": [
+51,
+"No cross-entropy, cosine of matched pairs only 0.618"
+],
+"2312": [
+51,
+"Text-to-brain head, Dice"
+],
+"2313": [
+51,
+"0.530"
+],
+"2314": [
+51,
+"Latent MSE and map correlation, final head with its own"
+],
+"2315": [
+51,
+"training settings"
+],
+"2316": [
+51,
+"Latent MSE only 0.512"
+],
+"2317": [
+51,
+""
+],
+"2318": [
+51,
+"Voxel-wise binary cross-entropy through the decoder 0.491"
+],
+"2319": [
+51,
+"Latent cosine only 0.385"
+],
+"2320": [
+51,
+""
+],
+"2321": [
+51,
+""
+],
+"2322": [
+51,
+""
+],
+"2323": [
+51,
+"References"
+],
+"2324": [
+51,
+"[1]Kong, R.et al.A network correspondence toolbox for quantitative evaluation"
+],
+"2325": [
+51,
+"of novel neuroimaging results.Nature Communications16, 2930 (2025). URL"
+],
+"2326": [
+51,
+"https://www.nature.com/articles/s41467-025-58176-9."
+],
+"2327": [
+51,
+""
+],
+"2328": [
+51,
+"[2]Yarkoni, T., Poldrack, R. A., Van Essen, D. C. & Wager, T. D. Cognitive neu-"
+],
+"2329": [
+51,
+"roscience 2.0: building a cumulative science of human brain function.Trends in"
+],
+"2330": [
+51,
+"Cognitive Sciences14, 489\u2013496 (2010). URLhttp://dx.doi.org/10.1016/j.tics."
+],
+"2331": [
+51,
+"2010.08.004."
+],
+"2332": [
+51,
+""
+],
+"2333": [
+51,
+"[3]Yarkoni, T., Poldrack, R. A., Nichols, T. E., Van Essen, D. C. & Wager, T. D."
+],
+"2334": [
+51,
+"Large-scale automated synthesis of human functional neuroimaging data.Nature"
+],
+"2335": [
+51,
+"Methods8, 665\u2013670 (2011). URLhttps://www.nature.com/articles/nmeth.1635."
+],
+"2336": [
+51,
+""
+],
+"2337": [
+51,
+"[4]Turner, B. O., Paul, E. J., Miller, M. B. & Barbey, A. K. Small sample sizes"
+],
+"2338": [
+51,
+"reduce the replicability of task-based fmri studies.Communications Biology1"
+],
+"2339": [
+51,
+"(2018). URLhttp://dx.doi.org/10.1038/s42003-018-0073-z."
+],
+"2340": [
+51,
+""
+],
+"2341": [
+51,
+"[5]Botvinik-Nezer, R.et al.Variability in the analysis of a single neuroimaging"
+],
+"2342": [
+51,
+"dataset by many teams.Nature582, 84\u201388 (2020). URLhttp://dx.doi.org/10."
+],
+"2343": [
+51,
+"1038/s41586-020-2314-9."
+],
+"2344": [
+51,
+""
+],
+"2345": [
+51,
+""
+],
+"2346": [
+51,
+""
+],
+"2347": [
+52,
+"[6]Markello, R. D.et al.neuromaps: structural and functional interpretation of"
+],
+"2348": [
+52,
+"brain maps.Nature Methods19, 1472\u20131479 (2022). URLhttp://dx.doi.org/10."
+],
+"2349": [
+52,
+"1038/s41592-022-01625-w."
+],
+"2350": [
+52,
+""
+],
+"2351": [
+52,
+"[7]Voytek, B. The data science future of neuroscience theory. Nature Methods19,"
+],
+"2352": [
+52,
+"1349\u20131350 (2022). URLhttp://dx.doi.org/10.1038/s41592-022-01630-z."
+],
+"2353": [
+52,
+"[8]Voytek, J. B. & Voytek, B. Automated cognome construction and semi-automated"
+],
+"2354": [
+52,
+"hypothesis generation.Journal of Neuroscience Methods208, 92\u2013100 (2012)."
+],
+"2355": [
+52,
+"URLhttps://linkinghub.elsevier.com/retrieve/pii/S0165027012001513."
+],
+"2356": [
+52,
+""
+],
+"2357": [
+52,
+"[9]Tshitoyan, V.et al.Unsupervised word embeddings capture latent knowledge"
+],
+"2358": [
+52,
+"from materials science literature.Nature571, 95\u201398 (2019). URLhttps://www."
+],
+"2359": [
+52,
+"nature.com/articles/s41586-019-1335-8."
+],
+"2360": [
+52,
+""
+],
+"2361": [
+52,
+"[10]Hansen, J. Y. & Misic, B. Integrating and interpreting brain maps.Trends in Neu-"
+],
+"2362": [
+52,
+"rosciences48, 594\u2013607 (2025). URLhttps://linkinghub.elsevier.com/retrieve/"
+],
+"2363": [
+52,
+"pii/S0166223625001249."
+],
+"2364": [
+52,
+""
+],
+"2365": [
+52,
+"[11]Dock`es, J.et al.NeuroQuery, comprehensive meta-analysis of human brain"
+],
+"2366": [
+52,
+"mapping.eLife9, e53385 (2020). URLhttps://elifesciences.org/articles/53385."
+],
+"2367": [
+52,
+""
+],
+"2368": [
+52,
+"[12]Vaswani, A.et al.Attention is all you need (2017)."
+],
+"2369": [
+52,
+""
+],
+"2370": [
+52,
+"[13]Devlin, J., Chang, M.-W., Lee, K. & Toutanova, K. BERT: Pre-training of Deep"
+],
+"2371": [
+52,
+"Bidirectional Transformers for Language Understanding (2018). URLhttps://"
+],
+"2372": [
+52,
+"arxiv.org/abs/1810.04805. Version Number: 2."
+],
+"2373": [
+52,
+"[14]Radford, A., Narasimhan, K., Salimans, T., Sutskever, I.et al.Improving"
+],
+"2374": [
+52,
+"language understanding by generative pre-training (2018)."
+],
+"2375": [
+52,
+""
+],
+"2376": [
+52,
+"[15]Radford, A.et al.Learning Transferable Visual Models From Natural Language"
+],
+"2377": [
+52,
+"Supervision (2021). URLhttps://arxiv.org/abs/2103.00020. Version Number: 1."
+],
+"2378": [
+52,
+""
+],
+"2379": [
+52,
+"[16]Meudec, R., Ghayem, F., Dock`es, J., Wassermann, D. & Thirion, B. inNeuro-"
+],
+"2380": [
+52,
+"ConText: Contrastive Text-to-Brain Mapping for Neuroscientific Literature(eds"
+],
+"2381": [
+52,
+"Linguraru, M. G.et al.)Medical Image Computing and Computer Assisted Inter-"
+],
+"2382": [
+52,
+"vention \u2013 MICCAI 2024, Vol. 15003 325\u2013335 (Springer Nature Switzerland,"
+],
+"2383": [
+52,
+"Cham, 2024). URLhttps://link.springer.com/10.1007/978-3-031-72384-1 31."
+],
+"2384": [
+52,
+"Series Title: Lecture Notes in Computer Science."
+],
+"2385": [
+52,
+""
+],
+"2386": [
+52,
+"[17]Peraza, J. A.et al.NiCLIP: Neuroimaging contrastive language-image pretraining"
+],
+"2387": [
+52,
+"model for predicting text from brain activation images (2025). URLhttp://"
+],
+"2388": [
+52,
+"biorxiv.org/lookup/doi/10.1101/2025.06.14.659706."
+],
+"2389": [
+52,
+""
+],
+"2390": [
+52,
+"[18]Mikolov, T., Chen, K., Corrado, G. & Dean, J. Efficient estimation of word"
+],
+"2391": [
+52,
+"representations in vector space (2013)."
+],
+"2392": [
+52,
+""
+],
+"2393": [
+53,
+"[19]Singh, A., D\u2019Arcy, M., Cohan, A., Downey, D. & Feldman, S. SciRepEval: A"
+],
+"2394": [
+53,
+"Multi-Format Benchmark for Scientific Document Representations (2023). URL"
+],
+"2395": [
+53,
+"http://arxiv.org/abs/2211.13308. ArXiv:2211.13308 [cs]."
+],
+"2396": [
+53,
+""
+],
+"2397": [
+53,
+"[20]Kent, J.et al.141. Neurosynth Compose: A Free an Open Platform for Precise"
+],
+"2398": [
+53,
+"Large-Scale Neuroimaging Meta-Analysis.Biological Psychiatry95, S156\u2013S157"
+],
+"2399": [
+53,
+"(2024). URLhttps://doi.org/10.1016/j.biopsych.2024.02.376. Publisher: Elsevier."
+],
+"2400": [
+53,
+"[21]Poldrack, R. A.et al.The cognitive atlas: Toward a knowledge foundation"
+],
+"2401": [
+53,
+"for cognitive neuroscience.Frontiers in NeuroinformaticsVolume 5 - 2011"
+],
+"2402": [
+53,
+"(2011). URLhttps://www.frontiersin.org/journals/neuroinformatics/articles/10."
+],
+"2403": [
+53,
+"3389/fninf.2011.00017."
+],
+"2404": [
+53,
+""
+],
+"2405": [
+53,
+"[22]Gorgolewski, K. J.et al.Neurovault.org: a web-based repository for collecting"
+],
+"2406": [
+53,
+"and sharing unthresholded statistical maps of the human brain.Frontiers in"
+],
+"2407": [
+53,
+"NeuroinformaticsVolume 9 - 2015(2015). URLhttps://www.frontiersin.org/"
+],
+"2408": [
+53,
+"journals/neuroinformatics/articles/10.3389/fninf.2015.00008."
+],
+"2409": [
+53,
+""
+],
+"2410": [
+53,
+"[23]Dadi, K.et al.Fine-grain atlases of functional modes for fMRI analysis.Neu-"
+],
+"2411": [
+53,
+"roImage221, 117126 (2020). URLhttps://linkinghub.elsevier.com/retrieve/pii/"
+],
+"2412": [
+53,
+"S1053811920306121."
+],
+"2413": [
+53,
+""
+],
+"2414": [
+53,
+"[24]Beltagy, I., Lo, K. & Cohan, A. SciBERT: A Pretrained Language Model for"
+],
+"2415": [
+53,
+"Scientific Text.arXiv preprint(2019). URLhttps://arxiv.org/abs/1903.10676."
+],
+"2416": [
+53,
+"Publisher: arXiv Version Number: 3."
+],
+"2417": [
+53,
+""
+],
+"2418": [
+53,
+"[25]Team, Q. Qwen3 technical report (2025). URLhttps://arxiv.org/abs/2505.09388."
+],
+"2419": [
+53,
+"arXiv:2505.09388."
+],
+"2420": [
+53,
+""
+],
+"2421": [
+53,
+"[26]Ngo, G. H., Nguyen, M., Chen, N. F. & Sabuncu, M. R. inText2Brain: Synthesis"
+],
+"2422": [
+53,
+"of Brain Activation Maps from Free-Form Text Query(eds De Bruijne, M.et al.)"
+],
+"2423": [
+53,
+"Medical Image Computing and Computer Assisted Intervention \u2013 MICCAI 2021,"
+],
+"2424": [
+53,
+"Vol. 12907 605\u2013614 (Springer International Publishing, Cham, 2021). URLhttps:"
+],
+"2425": [
+53,
+"//link.springer.com/10.1007/978-3-030-87234-2 57. Series Title: Lecture Notes"
+],
+"2426": [
+53,
+"in Computer Science."
+],
+"2427": [
+53,
+"[27]Griffanti, L.et al.Hand classification of fmri ica noise components. NeuroImage"
+],
+"2428": [
+53,
+"154, 188\u2013205 (2017). URLhttp://dx.doi.org/10.1016/j.neuroimage.2016.12.036."
+],
+"2429": [
+53,
+""
+],
+"2430": [
+53,
+"[28]Salimi-Khorshidi, G.et al.Automatic denoising of functional mri data: Com-"
+],
+"2431": [
+53,
+"bining independent component analysis and hierarchical fusion of classifiers."
+],
+"2432": [
+53,
+"NeuroImage90, 449\u2013468 (2014). URLhttp://dx.doi.org/10.1016/j.neuroimage."
+],
+"2433": [
+53,
+"2013.11.046."
+],
+"2434": [
+53,
+""
+],
+"2435": [
+53,
+"[29]Pruim, R. H.et al.Ica-aroma: A robust ica-based strategy for removing motion"
+],
+"2436": [
+53,
+"artifacts from fmri data.NeuroImage112, 267\u2013277 (2015). URLhttp://dx.doi."
+],
+"2437": [
+53,
+"org/10.1016/j.neuroimage.2015.02.064."
+],
+"2438": [
+53,
+""
+],
+"2439": [
+54,
+"[30]Oord, A. v. d.et al.Conditional Image Generation with PixelCNN Decoders"
+],
+"2440": [
+54,
+"(2016). URLhttps://arxiv.org/abs/1606.05328. Version Number: 2."
+],
+"2441": [
+54,
+""
+],
+"2442": [
+54,
+"[31]Markiewicz, C. J.et al.The OpenNeuro resource for sharing of neuroscience"
+],
+"2443": [
+54,
+"data.eLife10, e71774 (2021). URLhttps://elifesciences.org/articles/71774."
+],
+"2444": [
+54,
+"[32]Voytek, B. The virtuous cycle of a data ecosystem.PLoS Comput Biol12,"
+],
+"2445": [
+54,
+"e1005037 (2016). URLhttps://doi.org/10.1371/journal.pcbi.1005037."
+],
+"2446": [
+54,
+""
+],
+"2447": [
+54,
+"[33]Salimi-Khorshidi, G., Smith, S. M., Keltner, J. R., Wager, T. D. & Nichols, T. E."
+],
+"2448": [
+54,
+"Meta-analysis of neuroimaging data: a comparison of image-based and coordinate-"
+],
+"2449": [
+54,
+"based pooling of studies.NeuroImage45, 810\u2013823 (2009)."
+],
+"2450": [
+54,
+""
+],
+"2451": [
+54,
+""
+],
+"2452": [
+54,
+""
+],
+"2453": [
+54,
+""
+],
+"2454": [
+54,
+""
+],
+"2455": [
+54,
+""
+],
+"2456": [
+54,
+""
+],
+"2457": [
+54,
+""
+],
+"2458": [
+54,
+""
+],
+"2459": [
+54,
+""
+],
+"2460": [
+54,
+""
+],
+"2461": [
+54,
+""
+],
+"2462": [
+54,
+""
+],
+"2463": [
+54,
+""
+],
+"2464": [
+54,
+""
+],
+"2465": [
+54,
+""
+],
+"2466": [
+54,
+""
+],
+"2467": [
+54,
+""
+],
+"2468": [
+54,
+""
+],
+"2469": [
+54,
+""
+],
+"2470": [
+54,
+""
+],
+"2471": [
+54,
+""
+],
+"2472": [
+54,
+""
+],
+"2473": [
+54,
+""
+],
+"2474": [
+54,
+""
+],
+"2475": [
+54,
+""
+],
+"2476": [
+54,
+""
+],
+"2477": [
+54,
+""
+],
+"2478": [
+54,
+""
+],
+"2479": [
+54,
+""
+],
+"2480": [
+54,
+""
+],
+"2481": [
+54,
+""
+],
+"2482": [
+54,
+""
+],
+"2483": [
+54,
+""
+],
+"2484": [
+54,
+""
+]
+},
+"captions": {
+"Fig.1": 6,
+"Fig.2": 11,
+"Fig.3": 12,
+"Fig.4": 15,
+"Fig.5": 17,
+"Fig.6": 19,
+"Fig.S1": 24,
+"Fig.S2": 25,
+"Table.S1": 28,
+"Table.S2": 30,
+"Table.S3": 33,
+"Table.S4": 34,
+"Fig.S3": 34,
+"Fig.S4": 35,
+"Table.S5": 36,
+"Fig.S5": 40,
+"Table.S6": 41,
+"Table.S7": 42,
+"Fig.S6": 44,
+"Table.S8": 45,
+"Table.S9": 46,
+"Fig.S7": 47,
+"Fig.S8": 48,
+"Fig.S9": 49,
+"Fig.S10": 50,
+"Table.S10": 51
+}
+}
