@@ -127,7 +127,9 @@ def _niclip_train_pmids(path: Path) -> set[int]:
     """NiCLIP's training PMIDs: the ids ('<pmid>-<experiment>') of the GC-LDA model fit on the checkpoint's training split."""
     import gzip
 
-    with gzip.open(path, "rb") as fh:
+    import matplotlib
+
+    with gzip.open(path, "rb") as fh, matplotlib.rc_context():  # unpickling imports nimare, which resets rcParams
         model = pickle.load(fh)  # nimare GCLDAModel
     return {int(str(i).split("-")[0]) for i in model.ids}
 
