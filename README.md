@@ -123,7 +123,7 @@ Analyses are organized as Jupyter notebooks:
 
 ## Reproducing the paper
 
-Every figure of the paper and of the response to reviewers is reproducible from [`scripts/`](scripts/README.md).
+Every figure of the paper and of the response to reviewers is reproducible from [`scripts/`](https://github.com/neurovlm/neurovlm/blob/main/scripts/README.md).
 The inputs are fetched from Hugging Face at pinned revisions and checked by sha256, and training is deterministic. On a
 Linux machine with an NVIDIA GPU (driver >= 580) and [uv](https://docs.astral.sh/uv/), run from the repository root:
 
@@ -133,7 +133,7 @@ bash scripts/figures/review/core/run_all.sh           # response analyses and fi
 ```
 
 `bash scripts/pipeline/reproduce.sh --smoke` runs every stage at smoke scale in about 5 minutes.
-[`scripts/README.md`](scripts/README.md) explains the layout, the options, the validation and the proof that repeated
+[`scripts/README.md`](https://github.com/neurovlm/neurovlm/blob/main/scripts/README.md) explains the layout, the options, the validation and the proof that repeated
 runs give byte-identical models. CI runs the offline test suite (`.github/workflows/tests.yml`) and the pipeline smoke
 test (`.github/workflows/smoke.yml`).
 
